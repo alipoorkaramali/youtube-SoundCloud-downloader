@@ -1,50 +1,30 @@
 import os
 import json
-import tempfile
-import subprocess
-from datetime import datetime
 import instaloader
-from http.cookiejar import MozillaCookieJar
+from datetime import datetime
 
 def main():
-    username = os.environ.get('IG_USERNAME')
+    username = os.environ.get('TARGET_USERNAME')
     if not username:
-        print("❌ IG_USERNAME is required")
+        print("❌ TARGET_USERNAME is required")
         exit(1)
 
     output_file = os.environ.get('OUTPUT_FILE', 'instagram_posts.json')
-    cookie_pass = os.environ.get('INSTAGRAM_COOKIE_PASSPHRASE')
-    if not cookie_pass:
-        print("❌ INSTAGRAM_COOKIE_PASSPHRASE not set")
+    login_user = os.environ.get('IG_USERNAME')
+    login_pass = os.environ.get('IG_PASSWORD')
+    
+    if not login_user or not login_pass:
+        print("❌ IG_USERNAME or IG_PASSWORD not set")
         exit(1)
 
-    cookie_gpg = "cookies_instagram.txt.gpg"
-    if not os.path.exists(cookie_gpg):
-        print(f"❌ فایل {cookie_gpg} در ریشه مخزن یافت نشد")
-        exit(1)
-
-    cookie_file = None
+    loader = instaloader.Instaloader()
+    
     try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp:
-            cookie_file = tmp.name
+        # لاگین با اعتبار ذخیره شده
+        loader.login(login_user, login_pass)
+        print("✅ لاگین موفق")
         
-        subprocess.run([
-            "gpg", "--batch", "--yes", "--passphrase", cookie_pass,
-            "--decrypt", "--output", cookie_file, cookie_gpg
-        ], check=True)
-
-        # ایجاد loader با User-Agent
-        loader = instaloader.Instaloader()
-        loader.context._session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        })
-        
-        # بارگذاری کوکی
-        cj = MozillaCookieJar(cookie_file)
-        cj.load(ignore_discard=True, ignore_expires=True)
-        loader.context._session.cookies.update(cj)
-        
-        # دریافت پروفایل
+        # دریافت پروفایل هدف
         profile = instaloader.Profile.from_username(loader.context, username)
         posts = []
         for post in profile.get_posts():
@@ -63,9 +43,7 @@ def main():
             })
         
         result = {
-            'username': username,
-            'full_name': profile.full_name,
-            'follower_count': profile.followers,
+            'target_username': username,
             'fetched_at': datetime.now().isoformat(),
             'recent_posts': posts
         }
@@ -76,11 +54,8 @@ def main():
     except Exception as e:
         print(f"❌ خطا: {e}")
         with open(output_file, 'w') as f:
-            json.dump({"error": str(e), "username": username}, f)
+            json.dump({"error": str(e), "target": username}, f)
         exit(1)
-    finally:
-        if cookie_file and os.path.exists(cookie_file):
-            os.unlink(cookie_file)
 
 if __name__ == '__main__':
     main()
