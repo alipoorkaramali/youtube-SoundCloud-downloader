@@ -16,44 +16,48 @@ def main():
         print("❌ APIFY_API_TOKEN not set in secrets")
         exit(1)
 
-    print(f"🔍 در حال دریافت آخرین پست‌های @{username} از طریق Apify...")
+    print(f"🔍 در حال دریافت آخرین ۵ پست از @{username} با اکتور پیشرفته...")
 
     try:
         # راه‌اندازی کلاینت Apify
         client = ApifyClient(api_token)
 
-        # تعیین Actor ورودی (Instagram Scraper با قیمت اقتصادی)
+        # شناسه اکتور تخصصی اینستاگرام (کامل و بهینه)
+        actor_id = "khadinakbar/instagram-posts-scraper"
+        
+        # ورودی دقیق برای گرفتن فقط ۵ پست با حداکثر اطلاعات
         run_input = {
-            "usernames": [username],
-            "resultsPerPage": 5,  # فقط ۵ پست آخر
-            "proxyConfiguration": { "useApifyProxy": True }
+            "instagramUsernames": [username],
+            "maxPostsPerTarget": 5,                # دقیقاً ۵ پست
+            "includeRecentComments": True,         # دریافت کامنت‌های اخیر
+            "proxyConfiguration": {
+                "useApifyProxy": True,
+                "apifyProxyGroups": ["RESIDENTIAL"]  # پروکسی مسکونی برای جلوگیری از بلاک
+            }
         }
 
-        # اجرای Actor (اینجا از Actor ارزان‌قیمت پیش‌فرض استفاده شده)
-        actor_id = "muhammetakkurtt/instagram-scraper"  # قیمت: $1.00 / 1,000
-        print(f"🚀 در حال اجرای Actor با شناسه: {actor_id} ...")
-
-        # فراخوانی Actor و انتظار برای اتمام
+        print(f"🚀 اجرای Actor: {actor_id}")
         run = client.actor(actor_id).call(run_input=run_input)
-        print(f"✅ Actor با موفقیت اجرا شد. شناسه Run: {run['id']}")
+        print(f"✅ اجرا موفق. شناسه Run: {run['id']}")
 
-        # دریافت نتایج از Dataset Actor
+        # دریافت نتایج از Dataset
         posts = []
         for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-            # داده‌های هر پست را بر اساس نیازتان ساختاردهی کنید
-            post_data = {
+            # استخراج فیلدهای مورد نیاز (اکتور خروجی غنی دارد)
+            post = {
                 'shortcode': item.get('shortcode'),
-                'permalink': item.get('url'),
+                'permalink': item.get('url') or f"https://www.instagram.com/p/{item.get('shortcode')}/",
                 'timestamp': item.get('timestamp'),
                 'caption': item.get('caption'),
                 'like_count': item.get('likesCount'),
                 'comment_count': item.get('commentsCount'),
-                'media_type': item.get('type'),
+                'media_type': item.get('mediaType'),  # 'Image', 'Video', 'Carousel'
                 'thumbnail': item.get('displayUrl'),
-                'video_url': item.get('videoUrl')
+                'video_url': item.get('videoUrl') if item.get('mediaType') == 'Video' else None
             }
-            posts.append(post_data)
-            if len(posts) >= 5:  # اطمینان از حداکثر ۵ پست
+            posts.append(post)
+            # فقط ۵ پست اول را نگه می‌داریم (امنیت بیشتر)
+            if len(posts) >= 5:
                 break
 
         # ساختار خروجی نهایی
@@ -63,14 +67,15 @@ def main():
             'recent_posts': posts[:5]
         }
 
-        # ذخیره خروجی در فایل JSON
+        # ذخیره در فایل JSON
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
-        print(f"🎉 موفقیت: {len(posts)} پست برای @{username} دریافت و در {output_file} ذخیره شد.")
+        print(f"🎉 موفقیت: {len(posts)} پست برای @{username} دریافت شد.")
+        print(f"📄 خروجی در فایل {output_file} ذخیره گردید.")
 
     except Exception as e:
-        print(f"❌ خطای پیش‌بینی‌نشده: {str(e)}")
+        print(f"❌ خطا: {str(e)}")
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump({"error": str(e), "target": username}, f)
         exit(1)
