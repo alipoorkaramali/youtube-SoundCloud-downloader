@@ -30,8 +30,9 @@ def main():
         
         subprocess.run([
             "gpg", "--batch", "--yes", "--passphrase", cookie_pass,
-            "--decrypt", cookie_gpg, "--output", cookie_file
+            "--decrypt", "--output", cookie_file, cookie_gpg
         ], check=True)
+
         
         # استفاده از instaloader
         import instaloader
