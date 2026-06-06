@@ -17,7 +17,7 @@ def main():
         exit(1)
 
     # مسیر فایل کوکی رمزگذاری شده (در ریشه مخزن)
-    cookie_gpg = "instagram_cookies.txt.gpg"
+    cookie_gpg = "cookies_instagram.txt.gpg"
     if not os.path.exists(cookie_gpg):
         print(f"❌ فایل {cookie_gpg} در ریشه مخزن یافت نشد")
         exit(1)
