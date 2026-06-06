@@ -6,6 +6,7 @@ from datetime import datetime
 def main():
     # دریافت ورودی‌ها از متغیرهای محیطی
     username = os.environ.get('TARGET_USERNAME')
+    post_count_str = os.environ.get('POST_COUNT', '5')
     output_file = os.environ.get('OUTPUT_FILE', 'instagram_posts.json')
     api_token = os.environ.get('APIFY_API_TOKEN')
 
@@ -16,23 +17,31 @@ def main():
         print("❌ APIFY_API_TOKEN not set in secrets")
         exit(1)
 
-    print(f"🔍 در حال دریافت آخرین ۵ پست از @{username} با اکتور پیشرفته...")
+    # تبدیل به عدد صحیح
+    try:
+        post_count = int(post_count_str)
+    except ValueError:
+        print("⚠️ تعداد پست نامعتبر، استفاده از مقدار پیش‌فرض 5")
+        post_count = 5
+
+    # اطمینان از اینکه عدد در محدوده مجاز است (فقط برای ایمنی)
+    if post_count not in [5, 10, 15, 20]:
+        print(f"⚠️ تعداد پست {post_count} مجاز نیست. نزدیک‌ترین مقدار مجاز (5) استفاده می‌شود.")
+        post_count = 5
+
+    print(f"🔍 در حال دریافت {post_count} پست آخر از @{username}...")
 
     try:
-        # راه‌اندازی کلاینت Apify
         client = ApifyClient(api_token)
-
-        # شناسه اکتور تخصصی اینستاگرام (کامل و بهینه)
         actor_id = "khadinakbar/instagram-posts-scraper"
-        
-        # ورودی دقیق برای گرفتن فقط ۵ پست با حداکثر اطلاعات
+
         run_input = {
             "instagramUsernames": [username],
-            "maxPostsPerTarget": 5,                # دقیقاً ۵ پست
-            "includeRecentComments": True,         # دریافت کامنت‌های اخیر
+            "maxPostsPerTarget": post_count,
+            "includeRecentComments": True,
             "proxyConfiguration": {
                 "useApifyProxy": True,
-                "apifyProxyGroups": ["RESIDENTIAL"]  # پروکسی مسکونی برای جلوگیری از بلاک
+                "apifyProxyGroups": ["RESIDENTIAL"]
             }
         }
 
@@ -40,44 +49,32 @@ def main():
         run = client.actor(actor_id).call(run_input=run_input)
         print(f"✅ اجرا موفق. شناسه Run: {run['id']}")
 
-        # دریافت نتایج از Dataset
+        # دریافت تمام آیتم‌ها (هر آیتم یک پست کامل است)
         posts = []
         for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-            # استخراج فیلدهای مورد نیاز (اکتور خروجی غنی دارد)
-            post = {
-                'shortcode': item.get('shortcode'),
-                'permalink': item.get('url') or f"https://www.instagram.com/p/{item.get('shortcode')}/",
-                'timestamp': item.get('timestamp'),
-                'caption': item.get('caption'),
-                'like_count': item.get('likesCount'),
-                'comment_count': item.get('commentsCount'),
-                'media_type': item.get('mediaType'),  # 'Image', 'Video', 'Carousel'
-                'thumbnail': item.get('displayUrl'),
-                'video_url': item.get('videoUrl') if item.get('mediaType') == 'Video' else None
-            }
-            posts.append(post)
-            # فقط ۵ پست اول را نگه می‌داریم (امنیت بیشتر)
-            if len(posts) >= 5:
+            posts.append(item)   # کل آیتم را بدون هیچ فیلتری ذخیره کن
+            if len(posts) >= post_count:
                 break
 
         # ساختار خروجی نهایی
         result = {
             'target_username': username,
+            'requested_posts': post_count,
+            'fetched_posts': len(posts),
             'fetched_at': datetime.now().isoformat(),
-            'recent_posts': posts[:5]
+            'recent_posts': posts   # هر پست شامل تمام فیلدهای اصلی اکتور است
         }
 
-        # ذخیره در فایل JSON
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
-        print(f"🎉 موفقیت: {len(posts)} پست برای @{username} دریافت شد.")
+        print(f"🎉 موفقیت: {len(posts)} پست از @{username} دریافت شد.")
         print(f"📄 خروجی در فایل {output_file} ذخیره گردید.")
 
     except Exception as e:
         print(f"❌ خطا: {str(e)}")
         with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump({"error": str(e), "target": username}, f)
+            json.dump({"error": str(e), "target": username, "requested": post_count}, f)
         exit(1)
 
 if __name__ == '__main__':
