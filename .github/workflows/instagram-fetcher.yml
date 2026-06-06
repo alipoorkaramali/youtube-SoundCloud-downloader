@@ -1,4 +1,4 @@
-name: 📸 دریافت پست‌های اینستاگرام (تعداد دلخواه)
+name: 📸 دریافت پست‌های اینستاگرام (تعداد انتخابی 5،10،15،20)
 
 on:
   workflow_dispatch:
@@ -8,9 +8,15 @@ on:
         required: true
         default: 'bbcpersian'
       post_count:
-        description: 'تعداد پست مورد نظر (عدد بین 1 تا 20)'
+        description: 'تعداد پست مورد نظر'
         required: true
         default: '5'
+        type: choice
+        options:
+          - '5'
+          - '10'
+          - '15'
+          - '20'
       output_file:
         description: 'نام فایل JSON خروجی'
         required: false
