@@ -1,4 +1,4 @@
-name: 📸 اینستاگرام | دریافت ۵ پست آخر (با yt-dlp)
+name: 📸 اینستاگرام | دریافت ۵ پست آخر (Instaloader)
 
 on:
   workflow_dispatch:
@@ -18,27 +18,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: 📥 دریافت مخزن
-        uses: actions/checkout@v4
-
-      - name: 🐍 نصب پایتون
+      - uses: actions/checkout@v4
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: ⚙️ نصب yt-dlp و ffmpeg
-        uses: AnimMouse/setup-yt-dlp@v3
-        with:
-          ffmpeg: true
-
-      - name: 🔓 رمزگشایی کوکی و دریافت پست‌ها
+      - name: Install dependencies
+        run: |
+          pip install instaloader
+          sudo apt-get update && sudo apt-get install -y gpg
+      - name: Fetch Instagram posts
         env:
           IG_USERNAME: ${{ github.event.inputs.username }}
           OUTPUT_FILE: ${{ github.event.inputs.output_file }}
           INSTAGRAM_COOKIE_PASSPHRASE: ${{ secrets.INSTAGRAM_COOKIE_PASSPHRASE }}
-        run: python .github/scripts/fetch_instagram_posts_ytdlp.py
-
-      - name: 💾 ذخیره خروجی در مخزن
+        run: python .github/scripts/fetch_instagram_instaloader.py
+      - name: Save results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
