@@ -152,7 +152,7 @@ jobs:
 
       # ================= ثبت زمان آپلود =================
       - name: 🕒 ثبت زمان آپلود فایل‌های جدید
-        run: python record_upload_time.py "${{ github.event.inputs.folder }}"
+        run: python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
 
       # ================= ثبت فایل‌ها در مخزن با retry =================
       - name: 🚀 ثبت فایل‌ها در مخزن (با retry و حل کانفلیکت)
