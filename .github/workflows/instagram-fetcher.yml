@@ -1,4 +1,4 @@
-name: 📸 دریافت پست‌های اینستاگرام (ذخیره فایل جدید)
+name: 📸 دریافت پست‌های اینستاگرام
 
 on:
   workflow_dispatch:
@@ -28,6 +28,12 @@ jobs:
       - name: 📥 دریافت کد مخزن
         uses: actions/checkout@v4
 
+      - name: 🧹 پاکسازی و ساختن پوشه کش (حتماً انجام بشه)
+        run: |
+          rm -rf instagram_data
+          mkdir -p instagram_data
+          echo "پوشه instagram_data با موفقیت ساخته شد."
+
       - name: 🐍 تنظیم پایتون
         uses: actions/setup-python@v5
         with:
@@ -46,46 +52,18 @@ jobs:
           APIFY_API_TOKEN_2: ${{ secrets.APIFY_API_TOKEN_2 }}
         run: python .github/scripts/fetch_instagram_apify.py
 
-      # ========== ذخیره فایل JSON جدید به همراه timestamp ==========
-      - name: 📁 ایجاد پوشه instagram_data
-        run: mkdir -p instagram_data
-
-      - name: 💾 ذخیره JSON جدید بدون حذف قبلی
+      - name: 💾 ذخیره JSON جدید به همراه timestamp (بدون حذف قبلی)
         run: |
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           USERNAME="${{ github.event.inputs.username }}"
           NEW_FILE="instagram_data/${USERNAME}_${TIMESTAMP}.json"
           if [ -f instagram_posts.json ]; then
             cp instagram_posts.json "$NEW_FILE"
-            echo "✅ فایل جدید ذخیره شد: $NEW_FILE"
+            echo "فایل جدید ذخیره شد: $NEW_FILE"
           else
-            echo "❌ فایل instagram_posts.json یافت نشد"
+            echo "فایل instagram_posts.json یافت نشد!"
             exit 1
           fi
-
-      # ========== به‌روزرسانی لینک نمادین (اختیاری) ==========
-      - name: 🔗 بروزرسانی لینک symlink به آخرین فایل
-        run: |
-          USERNAME="${{ github.event.inputs.username }}"
-          ln -sf "instagram_data/${USERNAME}_$(date +%Y%m%d_%H%M%S).json" "instagram_posts.json" 2>/dev/null || true
-
-      # ========== ادامه مراحل قبلی (بستن ایشوها و ایجاد ایشو) ==========
-      - name: 🗂️ ذخیره token_counter.txt (در صورت نیاز)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add token_counter.txt 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "🔄 به‌روزرسانی token_counter" && git push
-
-      - name: ❌ بستن ایشوهای قبلی برای همین پیج
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          USERNAME="${{ github.event.inputs.username }}"
-          ISSUE_NUMBERS=$(gh issue list --state open --search "in:title @$USERNAME" --json number --jq '.[].number')
-          for num in $ISSUE_NUMBERS; do
-            gh issue close "$num" --comment "این ایشو با درخواست جدید به‌روزرسانی شده و بسته می‌شود."
-          done
 
       - name: 📝 ایجاد Issue با لیست پست‌ها (از آخرین فایل)
         env:
