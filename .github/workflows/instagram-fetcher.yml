@@ -54,14 +54,12 @@ jobs:
           git diff --staged --quiet || git commit -m "📸 به‌روزرسانی پست‌های @${{ github.event.inputs.username }}"
           git push
 
-      # ========== مرحله جدید: بستن ایشوهای قبلی برای همین پیج ==========
-      - name: ❌ بستن ایشوهای قبلی برای @${{ github.event.inputs.username }}
+      - name: ❌ بستن ایشوهای قبلی برای همین پیج
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           USERNAME="${{ github.event.inputs.username }}"
           echo "🔍 جستجوی ایشوهای باز با عنوان حاوی @$USERNAME ..."
-          # استفاده از gh issue list با جستجو در عنوان
           ISSUE_NUMBERS=$(gh issue list --state open --search "in:title @$USERNAME" --json number --jq '.[].number')
           if [ -z "$ISSUE_NUMBERS" ]; then
             echo "✅ هیچ ایشوی باز قبلی برای @$USERNAME یافت نشد."
@@ -72,7 +70,7 @@ jobs:
             done
           fi
 
-      - name: 📝 ایجاد Issue با لیست پست‌ها
+      - name: 📝 ایجاد Issue با لیست پست‌ها (استفاده از shortcode)
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: python .github/scripts/create_issue_with_posts.py
