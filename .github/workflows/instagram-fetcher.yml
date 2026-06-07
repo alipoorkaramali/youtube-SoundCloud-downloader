@@ -43,7 +43,7 @@ jobs:
           TARGET_USERNAME: ${{ github.event.inputs.username }}
           POST_COUNT: ${{ github.event.inputs.post_count }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
-          APIFY_API_TOKEN_2: ${{ secrets.APIFY_API_TOKEN_2 }}   # توکن دوم (اختیاری)
+          APIFY_API_TOKEN_2: ${{ secrets.APIFY_API_TOKEN_2 }}
         run: python .github/scripts/fetch_instagram_apify.py
 
       - name: 🗂️ ذخیره فایل instagram_posts.json در مخزن
@@ -53,6 +53,24 @@ jobs:
           git add instagram_posts.json token_counter.txt 2>/dev/null || true
           git diff --staged --quiet || git commit -m "📸 به‌روزرسانی پست‌های @${{ github.event.inputs.username }}"
           git push
+
+      # ========== مرحله جدید: بستن ایشوهای قبلی برای همین پیج ==========
+      - name: ❌ بستن ایشوهای قبلی برای @${{ github.event.inputs.username }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          USERNAME="${{ github.event.inputs.username }}"
+          echo "🔍 جستجوی ایشوهای باز با عنوان حاوی @$USERNAME ..."
+          # استفاده از gh issue list با جستجو در عنوان
+          ISSUE_NUMBERS=$(gh issue list --state open --search "in:title @$USERNAME" --json number --jq '.[].number')
+          if [ -z "$ISSUE_NUMBERS" ]; then
+            echo "✅ هیچ ایشوی باز قبلی برای @$USERNAME یافت نشد."
+          else
+            for num in $ISSUE_NUMBERS; do
+              gh issue close "$num" --comment "این ایشو با یک درخواست جدید به‌روزرسانی شده و بسته می‌شود. لطفاً ایشوی جدید را مشاهده کنید."
+              echo "🔒 ایشو #$num بسته شد."
+            done
+          fi
 
       - name: 📝 ایجاد Issue با لیست پست‌ها
         env:
