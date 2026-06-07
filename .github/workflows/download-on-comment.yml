@@ -81,14 +81,14 @@ jobs:
         run: |
           python .github/scripts/download_instagram_by_index.py ${{ steps.extract.outputs.shortcode }}
 
-      # ========== استخراج username از instagram_posts.json (در صورت وجود) ==========
+      # ========== استخراج نام کاربری از فایل JSON (با owner_username) ==========
       - name: 🔍 استخراج نام کاربری
         id: username
         run: |
           SHORTCODE="${{ steps.extract.outputs.shortcode }}"
           USERNAME="unknown"
           if [ -f instagram_posts.json ]; then
-            USERNAME=$(jq -r --arg sc "$SHORTCODE" '.recent_posts[] | select(.shortcode==$sc) | .username' instagram_posts.json 2>/dev/null || echo "unknown")
+            USERNAME=$(jq -r --arg sc "$SHORTCODE" '.recent_posts[] | select(.shortcode==$sc) | .owner_username' instagram_posts.json 2>/dev/null || echo "unknown")
           fi
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
 
