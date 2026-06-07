@@ -1,32 +1,34 @@
-name: 📥 اینستاگرام + آپلود به مگا (rclone + megatools)
+name: 📥 دانلود پست اینستاگرام با shortcode
 
 on:
   issue_comment:
     types: [created]
 
 jobs:
-  download-and-upload:
+  download:
     if: contains(github.event.comment.body, '/download')
     runs-on: ubuntu-latest
     permissions:
       issues: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: 📥 Checkout مخزن
         uses: actions/checkout@v4
 
-      - name: 🔢 استخراج شماره پست از کامنت
+      - name: 🔢 استخراج shortcode از کامنت
         id: extract
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          NUMBER=$(echo "$COMMENT" | grep -oE '/download[[:space:]]+([0-9]+)' | grep -oE '[0-9]+')
-          if [ -z "$NUMBER" ]; then
-            echo "No number found"
+          SHORTCODE=$(echo "$COMMENT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
+          if [ -z "$SHORTCODE" ]; then
+            echo "❌ فرمت صحیح نیست. از /download <shortcode> استفاده کنید."
             exit 1
           fi
-          echo "post_number=$NUMBER" >> $GITHUB_OUTPUT
+          echo "shortcode=$SHORTCODE" >> $GITHUB_OUTPUT
 
-      - name: 🐍 نصب Python و پیش‌نیازها
+      - name: 🐍 نصب Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -34,27 +36,37 @@ jobs:
       - name: ⚙️ نصب yt-dlp و requests
         run: pip install yt-dlp requests
 
-      - name: 🔄 بازیابی کش (بر اساس شماره پست)
+      - name: 🔐 رمزگشایی کوکی (در صورت وجود)
+        run: |
+          if [ -f cookies.txt.gpg ]; then
+            gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
+            echo "✅ کوکی رمزگشایی شد"
+          else
+            echo "⚠️ فایل cookies.txt.gpg یافت نشد، دانلود بدون کوکی انجام می‌شود"
+            touch cookies.txt
+          fi
+
+      - name: 🔄 بازیابی کش بر اساس shortcode
         id: cache
         uses: actions/cache@v4
         with:
-          path: instagram_downloads
-          key: instagram-post-${{ steps.extract.outputs.post_number }}
+          path: instagram_downloads/${{ steps.extract.outputs.shortcode }}
+          key: instagram-post-${{ steps.extract.outputs.shortcode }}
 
       - name: 🎯 دانلود پست (فقط در صورت عدم وجود کش)
         if: steps.cache.outputs.cache-hit != 'true'
-        env:
-          POST_INDEX: ${{ steps.extract.outputs.post_number }}
-        run: python .github/scripts/download_instagram_by_index.py
+        run: |
+          python .github/scripts/download_instagram_by_index.py ${{ steps.extract.outputs.shortcode }}
 
-      - name: 💾 ذخیره در کش (برای دفعات بعد)
+      - name: 💾 ذخیره کش (برای دفعات بعد)
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: instagram_downloads
-          key: instagram-post-${{ steps.extract.outputs.post_number }}
+          path: instagram_downloads/${{ steps.extract.outputs.shortcode }}
+          key: instagram-post-${{ steps.extract.outputs.shortcode }}
 
-      - name: 📦 نصب rclone (آخرین نسخه)
+      # ============= نصب و تنظیم rclone =============
+      - name: 📦 نصب rclone
         run: |
           curl https://rclone.org/install.sh | sudo bash
           rclone version
@@ -63,67 +75,53 @@ jobs:
         run: |
           mkdir -p ~/.config/rclone
           if [ ! -f rclone_mega.conf.gpg ]; then
-            echo "❌ فایل rclone_mega.conf.gpg در ریشه مخزن پیدا نشد!"
+            echo "❌ فایل rclone_mega.conf.gpg یافت نشد"
             exit 1
           fi
           gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
-          echo "✅ rclone config loaded"
           rclone --config ~/.config/rclone/rclone.conf listremotes
 
-      - name: ☁️ آپلود به مگا با rclone و گرفتن لینک با megatools
-        id: upload
-        env:
-          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
-          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+      - name: 📤 آپلود به مگا در مسیر Instagram/username/shortcode
+        id: mega
         run: |
-          CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
-          POST_NUM="${{ steps.extract.outputs.post_number }}"
-          REMOTE_PATH="mega:Instagram_Post_$POST_NUM"
-          MEGA_FOLDER_PATH="/Instagram_Post_$POST_NUM"
-          LOCAL_DIR="instagram_downloads"
-          
-          # ایجاد پوشه در مگا (از طریق rclone)
-          rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
-          
-          # آپلود فایل‌ها
-          echo "⬆️ در حال آپلود به مگا..."
-          rclone --config "$CONFIG_FILE" copy "$LOCAL_DIR" "$REMOTE_PATH" --progress --transfers=4 --verbose
-          
-          # نصب megatools برای گرفتن لینک عمومی
-          sudo apt-get install -y megatools
-          
-          # گرفتن لینک پوشه با megatools
-          echo "🔗 در حال گرفتن لینک عمومی..."
-          LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "$MEGA_FOLDER_PATH" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
-          
-          if [ -z "$LINK" ]; then
-            LINK="⚠️ لینک خودکار گرفته نشد. لطفاً با اکانت مگا خود به پوشه '$MEGA_FOLDER_PATH' مراجعه کنید."
+          SHORTCODE="${{ steps.extract.outputs.shortcode }}"
+          # خواندن نام کاربری از فایل post_info.json
+          INFO_FILE="instagram_downloads/$SHORTCODE/post_info.json"
+          if [ -f "$INFO_FILE" ]; then
+            USERNAME=$(jq -r '.username' "$INFO_FILE")
+          else
+            USERNAME="unknown"
           fi
+          REMOTE_PATH="mega:Instagram/${USERNAME}/${SHORTCODE}"
+          echo "📂 آپلود به: $REMOTE_PATH"
+          rclone mkdir "$REMOTE_PATH" 2>/dev/null || true
+          rclone copy "instagram_downloads/$SHORTCODE" "$REMOTE_PATH" --progress --transfers=4 --verbose
           
-          echo "mega_link=$LINK" >> $GITHUB_OUTPUT
-          echo "✅ فرآیند آپلود و لینک‌گیری کامل شد."
+          # گرفتن لینک عمومی با megatools
+          sudo apt-get update && sudo apt-get install -y megatools
+          MEGA_FOLDER_PATH="/Instagram/${USERNAME}/${SHORTCODE}"
+          LINK=$(megatools export --username "${{ secrets.MEGA_EMAIL }}" --password "${{ secrets.MEGA_PASSWORD }}" "$MEGA_FOLDER_PATH" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
+          if [ -z "$LINK" ]; then
+            LINK="⚠️ لینک خودکار گرفته نشد، اما فایل در مگا موجود است."
+          fi
+          echo "link=$LINK" >> $GITHUB_OUTPUT
 
       - name: 💬 کامنت موفقیت با لینک مگا
-        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BODY_FILE=$(mktemp)
-          echo "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت به مگا آپلود شد." >> "$BODY_FILE"
-          echo "" >> "$BODY_FILE"
-          echo "🔗 **لینک دانلود:** ${{ steps.upload.outputs.mega_link }}" >> "$BODY_FILE"
-          echo "" >> "$BODY_FILE"
-          if [ "${{ steps.cache.outputs.cache-hit }}" = "true" ]; then
-            echo "⚡ (این فایل از روی کش بازیابی شد، دانلود جدید انجام نشد.)" >> "$BODY_FILE"
-          else
-            echo "📥 (این فایل به تازگی دانلود و آپلود شده است.)" >> "$BODY_FILE"
-          fi
-          gh issue comment "${{ github.event.issue.number }}" --body-file "$BODY_FILE"
+          SHORTCODE="${{ steps.extract.outputs.shortcode }}"
+          LINK="${{ steps.mega.outputs.link }}"
+          gh issue comment "${{ github.event.issue.number }}" --body "✅ پست با shortcode **\`$SHORTCODE\`** با موفقیت به مگا آپلود شد.
+          
+🔗 **لینک دانلود:** $LINK
+          
+📁 ساختار: `Instagram/username/$SHORTCODE/`"
 
       - name: ❌ کامنت خطا
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در پردازش پست شماره ${{ steps.extract.outputs.post_number }}. لطفاً لاگ اکشن را بررسی کنید."
+          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در پردازش shortcode \`${{ steps.extract.outputs.shortcode }}\`. لطفاً لاگ اکشن را بررسی کنید."
