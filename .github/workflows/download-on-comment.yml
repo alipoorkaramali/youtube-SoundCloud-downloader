@@ -44,27 +44,18 @@ jobs:
             touch cookies.txt
           fi
 
-      # ========== کش rclone در مسیر کاربر ==========
+      # ========== کش فقط برای rclone ==========
       - name: 💾 Cache rclone binary
         id: cache-rclone
         uses: actions/cache@v4
         with:
-          path: ~/.local/bin/rclone
+          path: /usr/bin/rclone
           key: ${{ runner.os }}-rclone-v1.74.0
 
       - name: 📦 نصب rclone (در صورت عدم کش)
         if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
           curl https://rclone.org/install.sh | sudo bash
-          mkdir -p ~/.local/bin
-          cp /usr/bin/rclone ~/.local/bin/
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: 🔗 اطمینان از وجود rclone در PATH (برای کش شده)
-        if: steps.cache-rclone.outputs.cache-hit == 'true'
-        run: |
-          chmod +x ~/.local/bin/rclone
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
           rclone version
 
       - name: 🔓 رمزگشایی کانفیگ rclone برای مگا
@@ -78,10 +69,12 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           rclone --config ~/.config/rclone/rclone.conf listremotes
 
+      # ========== دانلود پست (بدون کش) ==========
       - name: 🎯 دانلود پست
         run: |
           python .github/scripts/download_instagram_by_index.py ${{ steps.extract.outputs.shortcode }}
 
+      # ========== آپلود به مگا ==========
       - name: 📤 آپلود به مگا
         id: mega
         run: |
@@ -105,7 +98,7 @@ jobs:
           fi
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
-      - name: 💬 کامنت موفقیت
+      - name: 💬 کامنت موفقیت با لینک مگا
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
