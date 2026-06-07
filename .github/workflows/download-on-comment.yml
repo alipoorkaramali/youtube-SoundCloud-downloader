@@ -13,7 +13,7 @@ jobs:
       issues: write
 
     steps:
-      - name: 📥 Checkout
+      - name: 📥 دریافت کد
         uses: actions/checkout@v4
 
       - name: 🔢 استخراج شماره پست
@@ -22,7 +22,7 @@ jobs:
           COMMENT="${{ github.event.comment.body }}"
           NUMBER=$(echo "$COMMENT" | grep -oE '/download[[:space:]]+([0-9]+)' | grep -oE '[0-9]+')
           if [ -z "$NUMBER" ]; then
-            echo "❌ شماره یافت نشد. از /download <number> استفاده کنید."
+            echo "❌ شماره معتبر نیست"
             exit 1
           fi
           echo "post_number=$NUMBER" >> $GITHUB_OUTPUT
@@ -32,17 +32,17 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 📦 نصب yt-dlp و requests
+      - name: 📦 نصب کتابخانه‌ها
         run: pip install yt-dlp requests
 
-      - name: 💾 کش rclone (در مسیر کاربر)
+      - name: 💾 ذخیره‌سازی rclone (کش)
         id: cache-rclone
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/rclone
           key: ${{ runner.os }}-rclone-v1.74.0
 
-      - name: 📦 نصب rclone (در صورت عدم کش)
+      - name: 📦 نصب rclone (در صورت نیاز)
         if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
           curl https://rclone.org/install.sh | sudo bash
@@ -50,25 +50,25 @@ jobs:
           cp /usr/bin/rclone ~/.local/bin/
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: 🔗 فعال‌سازی rclone (در صورت کش)
+      - name: 🔗 فعال‌سازی rclone
         if: steps.cache-rclone.outputs.cache-hit == 'true'
         run: |
           chmod +x ~/.local/bin/rclone
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           rclone version
 
-      - name: 🔓 رمزگشایی کانفیگ rclone
+      - name: 🔓 باز کردن قفل کانفیگ rclone
         run: |
           mkdir -p ~/.config/rclone
           if [ ! -f rclone_mega.conf.gpg ]; then
-            echo "❌ فایل rclone_mega.conf.gpg یافت نشد"
+            echo "❌ فایل rclone_mega.conf.gpg پیدا نشد"
             exit 1
           fi
           gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
           rclone listremotes
 
-      - name: 🎯 دانلود پست (با اسکریپت شما)
+      - name: 🎯 دانلود پست
         env:
           POST_INDEX: ${{ steps.extract.outputs.post_number }}
         run: python .github/scripts/download_instagram_by_index.py
@@ -81,7 +81,7 @@ jobs:
         run: |
           DOWNLOAD_DIR="instagram_downloads"
           if [ ! -d "$DOWNLOAD_DIR" ]; then
-            echo "❌ پوشه دانلود یافت نشد"
+            echo "پوشه دانلود وجود ندارد"
             exit 1
           fi
           POST_NUM="${{ steps.extract.outputs.post_number }}"
@@ -94,7 +94,7 @@ jobs:
           MEGA_FOLDER_PATH="/Instagram_Post_$POST_NUM"
           LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "$MEGA_FOLDER_PATH" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
           if [ -z "$LINK" ]; then
-            LINK="⚠️ لینک گرفته نشد، فایل در مگا موجود است."
+            LINK="⚠️ لینک خودکار گرفته نشد"
           fi
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
@@ -102,13 +102,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت به مگا آپلود شد.
-          
-🔗 **لینک دانلود:** ${{ steps.mega.outputs.link }}"
+          BODY_FILE=$(mktemp)
+          echo "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت به مگا آپلود شد." >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          echo "🔗 **لینک دانلود:** ${{ steps.mega.outputs.link }}" >> "$BODY_FILE"
+          gh issue comment "${{ github.event.issue.number }}" --body-file "$BODY_FILE"
 
       - name: ❌ کامنت خطا
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در پردازش پست شماره ${{ steps.extract.outputs.post_number }}. لطفاً لاگ را بررسی کنید."
+          BODY_FILE=$(mktemp)
+          echo "❌ خطا در پردازش پست شماره ${{ steps.extract.outputs.post_number }}." >> "$BODY_FILE"
+          echo "لطفاً لاگ اکشن را بررسی کنید." >> "$BODY_FILE"
+          gh issue comment "${{ github.event.issue.number }}" --body-file "$BODY_FILE"
