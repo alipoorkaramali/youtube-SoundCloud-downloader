@@ -28,47 +28,47 @@ jobs:
       - name: 📥 دریافت کد مخزن
         uses: actions/checkout@v4
 
-      # ========== مرحله جدید: بررسی کش JSON ==========
+      # ========== ایجاد پوشه کش (همیشه) ==========
+      - name: 📁 ایجاد پوشه temp_instagram_json
+        run: mkdir -p temp_instagram_json
+
+      # ========== بررسی کش JSON ==========
       - name: 🔍 بررسی کش JSON (حداکثر ۲ روز)
         id: cache_check
         run: |
           USERNAME="${{ github.event.inputs.username }}"
           CACHE_FILE="temp_instagram_json/${USERNAME}.json"
           if [ -f "$CACHE_FILE" ]; then
-            # خواندن timestamp از خط اول فایل
             CACHE_TIME=$(head -n1 "$CACHE_FILE" | grep -oE '[0-9]+' || echo "0")
             NOW=$(date +%s)
             AGE=$((NOW - CACHE_TIME))
-            MAX_AGE=172800  # 2 روز
+            MAX_AGE=172800
             if [ $AGE -lt $MAX_AGE ]; then
               echo "✅ کش معتبر (${AGE} ثانیه پیش) - استفاده از فایل موجود"
-              # استخراج محتوای JSON (حذف خط اول timestamp)
               tail -n +2 "$CACHE_FILE" > instagram_posts.json
               echo "cache_hit=true" >> $GITHUB_OUTPUT
               exit 0
             else
-              echo "⚠️ کش منقضی شده (${AGE} ثانیه پیش) - دریافت مجدد از Apify"
+              echo "⚠️ کش منقضی شده - دریافت مجدد"
             fi
           else
             echo "📂 کش وجود ندارد - دریافت از Apify"
           fi
           echo "cache_hit=false" >> $GITHUB_OUTPUT
-          mkdir -p temp_instagram_json
 
-      # ========== اگر کش معتبر بود، مراحل زیر (نصب و فراخوانی Apify) اسکیپ می‌شوند ==========
+      # ========== دریافت از Apify در صورت نیاز ==========
       - name: 🐍 تنظیم پایتون
         if: steps.cache_check.outputs.cache_hit != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 📦 نصب کتابخانه‌های مورد نیاز (در صورت عدم کش)
+      - name: 📦 نصب کتابخانه‌ها
         if: steps.cache_check.outputs.cache_hit != 'true'
         run: |
-          pip install apify-client
-          pip install requests
+          pip install apify-client requests
 
-      - name: 🚀 دریافت پست‌ها با Apify (Round Robin بین دو توکن)
+      - name: 🚀 دریافت پست‌ها با Apify
         if: steps.cache_check.outputs.cache_hit != 'true'
         env:
           TARGET_USERNAME: ${{ github.event.inputs.username }}
@@ -77,23 +77,22 @@ jobs:
           APIFY_API_TOKEN_2: ${{ secrets.APIFY_API_TOKEN_2 }}
         run: python .github/scripts/fetch_instagram_apify.py
 
-      - name: 💾 ذخیره JSON در کش موقت (فقط در صورت دریافت جدید)
+      # ========== ذخیره کش (فقط در صورت دریافت جدید و وجود فایل) ==========
+      - name: 💾 ذخیره JSON در کش موقت
         if: steps.cache_check.outputs.cache_hit != 'true'
         run: |
-          USERNAME="${{ github.event.inputs.username }}"
-          CACHE_FILE="temp_instagram_json/${USERNAME}.json"
-          if [ -f instagram_posts.json ]; then
-            # اضافه کردن خط اول شامل timestamp
-            echo "$(date +%s)" > "$CACHE_FILE"
-            cat instagram_posts.json >> "$CACHE_FILE"
-            echo "✅ JSON در کش ذخیره شد (معتبر تا ۲ روز)"
-          else
+          if [ ! -f instagram_posts.json ]; then
             echo "❌ فایل instagram_posts.json یافت نشد"
             exit 1
           fi
+          USERNAME="${{ github.event.inputs.username }}"
+          CACHE_FILE="temp_instagram_json/${USERNAME}.json"
+          echo "$(date +%s)" > "$CACHE_FILE"
+          cat instagram_posts.json >> "$CACHE_FILE"
+          echo "✅ JSON در کش ذخیره شد (معتبر تا ۲ روز)"
 
-      # ========== ادامه مراحل همیشگی (بدون تغییر) ==========
-      - name: 🗂️ ذخیره فایل instagram_posts.json در مخزن (در صورت نیاز)
+      # ========== ادامه مراحل همیشگی ==========
+      - name: 🗂️ ذخیره فایل instagram_posts.json در مخزن
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -101,23 +100,17 @@ jobs:
           git diff --staged --quiet || git commit -m "📸 به‌روزرسانی پست‌های @${{ github.event.inputs.username }}"
           git push
 
-      - name: ❌ بستن ایشوهای قبلی برای همین پیج
+      - name: ❌ بستن ایشوهای قبلی
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           USERNAME="${{ github.event.inputs.username }}"
-          echo "🔍 جستجوی ایشوهای باز با عنوان حاوی @$USERNAME ..."
           ISSUE_NUMBERS=$(gh issue list --state open --search "in:title @$USERNAME" --json number --jq '.[].number')
-          if [ -z "$ISSUE_NUMBERS" ]; then
-            echo "✅ هیچ ایشوی باز قبلی برای @$USERNAME یافت نشد."
-          else
-            for num in $ISSUE_NUMBERS; do
-              gh issue close "$num" --comment "این ایشو با یک درخواست جدید به‌روزرسانی شده و بسته می‌شود. لطفاً ایشوی جدید را مشاهده کنید."
-              echo "🔒 ایشو #$num بسته شد."
-            done
-          fi
+          for num in $ISSUE_NUMBERS; do
+            gh issue close "$num" --comment "این ایشو با درخواست جدید به‌روزرسانی شده و بسته می‌شود."
+          done
 
-      - name: 📝 ایجاد Issue با لیست پست‌ها (استفاده از shortcode)
+      - name: 📝 ایجاد Issue با لیست پست‌ها
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: python .github/scripts/create_issue_with_posts.py
