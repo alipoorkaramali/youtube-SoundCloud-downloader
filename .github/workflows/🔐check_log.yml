@@ -28,7 +28,7 @@ jobs:
       - name: 🔎 Run check_and_trigger.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python check_and_trigger.py
+        run: python .github/scripts/check_and_trigger.py
 
       - name: 💾 Commit updated state files
         run: |
