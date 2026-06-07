@@ -34,7 +34,6 @@ jobs:
       - name: 📦 نصب yt-dlp و requests
         run: pip install yt-dlp requests
 
-      # ========== کوکی (اختیاری) ==========
       - name: 🔐 رمزگشایی کوکی (در صورت وجود)
         run: |
           if [ -f cookies.txt.gpg ]; then
@@ -45,7 +44,6 @@ jobs:
             touch cookies.txt
           fi
 
-      # ========== کش rclone ==========
       - name: 💾 کش rclone
         id: cache-rclone
         uses: actions/cache@v4
@@ -68,7 +66,6 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           rclone version
 
-      # ========== کانفیگ rclone ==========
       - name: 🔓 رمزگشایی کانفیگ rclone
         run: |
           mkdir -p ~/.config/rclone
@@ -80,38 +77,48 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           rclone listremotes
 
-      # ========== دانلود پست با اسکریپت جدید ==========
-      - name: 🎯 دانلود پست (shortcode)
+      - name: 🎯 دانلود پست
         run: |
           python .github/scripts/download_instagram_by_index.py ${{ steps.extract.outputs.shortcode }}
 
-      # ========== آپلود به مگا ==========
-      - name: ☁️ آپلود به مگا و گرفتن لینک
+      # ========== استخراج username از instagram_posts.json (در صورت وجود) ==========
+      - name: 🔍 استخراج نام کاربری
+        id: username
+        run: |
+          SHORTCODE="${{ steps.extract.outputs.shortcode }}"
+          USERNAME="unknown"
+          if [ -f instagram_posts.json ]; then
+            USERNAME=$(jq -r --arg sc "$SHORTCODE" '.recent_posts[] | select(.shortcode==$sc) | .username' instagram_posts.json 2>/dev/null || echo "unknown")
+          fi
+          echo "username=$USERNAME" >> $GITHUB_OUTPUT
+
+      # ========== آپلود به مگا با ساختار Instagram/username/shortcode ==========
+      - name: ☁️ آپلود به مگا
         id: mega
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           SHORTCODE="${{ steps.extract.outputs.shortcode }}"
+          USERNAME="${{ steps.username.outputs.username }}"
           DOWNLOAD_DIR="instagram_downloads/$SHORTCODE"
           if [ ! -d "$DOWNLOAD_DIR" ]; then
             echo "❌ پوشه دانلود یافت نشد"
             exit 1
           fi
-          REMOTE_PATH="mega:Instagram/${SHORTCODE}"
+          REMOTE_PATH="mega:Instagram/${USERNAME}/${SHORTCODE}"
           rclone mkdir "$REMOTE_PATH" 2>/dev/null || true
           rclone copy "$DOWNLOAD_DIR" "$REMOTE_PATH" --transfers=4 --verbose
 
           sudo apt-get update
           sudo apt-get install -y megatools jq
-          MEGA_FOLDER_PATH="/Instagram/${SHORTCODE}"
+          MEGA_FOLDER_PATH="/Instagram/${USERNAME}/${SHORTCODE}"
           LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "$MEGA_FOLDER_PATH" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
           if [ -z "$LINK" ]; then
             LINK="⚠️ لینک خودکار گرفته نشد، فایل در مگا موجود است."
           fi
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
-      # ========== کامنت موفقیت (بدون خطای YAML) ==========
       - name: 💬 کامنت موفقیت
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -120,9 +127,10 @@ jobs:
           echo "✅ پست با shortcode **${{ steps.extract.outputs.shortcode }}** با موفقیت به مگا آپلود شد." >> "$BODY_FILE"
           echo "" >> "$BODY_FILE"
           echo "🔗 **لینک دانلود:** ${{ steps.mega.outputs.link }}" >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          echo "📁 مسیر در مگا: \`Instagram/${{ steps.username.outputs.username }}/${{ steps.extract.outputs.shortcode }}/\`" >> "$BODY_FILE"
           gh issue comment "${{ github.event.issue.number }}" --body-file "$BODY_FILE"
 
-      # ========== کامنت خطا ==========
       - name: ❌ کامنت خطا
         if: failure()
         env:
