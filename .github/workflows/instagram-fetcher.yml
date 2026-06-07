@@ -33,24 +33,24 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 📦 نصب کتابخانه Apify client
-        run: pip install apify-client
+      - name: 📦 نصب کتابخانه‌های مورد نیاز
+        run: |
+          pip install apify-client
+          pip install requests
 
-      - name: 📦 نصب کتابخانه requests (برای ایجاد Issue)
-        run: pip install requests
-
-      - name: 🚀 دریافت پست‌ها با Apify
+      - name: 🚀 دریافت پست‌ها با Apify (Round Robin بین دو توکن)
         env:
           TARGET_USERNAME: ${{ github.event.inputs.username }}
           POST_COUNT: ${{ github.event.inputs.post_count }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          APIFY_API_TOKEN_2: ${{ secrets.APIFY_API_TOKEN_2 }}   # توکن دوم (اختیاری)
         run: python .github/scripts/fetch_instagram_apify.py
 
       - name: 🗂️ ذخیره فایل instagram_posts.json در مخزن
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add instagram_posts.json
+          git add instagram_posts.json token_counter.txt 2>/dev/null || true
           git diff --staged --quiet || git commit -m "📸 به‌روزرسانی پست‌های @${{ github.event.inputs.username }}"
           git push
 
