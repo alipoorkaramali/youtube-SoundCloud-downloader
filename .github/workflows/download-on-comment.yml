@@ -1,58 +1,109 @@
-name: 📥 دانلود پست از روی کامنت Issue
+name: 📥 دانلود پست اینستاگرام و آپلود به Mega (شرایط عادی)
 
 on:
   issue_comment:
     types: [created]
 
 jobs:
-  download:
+  download-and-upload:
     if: contains(github.event.comment.body, '/download')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       issues: write
     steps:
-      - name: 📥 Checkout
+      - name: 📥 دریافت کد مخزن
         uses: actions/checkout@v4
 
-      - name: 🔢 Extract post number from comment
+      - name: 🔢 استخراج شماره پست از کامنت
         id: extract
         run: |
           COMMENT="${{ github.event.comment.body }}"
           NUMBER=$(echo "$COMMENT" | grep -oE '/download[[:space:]]+([0-9]+)' | grep -oE '[0-9]+')
           if [ -z "$NUMBER" ]; then
-            echo "No number found"
+            echo "❌ شماره پست یافت نشد"
             exit 1
           fi
           echo "post_number=$NUMBER" >> $GITHUB_OUTPUT
 
-      - name: 🐍 Setup Python & yt-dlp
+      - name: 🐍 نصب پایتون و yt-dlp
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: ⚙️ Install yt-dlp
-        run: pip install yt-dlp
+      - name: ⚙️ نصب yt-dlp و کتابخانه‌های مورد نیاز
+        run: |
+          pip install yt-dlp requests
 
-      - name: 📦 Install requests (for media_urls download)
-        run: pip install requests
-
-      - name: 🎯 Download selected post
+      - name: 🎯 دانلود پست با اسکریپت هوشمند
         env:
           POST_INDEX: ${{ steps.extract.outputs.post_number }}
         run: python .github/scripts/download_instagram_by_index.py
 
-      - name: 💾 Commit downloaded files
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add instagram_downloads/
-          git diff --staged --quiet || git commit -m "📥 دانلود پست #${{ steps.extract.outputs.post_number }}"
-          git push
+      # ============= بخش آپلود به Mega با rclone =============
+      - name: 💾 کش باینری rclone
+        id: cache-rclone
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/rclone
+          key: ${{ runner.os }}-rclone-v1.74.0
 
-      - name: 💬 Add success comment to issue
+      - name: 📦 نصب rclone (در صورت نبودن در کش)
+        if: steps.cache-rclone.outputs.cache-hit != 'true'
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.local/bin
+          cp /usr/bin/rclone ~/.local/bin/
+
+      - name: 🔗 اطمینان از وجود rclone در PATH
+        run: |
+          if [ ! -f /usr/bin/rclone ]; then
+            if [ -f ~/.local/bin/rclone ]; then
+              sudo cp ~/.local/bin/rclone /usr/bin/rclone
+              sudo chmod +x /usr/bin/rclone
+            else
+              echo "❌ rclone binary not found"
+              exit 1
+            fi
+          fi
+          rclone version
+
+      - name: 🔓 رمزگشایی تنظیمات rclone
+        run: |
+          mkdir -p ~/.config/rclone
+          if [ ! -f rclone_mega.conf.gpg ]; then
+            echo "❌ فایل rclone_mega.conf.gpg در ریشه مخزن یافت نشد!"
+            exit 1
+          fi
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+          chmod 600 ~/.config/rclone/rclone.conf
+          echo "✅ rclone config loaded"
+
+      - name: ☁️ آپلود پوشه دانلود شده به Mega.nz
+        env:
+          REMOTE_FOLDER: "InstagramDownloads"  # نام پوشه در Mega (می‌توانید تغییر دهید)
+        run: |
+          SHORTCODE=$(ls instagram_downloads/ | head -1)
+          LOCAL_PATH="instagram_downloads/$SHORTCODE"
+          if [ ! -d "$LOCAL_PATH" ]; then
+            echo "❌ پوشه دانلود شده یافت نشد"
+            exit 1
+          fi
+          rclone --config ~/.config/rclone/rclone.conf copy "$LOCAL_PATH" "mega:$REMOTE_FOLDER/$SHORTCODE" --progress --verbose
+          echo "✅ آپلود به Mega با موفقیت انجام شد"
+
+      - name: 🧹 پاکسازی فایل‌های محلی (اختیاری)
+        run: |
+          rm -rf instagram_downloads/
+          echo "🧹 فایل‌های محلی حذف شدند"
+
+      - name: 💬 افزودن لینک Mega به کامنت Issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REMOTE_FOLDER: "InstagramDownloads"
         run: |
+          SHORTCODE=$(git ls-tree -r HEAD --name-only | grep -oP 'instagram_downloads/\K[^/]+' | head -1 || echo "unknown")
+          MEGA_LINK="https://mega.nz/folder/..."  # لینک مستقیم پوشه عمومی Mega (اختیاری)
+          # در صورت تمایل می‌توانید با استفاده از rclone لینک عمومی بسازید (نیاز به تنظیم جداگانه دارد)
           ISSUE_NUMBER="${{ github.event.issue.number }}"
-          gh issue comment "$ISSUE_NUMBER" --body "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت دانلود شد. فایل در پوشه `instagram_downloads/` قرار دارد."
+          gh issue comment "$ISSUE_NUMBER" --body "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت به Mega آپلود شد. (Shortcode: \`$SHORTCODE\`)"
