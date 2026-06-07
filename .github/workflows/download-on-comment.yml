@@ -31,11 +31,8 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: ⚙️ نصب yt-dlp و requests و jq
-        run: |
-          pip install yt-dlp requests
-          sudo apt-get update
-          sudo apt-get install -y jq
+      - name: ⚙️ نصب yt-dlp و requests
+        run: pip install yt-dlp requests
 
       - name: 🔐 رمزگشایی کوکی (در صورت وجود)
         run: |
@@ -47,27 +44,16 @@ jobs:
             touch cookies.txt
           fi
 
-      - name: 🔄 بازیابی کش بر اساس shortcode
-        id: cache
+      # ========== کش فقط برای rclone ==========
+      - name: 💾 Cache rclone binary
+        id: cache-rclone
         uses: actions/cache@v4
         with:
-          path: instagram_downloads/${{ steps.extract.outputs.shortcode }}
-          key: instagram-post-${{ steps.extract.outputs.shortcode }}
+          path: /usr/bin/rclone
+          key: ${{ runner.os }}-rclone-v1.74.0
 
-      - name: 🎯 دانلود پست (فقط در صورت عدم وجود کش)
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          python .github/scripts/download_instagram_by_index.py ${{ steps.extract.outputs.shortcode }}
-
-      - name: 💾 ذخیره کش (برای دفعات بعد)
-        if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: instagram_downloads/${{ steps.extract.outputs.shortcode }}
-          key: instagram-post-${{ steps.extract.outputs.shortcode }}
-
-      # ============= نصب و تنظیم rclone =============
-      - name: 📦 نصب rclone
+      - name: 📦 نصب rclone (در صورت عدم کش)
+        if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
           curl https://rclone.org/install.sh | sudo bash
           rclone version
@@ -83,7 +69,13 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           rclone --config ~/.config/rclone/rclone.conf listremotes
 
-      - name: 📤 آپلود به مگا در مسیر Instagram/username/shortcode
+      # ========== دانلود پست (بدون کش) ==========
+      - name: 🎯 دانلود پست
+        run: |
+          python .github/scripts/download_instagram_by_index.py ${{ steps.extract.outputs.shortcode }}
+
+      # ========== آپلود به مگا ==========
+      - name: 📤 آپلود به مگا
         id: mega
         run: |
           SHORTCODE="${{ steps.extract.outputs.shortcode }}"
@@ -94,12 +86,11 @@ jobs:
             USERNAME="unknown"
           fi
           REMOTE_PATH="mega:Instagram/${USERNAME}/${SHORTCODE}"
-          echo "📂 آپلود به: $REMOTE_PATH"
           rclone mkdir "$REMOTE_PATH" 2>/dev/null || true
           rclone copy "instagram_downloads/$SHORTCODE" "$REMOTE_PATH" --transfers=4 --verbose
           
-          # نصب megatools برای گرفتن لینک عمومی
-          sudo apt-get install -y megatools
+          sudo apt-get update
+          sudo apt-get install -y megatools jq
           MEGA_FOLDER_PATH="/Instagram/${USERNAME}/${SHORTCODE}"
           LINK=$(megatools export --username "${{ secrets.MEGA_EMAIL }}" --password "${{ secrets.MEGA_PASSWORD }}" "$MEGA_FOLDER_PATH" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
           if [ -z "$LINK" ]; then
@@ -107,23 +98,19 @@ jobs:
           fi
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
-      # ============= اصلاح شده: استفاده از فایل موقت برای بدنه کامنت =============
       - name: 💬 کامنت موفقیت با لینک مگا
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SHORTCODE="${{ steps.extract.outputs.shortcode }}"
           LINK="${{ steps.mega.outputs.link }}"
-          ISSUE_NUMBER="${{ github.event.issue.number }}"
-          
           BODY_FILE=$(mktemp)
           echo "✅ پست با shortcode **\`$SHORTCODE\`** با موفقیت به مگا آپلود شد." >> "$BODY_FILE"
           echo "" >> "$BODY_FILE"
           echo "🔗 **لینک دانلود:** $LINK" >> "$BODY_FILE"
           echo "" >> "$BODY_FILE"
           echo "📁 ساختار: \`Instagram/username/$SHORTCODE/\`" >> "$BODY_FILE"
-          
-          gh issue comment "$ISSUE_NUMBER" --body-file "$BODY_FILE"
+          gh issue comment "${{ github.event.issue.number }}" --body-file "$BODY_FILE"
 
       - name: ❌ کامنت خطا
         if: failure()
