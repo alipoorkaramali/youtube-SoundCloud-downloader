@@ -28,11 +28,8 @@ jobs:
       - name: 📥 دریافت کد مخزن
         uses: actions/checkout@v4
 
-      - name: 🧹 پاکسازی و ساختن پوشه کش (حتماً انجام بشه)
-        run: |
-          rm -rf instagram_data
-          mkdir -p instagram_data
-          echo "پوشه instagram_data با موفقیت ساخته شد."
+      - name: 📁 آماده‌سازی پوشه instagram_data
+        run: mkdir -p instagram_data
 
       - name: 🐍 تنظیم پایتون
         uses: actions/setup-python@v5
@@ -52,20 +49,46 @@ jobs:
           APIFY_API_TOKEN_2: ${{ secrets.APIFY_API_TOKEN_2 }}
         run: python .github/scripts/fetch_instagram_apify.py
 
-      - name: 💾 ذخیره JSON جدید به همراه timestamp (بدون حذف قبلی)
+      - name: 💾 ذخیره JSON در instagram_data (با زمان)
+        id: save
         run: |
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           USERNAME="${{ github.event.inputs.username }}"
           NEW_FILE="instagram_data/${USERNAME}_${TIMESTAMP}.json"
           if [ -f instagram_posts.json ]; then
             cp instagram_posts.json "$NEW_FILE"
-            echo "فایل جدید ذخیره شد: $NEW_FILE"
+            echo "✅ فایل ذخیره شد: $NEW_FILE"
+            echo "saved_file=$NEW_FILE" >> $GITHUB_OUTPUT
           else
-            echo "فایل instagram_posts.json یافت نشد!"
+            echo "❌ خطا: instagram_posts.json یافت نشد"
             exit 1
           fi
 
-      - name: 📝 ایجاد Issue با لیست پست‌ها (از آخرین فایل)
+      - name: 📤 Commit و Push فایل JSON به مخزن
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add instagram_data/
+          git diff --staged --quiet || git commit -m "📸 اضافه شدن JSON جدید برای @${{ github.event.inputs.username }}"
+          git push
+
+      - name: ❌ بستن ایشوهای قبلی برای همین پیج
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          USERNAME="${{ github.event.inputs.username }}"
+          echo "🔍 جستجوی ایشوهای باز با عنوان حاوی @$USERNAME ..."
+          ISSUE_NUMBERS=$(gh issue list --state open --search "in:title @$USERNAME" --json number --jq '.[].number')
+          if [ -z "$ISSUE_NUMBERS" ]; then
+            echo "✅ هیچ ایشوی باز قبلی یافت نشد."
+          else
+            for num in $ISSUE_NUMBERS; do
+              gh issue close "$num" --comment "این ایشو با درخواست جدید به‌روزرسانی شده و بسته می‌شود. اما همچنان می‌توانید با کامنت '/download shortcode' دانلود کنید."
+              echo "🔒 ایشو #$num بسته شد."
+            done
+          fi
+
+      - name: 📝 ایجاد Issue جدید با لیست پست‌ها
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: python .github/scripts/create_issue_with_posts.py
