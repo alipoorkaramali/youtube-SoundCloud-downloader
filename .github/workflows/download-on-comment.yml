@@ -77,7 +77,7 @@ jobs:
           echo "link=$MEGA_LINK" >> $GITHUB_OUTPUT
           mega-logout
 
-      - name: 💬 کامنت موفقیت (بدون subshell پیچیده)
+      - name: 💬 کامنت موفقیت
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -87,19 +87,21 @@ jobs:
           MEGA_LINK="${{ steps.mega-upload.outputs.link }}"
           CACHE_HIT="${{ steps.cache.outputs.cache-hit }}"
           
+          # ساختن فایل موقت برای بدنه کامنت
+          BODY_FILE=$(mktemp)
+          
+          echo "✅ پست شماره $POST_NUM با موفقیت آپلود شد." >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          echo "🔗 **لینک دانلود از مگا:** $MEGA_LINK" >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          
           if [ "$CACHE_HIT" = "true" ]; then
-            STATUS_MSG="⚡ (این فایل از روی کش بازیابی شد، دانلود جدید انجام نشد.)"
+            echo "⚡ (این فایل از روی کش بازیابی شد، دانلود جدید انجام نشد.)" >> "$BODY_FILE"
           else
-            STATUS_MSG="📥 (این فایل به تازگی دانلود و سپس آپلود شده است.)"
+            echo "📥 (این فایل به تازگی دانلود و سپس آپلود شده است.)" >> "$BODY_FILE"
           fi
           
-          BODY="✅ پست شماره $POST_NUM با موفقیت آپلود شد.
-          
-🔗 **لینک دانلود از مگا:** $MEGA_LINK
-          
-$STATUS_MSG"
-          
-          gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+          gh issue comment "$ISSUE_NUMBER" --body-file "$BODY_FILE"
 
       - name: ❌ کامنت خطا
         if: failure()
