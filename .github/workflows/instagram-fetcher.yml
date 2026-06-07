@@ -1,4 +1,4 @@
-name: 📸 دریافت پست‌های اینستاگرام (با کش ۲ روزه JSON)
+name: 📸 دریافت پست‌های اینستاگرام (ذخیره فایل جدید)
 
 on:
   workflow_dispatch:
@@ -28,48 +28,17 @@ jobs:
       - name: 📥 دریافت کد مخزن
         uses: actions/checkout@v4
 
-      # ========== ایجاد پوشه کش (همیشه) ==========
-      - name: 📁 ایجاد پوشه temp_instagram_json
-        run: mkdir -p temp_instagram_json
-
-      # ========== بررسی کش JSON ==========
-      - name: 🔍 بررسی کش JSON (حداکثر ۲ روز)
-        id: cache_check
-        run: |
-          USERNAME="${{ github.event.inputs.username }}"
-          CACHE_FILE="temp_instagram_json/${USERNAME}.json"
-          if [ -f "$CACHE_FILE" ]; then
-            CACHE_TIME=$(head -n1 "$CACHE_FILE" | grep -oE '[0-9]+' || echo "0")
-            NOW=$(date +%s)
-            AGE=$((NOW - CACHE_TIME))
-            MAX_AGE=172800
-            if [ $AGE -lt $MAX_AGE ]; then
-              echo "✅ کش معتبر (${AGE} ثانیه پیش) - استفاده از فایل موجود"
-              tail -n +2 "$CACHE_FILE" > instagram_posts.json
-              echo "cache_hit=true" >> $GITHUB_OUTPUT
-              exit 0
-            else
-              echo "⚠️ کش منقضی شده - دریافت مجدد"
-            fi
-          else
-            echo "📂 کش وجود ندارد - دریافت از Apify"
-          fi
-          echo "cache_hit=false" >> $GITHUB_OUTPUT
-
-      # ========== دریافت از Apify در صورت نیاز ==========
       - name: 🐍 تنظیم پایتون
-        if: steps.cache_check.outputs.cache_hit != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: 📦 نصب کتابخانه‌ها
-        if: steps.cache_check.outputs.cache_hit != 'true'
         run: |
-          pip install apify-client requests
+          pip install apify-client
+          pip install requests
 
-      - name: 🚀 دریافت پست‌ها با Apify
-        if: steps.cache_check.outputs.cache_hit != 'true'
+      - name: 🚀 دریافت پست‌ها با Apify (Round Robin)
         env:
           TARGET_USERNAME: ${{ github.event.inputs.username }}
           POST_COUNT: ${{ github.event.inputs.post_count }}
@@ -77,30 +46,38 @@ jobs:
           APIFY_API_TOKEN_2: ${{ secrets.APIFY_API_TOKEN_2 }}
         run: python .github/scripts/fetch_instagram_apify.py
 
-      # ========== ذخیره کش (فقط در صورت دریافت جدید و وجود فایل) ==========
-      - name: 💾 ذخیره JSON در کش موقت
-        if: steps.cache_check.outputs.cache_hit != 'true'
+      # ========== ذخیره فایل JSON جدید به همراه timestamp ==========
+      - name: 📁 ایجاد پوشه instagram_data
+        run: mkdir -p instagram_data
+
+      - name: 💾 ذخیره JSON جدید بدون حذف قبلی
         run: |
-          if [ ! -f instagram_posts.json ]; then
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          USERNAME="${{ github.event.inputs.username }}"
+          NEW_FILE="instagram_data/${USERNAME}_${TIMESTAMP}.json"
+          if [ -f instagram_posts.json ]; then
+            cp instagram_posts.json "$NEW_FILE"
+            echo "✅ فایل جدید ذخیره شد: $NEW_FILE"
+          else
             echo "❌ فایل instagram_posts.json یافت نشد"
             exit 1
           fi
-          USERNAME="${{ github.event.inputs.username }}"
-          CACHE_FILE="temp_instagram_json/${USERNAME}.json"
-          echo "$(date +%s)" > "$CACHE_FILE"
-          cat instagram_posts.json >> "$CACHE_FILE"
-          echo "✅ JSON در کش ذخیره شد (معتبر تا ۲ روز)"
 
-      # ========== ادامه مراحل همیشگی ==========
-      - name: 🗂️ ذخیره فایل instagram_posts.json در مخزن
+      # ========== به‌روزرسانی لینک نمادین (اختیاری) ==========
+      - name: 🔗 بروزرسانی لینک symlink به آخرین فایل
+        run: |
+          USERNAME="${{ github.event.inputs.username }}"
+          ln -sf "instagram_data/${USERNAME}_$(date +%Y%m%d_%H%M%S).json" "instagram_posts.json" 2>/dev/null || true
+
+      # ========== ادامه مراحل قبلی (بستن ایشوها و ایجاد ایشو) ==========
+      - name: 🗂️ ذخیره token_counter.txt (در صورت نیاز)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add instagram_posts.json token_counter.txt 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "📸 به‌روزرسانی پست‌های @${{ github.event.inputs.username }}"
-          git push
+          git add token_counter.txt 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🔄 به‌روزرسانی token_counter" && git push
 
-      - name: ❌ بستن ایشوهای قبلی
+      - name: ❌ بستن ایشوهای قبلی برای همین پیج
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -110,7 +87,7 @@ jobs:
             gh issue close "$num" --comment "این ایشو با درخواست جدید به‌روزرسانی شده و بسته می‌شود."
           done
 
-      - name: 📝 ایجاد Issue با لیست پست‌ها
+      - name: 📝 ایجاد Issue با لیست پست‌ها (از آخرین فایل)
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: python .github/scripts/create_issue_with_posts.py
