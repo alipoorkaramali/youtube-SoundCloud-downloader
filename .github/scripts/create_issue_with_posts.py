@@ -4,7 +4,7 @@ import requests
 from pathlib import Path
 
 def main():
-    repo = os.environ.get('GITHUB_REPOSITORY')   # مثل alipoorkaramali/new-youtube...
+    repo = os.environ.get('GITHUB_REPOSITORY')
     token = os.environ.get('GH_PAT')
     if not token:
         print("❌ GH_PAT not set")
@@ -26,17 +26,19 @@ def main():
     username = data.get('target_username', 'unknown')
     fetched_at = data.get('fetched_at', '')[:10]
 
-    body = f"## 📸 پست‌های جدید اینستاگرام – @{username} – {fetched_at}\n\n"
-    body += "برای دانلود هر پست، **شماره** آن را در یک کامنت جدید بنویسید:\n"
-    body += "`/download 1`  یا  `/download 2`  و ...\n\n"
-    body += "| شماره | شورت‌کد | کپشن (بخشی) |\n"
-    body += "|-------|----------|--------------|\n"
+    # ساخت بدنه ایشو
+    body = f"## 📸 پست‌های اینستاگرام – @{username} – {fetched_at}\n\n"
+    body += "برای دانلود هر پست، **shortcode** آن را در یک کامنت جدید بنویسید:\n"
+    body += "`/download shortcode`  (مثال: `/download CxYz123`)\n\n"
+    body += "| shortcode | کپشن (بخشی) |\n"
+    body += "|-----------|--------------|\n"
 
-    for idx, post in enumerate(posts, start=1):
+    for post in posts:
         shortcode = post.get('shortcode', '')
         caption = post.get('caption', '')[:80].replace('\n', ' ').replace('|', '\\|')
-        body += f"| {idx} | `{shortcode}` | {caption} |\n"
+        body += f"| `{shortcode}` | {caption} |\n"
 
+    # ایجاد ایشو
     url = f"https://api.github.com/repos/{repo}/issues"
     headers = {
         "Authorization": f"token {token}",
