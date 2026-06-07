@@ -10,8 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: 📥 Checkout مخزن
@@ -33,8 +31,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: ⚙️ نصب yt-dlp و requests
-        run: pip install yt-dlp requests
+      - name: ⚙️ نصب yt-dlp و requests و jq
+        run: |
+          pip install yt-dlp requests
+          sudo apt-get update
+          sudo apt-get install -y jq
 
       - name: 🔐 رمزگشایی کوکی (در صورت وجود)
         run: |
@@ -86,7 +87,6 @@ jobs:
         id: mega
         run: |
           SHORTCODE="${{ steps.extract.outputs.shortcode }}"
-          # خواندن نام کاربری از فایل post_info.json
           INFO_FILE="instagram_downloads/$SHORTCODE/post_info.json"
           if [ -f "$INFO_FILE" ]; then
             USERNAME=$(jq -r '.username' "$INFO_FILE")
@@ -96,10 +96,10 @@ jobs:
           REMOTE_PATH="mega:Instagram/${USERNAME}/${SHORTCODE}"
           echo "📂 آپلود به: $REMOTE_PATH"
           rclone mkdir "$REMOTE_PATH" 2>/dev/null || true
-          rclone copy "instagram_downloads/$SHORTCODE" "$REMOTE_PATH" --progress --transfers=4 --verbose
+          rclone copy "instagram_downloads/$SHORTCODE" "$REMOTE_PATH" --transfers=4 --verbose
           
-          # گرفتن لینک عمومی با megatools
-          sudo apt-get update && sudo apt-get install -y megatools
+          # نصب megatools برای گرفتن لینک عمومی
+          sudo apt-get install -y megatools
           MEGA_FOLDER_PATH="/Instagram/${USERNAME}/${SHORTCODE}"
           LINK=$(megatools export --username "${{ secrets.MEGA_EMAIL }}" --password "${{ secrets.MEGA_PASSWORD }}" "$MEGA_FOLDER_PATH" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
           if [ -z "$LINK" ]; then
@@ -107,17 +107,23 @@ jobs:
           fi
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
+      # ============= اصلاح شده: استفاده از فایل موقت برای بدنه کامنت =============
       - name: 💬 کامنت موفقیت با لینک مگا
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SHORTCODE="${{ steps.extract.outputs.shortcode }}"
           LINK="${{ steps.mega.outputs.link }}"
-          gh issue comment "${{ github.event.issue.number }}" --body "✅ پست با shortcode **\`$SHORTCODE\`** با موفقیت به مگا آپلود شد.
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
           
-🔗 **لینک دانلود:** $LINK
+          BODY_FILE=$(mktemp)
+          echo "✅ پست با shortcode **\`$SHORTCODE\`** با موفقیت به مگا آپلود شد." >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          echo "🔗 **لینک دانلود:** $LINK" >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          echo "📁 ساختار: \`Instagram/username/$SHORTCODE/\`" >> "$BODY_FILE"
           
-📁 ساختار: `Instagram/username/$SHORTCODE/`"
+          gh issue comment "$ISSUE_NUMBER" --body-file "$BODY_FILE"
 
       - name: ❌ کامنت خطا
         if: failure()
