@@ -1,4 +1,4 @@
-name: 📥 اینستاگرام + آپلود به مگا با rclone
+name: 📥 اینستاگرام + آپلود به مگا (rclone + megatools)
 
 on:
   issue_comment:
@@ -15,7 +15,7 @@ jobs:
       - name: 📥 Checkout مخزن
         uses: actions/checkout@v4
 
-      - name: 🔢 استخراج شماره پست
+      - name: 🔢 استخراج شماره پست از کامنت
         id: extract
         run: |
           COMMENT="${{ github.event.comment.body }}"
@@ -34,14 +34,14 @@ jobs:
       - name: ⚙️ نصب yt-dlp و requests
         run: pip install yt-dlp requests
 
-      - name: 🔄 بازیابی کش (فقط محتوای دانلود شده)
+      - name: 🔄 بازیابی کش (بر اساس شماره پست)
         id: cache
         uses: actions/cache@v4
         with:
           path: instagram_downloads
           key: instagram-post-${{ steps.extract.outputs.post_number }}
 
-      - name: 🎯 دانلود پست (در صورت عدم کش)
+      - name: 🎯 دانلود پست (فقط در صورت عدم وجود کش)
         if: steps.cache.outputs.cache-hit != 'true'
         env:
           POST_INDEX: ${{ steps.extract.outputs.post_number }}
@@ -54,7 +54,6 @@ jobs:
           path: instagram_downloads
           key: instagram-post-${{ steps.extract.outputs.post_number }}
 
-      # ---------- نصب rclone بدون مشکل کش (روش مطمئن) ----------
       - name: 📦 نصب rclone (آخرین نسخه)
         run: |
           curl https://rclone.org/install.sh | sudo bash
@@ -72,32 +71,38 @@ jobs:
           echo "✅ rclone config loaded"
           rclone --config ~/.config/rclone/rclone.conf listremotes
 
-      - name: ☁️ آپلود به مگا با rclone
+      - name: ☁️ آپلود به مگا با rclone و گرفتن لینک با megatools
         id: upload
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
-          REMOTE_PATH="mega:Instagram_Post_${{ steps.extract.outputs.post_number }}"
+          POST_NUM="${{ steps.extract.outputs.post_number }}"
+          REMOTE_PATH="mega:Instagram_Post_$POST_NUM"
+          MEGA_FOLDER_PATH="/Instagram_Post_$POST_NUM"
           LOCAL_DIR="instagram_downloads"
           
-          # ایجاد پوشه در مگا
+          # ایجاد پوشه در مگا (از طریق rclone)
           rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
           
-          # آپلود محتوا
+          # آپلود فایل‌ها
+          echo "⬆️ در حال آپلود به مگا..."
           rclone --config "$CONFIG_FILE" copy "$LOCAL_DIR" "$REMOTE_PATH" --progress --transfers=4 --verbose
           
-          # گرفتن لینک عمومی (rclone خودش می‌تواند برای پوشه لینک بسازد)
-          # توجه: برخی ریموت‌ها نیاز به پشتیبانی دارند، مگا پشتیبانی می‌کند.
-          LINK=$(rclone --config "$CONFIG_FILE" link "$REMOTE_PATH" 2>/dev/null)
+          # نصب megatools برای گرفتن لینک عمومی
+          sudo apt-get install -y megatools
+          
+          # گرفتن لینک پوشه با megatools
+          echo "🔗 در حال گرفتن لینک عمومی..."
+          LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "$MEGA_FOLDER_PATH" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
+          
           if [ -z "$LINK" ]; then
-            # اگر لینک پوشه کار نکرد، لینک اولین فایل را می‌گیریم
-            FIRST_FILE=$(rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH" | head -1 | awk '{print $2}')
-            if [ -n "$FIRST_FILE" ]; then
-              LINK=$(rclone --config "$CONFIG_FILE" link "$REMOTE_PATH/$FIRST_FILE")
-            fi
+            LINK="⚠️ لینک خودکار گرفته نشد. لطفاً با اکانت مگا خود به پوشه '$MEGA_FOLDER_PATH' مراجعه کنید."
           fi
           
           echo "mega_link=$LINK" >> $GITHUB_OUTPUT
-          echo "✅ آپلود کامل شد. لینک: $LINK"
+          echo "✅ فرآیند آپلود و لینک‌گیری کامل شد."
 
       - name: 💬 کامنت موفقیت با لینک مگا
         if: success()
