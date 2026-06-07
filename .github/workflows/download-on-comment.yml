@@ -1,21 +1,21 @@
-name: 📥 دانلود پست از روی کامنت Issue
+name: 📥 دانلود پست و آپلود در مگا (با کش)
 
 on:
   issue_comment:
     types: [created]
 
 jobs:
-  download:
+  download-and-upload:
     if: contains(github.event.comment.body, '/download')
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       issues: write
+
     steps:
-      - name: 📥 Checkout
+      - name: 📥 Checkout مخزن (برای اسکریپت)
         uses: actions/checkout@v4
 
-      - name: 🔢 Extract post number from comment
+      - name: 🔢 استخراج شماره پست از کامنت
         id: extract
         run: |
           COMMENT="${{ github.event.comment.body }}"
@@ -26,33 +26,82 @@ jobs:
           fi
           echo "post_number=$NUMBER" >> $GITHUB_OUTPUT
 
-      - name: 🐍 Setup Python & yt-dlp
+      - name: 🐍 نصب Python و yt-dlp (در صورت نیاز)
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: ⚙️ Install yt-dlp
-        run: pip install yt-dlp
+      - name: ⚙️ نصب پیش‌نیازها
+        run: pip install yt-dlp requests
 
-      - name: 📦 Install requests (for media_urls download)
-        run: pip install requests
+      - name: 🔄 تلاش برای بازیابی کش (بر اساس شماره پست)
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: instagram_downloads
+          key: instagram-post-${{ steps.extract.outputs.post_number }}
 
-      - name: 🎯 Download selected post
+      - name: 🎯 دانلود پست (فقط در صورت عدم وجود کش)
+        if: steps.cache.outputs.cache-hit != 'true'
         env:
           POST_INDEX: ${{ steps.extract.outputs.post_number }}
         run: python .github/scripts/download_instagram_by_index.py
 
-      - name: 💾 Commit downloaded files
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add instagram_downloads/
-          git diff --staged --quiet || git commit -m "📥 دانلود پست #${{ steps.extract.outputs.post_number }}"
-          git push
+      - name: 💾 ذخیره پوشه دانلود در کش (برای دفعات بعد)
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: instagram_downloads
+          key: instagram-post-${{ steps.extract.outputs.post_number }}
 
-      - name: 💬 Add success comment to issue
+      - name: 🧰 نصب ابزار mega-cmd
+        run: |
+          sudo apt-get update
+          wget https://mega.nz/linux/repo/xUbuntu_22.04/amd64/megacmd-xUbuntu_22.04_amd64.deb
+          sudo dpkg -i megacmd-xUbuntu_22.04_amd64.deb || sudo apt-get -f install -y
+
+      - name: ☁️ آپلود به مگا (چه از کش، چه از دانلود جدید)
+        id: mega-upload
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
+          
+          POST_NUM="${{ steps.extract.outputs.post_number }}"
+          LOCAL_DIR="instagram_downloads"
+          REMOTE_DIR="/Instagram_Post_$POST_NUM"
+          
+          # حذف پوشه قبلی در مگا (اختیاری) تا تداخل نداشته باشد
+          mega-rm "$REMOTE_DIR" --force 2>/dev/null || true
+          
+          # آپلود پوشه محلی
+          mega-put --disable-previews "$LOCAL_DIR" "$REMOTE_DIR"
+          
+          # ساخت لینک عمومی و ذخیره در output
+          mega-export -a "$REMOTE_DIR" > link.txt
+          MEGA_LINK=$(grep -o 'https://mega.nz/[^ ]*' link.txt | head -1)
+          echo "link=$MEGA_LINK" >> $GITHUB_OUTPUT
+          
+          mega-logout
+
+      - name: 💬 افزودن کامنت موفقیت با لینک مگا
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number }}"
-          gh issue comment "$ISSUE_NUMBER" --body "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت دانلود شد. فایل در پوشه `instagram_downloads/` قرار دارد."
+          MEGA_LINK="${{ steps.mega-upload.outputs.link }}"
+          gh issue comment "$ISSUE_NUMBER" --body "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت آپلود شد.
+
+🔗 **لینک دانلود از مگا:** $MEGA_LINK
+
+$( [ '${{ steps.cache.outputs.cache-hit }}' = 'true' ] && echo '⚡ (این فایل از روی کش بازیابی شد، دانلود جدید انجام نشد.)' || echo '📥 (این فایل به تازگی دانلود و سپس آپلود شده است.)' )"
+
+      - name: ❌ کامنت خطا در صورت بروز مشکل
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          gh issue comment "$ISSUE_NUMBER" --body "❌ خطا در پردازش پست شماره ${{ steps.extract.outputs.post_number }}. لطفاً بعداً تلاش کنید."
