@@ -1,4 +1,4 @@
-name: 📥 دانلود پست اینستاگرام + آپلود به مگا با rclone
+name: 📥 اینستاگرام + آپلود به مگا با rclone
 
 on:
   issue_comment:
@@ -26,15 +26,15 @@ jobs:
           fi
           echo "post_number=$NUMBER" >> $GITHUB_OUTPUT
 
-      - name: 🐍 نصب Python و yt-dlp
+      - name: 🐍 نصب Python و پیش‌نیازها
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: ⚙️ نصب پیش‌نیازها
+      - name: ⚙️ نصب yt-dlp و requests
         run: pip install yt-dlp requests
 
-      - name: 🔄 بازیابی کش (بر اساس شماره پست)
+      - name: 🔄 بازیابی کش (فقط محتوای دانلود شده)
         id: cache
         uses: actions/cache@v4
         with:
@@ -54,21 +54,13 @@ jobs:
           path: instagram_downloads
           key: instagram-post-${{ steps.extract.outputs.post_number }}
 
-      # ---------- آپلود با rclone (مانند روش پایدار شما) ----------
-      - name: 💾 Cache rclone binary
-        id: cache-rclone
-        uses: actions/cache@v4
-        with:
-          path: /usr/bin/rclone
-          key: ${{ runner.os }}-rclone-v1.74.0
-
-      - name: 📦 Install latest rclone (if not cached)
-        if: steps.cache-rclone.outputs.cache-hit != 'true'
+      # ---------- نصب rclone بدون مشکل کش (روش مطمئن) ----------
+      - name: 📦 نصب rclone (آخرین نسخه)
         run: |
           curl https://rclone.org/install.sh | sudo bash
           rclone version
 
-      - name: 🔓 Decrypt rclone config for Mega
+      - name: 🔓 رمزگشایی کانفیگ rclone برای مگا
         run: |
           mkdir -p ~/.config/rclone
           if [ ! -f rclone_mega.conf.gpg ]; then
@@ -80,34 +72,32 @@ jobs:
           echo "✅ rclone config loaded"
           rclone --config ~/.config/rclone/rclone.conf listremotes
 
-      - name: ☁️ آپلود فایل‌ها به Mega.nz
-        id: mega-upload
+      - name: ☁️ آپلود به مگا با rclone
+        id: upload
         run: |
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
           REMOTE_PATH="mega:Instagram_Post_${{ steps.extract.outputs.post_number }}"
           LOCAL_DIR="instagram_downloads"
           
-          # ایجاد پوشه در مگا (اختیاری)
+          # ایجاد پوشه در مگا
           rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
           
-          # آپلود کل پوشه
+          # آپلود محتوا
           rclone --config "$CONFIG_FILE" copy "$LOCAL_DIR" "$REMOTE_PATH" --progress --transfers=4 --verbose
           
-          # دریافت لینک عمومی (با rclone لینک گرفتن کمی متفاوت است)
-          # ابتدا لینک را با rclone link می‌گیریم (برای پوشه کار نمی‌کند، باید برای هر فایل جدا)
-          # برای سادگی، یک فایل متنی حاوی لینک دانلود از mage uploader? بهتر است لینک پوشه را از طریق mega-cmd بگیریم
-          # اما فعلاً فرض می‌کنیم که می‌خواهید لینک فایل اول را بدهید، یا از mega-cmd برای لینک پوشه استفاده کنید.
-          # راه حل: نصب mega-cmd فقط برای گرفتن لینک عمومی (بدون لاگین مجدد)
-          sudo apt-get update
-          wget https://mega.nz/linux/repo/xUbuntu_22.04/amd64/megacmd-xUbuntu_22.04_amd64.deb
-          sudo dpkg -i megacmd-xUbuntu_22.04_amd64.deb || sudo apt-get -f install -y
+          # گرفتن لینک عمومی (rclone خودش می‌تواند برای پوشه لینک بسازد)
+          # توجه: برخی ریموت‌ها نیاز به پشتیبانی دارند، مگا پشتیبانی می‌کند.
+          LINK=$(rclone --config "$CONFIG_FILE" link "$REMOTE_PATH" 2>/dev/null)
+          if [ -z "$LINK" ]; then
+            # اگر لینک پوشه کار نکرد، لینک اولین فایل را می‌گیریم
+            FIRST_FILE=$(rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH" | head -1 | awk '{print $2}')
+            if [ -n "$FIRST_FILE" ]; then
+              LINK=$(rclone --config "$CONFIG_FILE" link "$REMOTE_PATH/$FIRST_FILE")
+            fi
+          fi
           
-          # لاگین با همان اطلاعات (می‌توانید از secrets استفاده کنید)
-          mega-login --scripted "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
-          mega-export -a "$REMOTE_PATH" > link.txt
-          MEGA_LINK=$(grep -o 'https://mega.nz/[^ ]*' link.txt | head -1)
-          echo "link=$MEGA_LINK" >> $GITHUB_OUTPUT
-          mega-logout
+          echo "mega_link=$LINK" >> $GITHUB_OUTPUT
+          echo "✅ آپلود کامل شد. لینک: $LINK"
 
       - name: 💬 کامنت موفقیت با لینک مگا
         if: success()
@@ -115,14 +105,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BODY_FILE=$(mktemp)
-          echo "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت آپلود شد." >> "$BODY_FILE"
+          echo "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت به مگا آپلود شد." >> "$BODY_FILE"
           echo "" >> "$BODY_FILE"
-          echo "🔗 **لینک دانلود از مگا:** ${{ steps.mega-upload.outputs.link }}" >> "$BODY_FILE"
+          echo "🔗 **لینک دانلود:** ${{ steps.upload.outputs.mega_link }}" >> "$BODY_FILE"
           echo "" >> "$BODY_FILE"
           if [ "${{ steps.cache.outputs.cache-hit }}" = "true" ]; then
             echo "⚡ (این فایل از روی کش بازیابی شد، دانلود جدید انجام نشد.)" >> "$BODY_FILE"
           else
-            echo "📥 (این فایل به تازگی دانلود و سپس آپلود شده است.)" >> "$BODY_FILE"
+            echo "📥 (این فایل به تازگی دانلود و آپلود شده است.)" >> "$BODY_FILE"
           fi
           gh issue comment "${{ github.event.issue.number }}" --body-file "$BODY_FILE"
 
@@ -131,4 +121,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در پردازش پست شماره ${{ steps.extract.outputs.post_number }}. لطفاً بعداً تلاش کنید."
+          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در پردازش پست شماره ${{ steps.extract.outputs.post_number }}. لطفاً لاگ اکشن را بررسی کنید."
