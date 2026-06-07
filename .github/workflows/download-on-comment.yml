@@ -34,6 +34,9 @@ jobs:
       - name: ⚙️ Install yt-dlp
         run: pip install yt-dlp
 
+      - name: 📦 Install requests (for media_urls download)
+        run: pip install requests
+
       - name: 🎯 Download selected post
         env:
           POST_INDEX: ${{ steps.extract.outputs.post_number }}
@@ -49,7 +52,7 @@ jobs:
 
       - name: 💬 Add success comment to issue
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number }}"
           gh issue comment "$ISSUE_NUMBER" --body "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت دانلود شد. فایل در پوشه `instagram_downloads/` قرار دارد."
