@@ -1,173 +1,58 @@
-name: 🎬🎵 Costume Downloader + Mega.nz (with ZIP split)
+name: 📥 دانلود پست از روی کامنت Issue
 
 on:
-  workflow_dispatch:
-    inputs:
-      platform:
-        description: '🌐 پلتفرم'
-        required: true
-        default: 'youtube'
-        type: choice
-        options:
-          - youtube
-          - soundcloud
-      url:
-        description: '🔗 لینک دانلود'
-        required: true
-      type:
-        description: 'نوع دانلود'
-        required: true
-        default: 'audio'
-        type: choice
-        options:
-          - audio
-          - video
-      quality:
-        description: '🎬 کیفیت ویدیو (فقط برای حالت ویدیو)'
-        required: false
-        default: 'best'
-        type: choice
-        options:
-          - '144p'
-          - '240p'
-          - '360p'
-          - '480p'
-          - '720p'
-          - '1080p'
-          - 'best'
-      folder:
-        description: '📁 پوشه موقت'
-        required: false
-        default: 'downloads'
-      mega_folder:
-        description: '📂 پوشه در Mega.nz'
-        required: false
-        default: 'YoutubeDownloads'
-      split_choice:
-        description: 'تقسیم فایل به چند قسمت (ZIP volume)؟'
-        required: true
-        default: 'single'
-        type: choice
-        options:
-          - single
-          - split
-      split_size:
-        description: 'اندازه هر قسمت (مثال: 100M, 500M, 1G)'
-        required: false
-        default: '100M'
+  issue_comment:
+    types: [created]
 
 jobs:
   download:
+    if: contains(github.event.comment.body, '/download')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
     steps:
-      - name: 📥 Checkout Repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: 🔐 Decrypt cookies (if exists)
+      - name: 🔢 Extract post number from comment
+        id: extract
         run: |
-          if [ -f cookies.txt.gpg ]; then
-            gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
-          else
-            echo "⚠️ فایل cookies.txt.gpg یافت نشد"
-            touch cookies.txt
-          fi
-
-      - name: ⚙️ Setup yt-dlp + ffmpeg
-        uses: AnimMouse/setup-yt-dlp@v3
-        with:
-          aria2: true
-          ffmpeg: true
-
-      # ============= کش و نصب rclone (رفع خطای Permission denied) =============
-      - name: 💾 Cache rclone binary (user path)
-        id: cache-rclone
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/bin/rclone
-          key: ${{ runner.os }}-rclone-v1.74.0
-
-      - name: 📦 Install rclone if not cached
-        if: steps.cache-rclone.outputs.cache-hit != 'true'
-        run: |
-          curl https://rclone.org/install.sh | sudo bash
-          mkdir -p ~/.local/bin
-          cp /usr/bin/rclone ~/.local/bin/
-
-      - name: 🔗 Copy rclone to system PATH (from cache or install)
-        run: |
-          if [ ! -f /usr/bin/rclone ]; then
-            if [ -f ~/.local/bin/rclone ]; then
-              sudo cp ~/.local/bin/rclone /usr/bin/rclone
-              sudo chmod +x /usr/bin/rclone
-            else
-              echo "❌ rclone binary not found"
-              exit 1
-            fi
-          fi
-          rclone version
-      # =============================================================
-
-      - name: 🔓 Decrypt rclone config
-        run: |
-          mkdir -p ~/.config/rclone
-          if [ ! -f rclone_mega.conf.gpg ]; then
-            echo "❌ فایل rclone_mega.conf.gpg در ریشه مخزن پیدا نشد!"
+          COMMENT="${{ github.event.comment.body }}"
+          NUMBER=$(echo "$COMMENT" | grep -oE '/download[[:space:]]+([0-9]+)' | grep -oE '[0-9]+')
+          if [ -z "$NUMBER" ]; then
+            echo "No number found"
             exit 1
           fi
-          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
-          chmod 600 ~/.config/rclone/rclone.conf
-          echo "✅ rclone config loaded"
-          rclone --config ~/.config/rclone/rclone.conf listremotes
+          echo "post_number=$NUMBER" >> $GITHUB_OUTPUT
 
-      - name: ▶️ دانلود فایل
-        id: download
-        run: |
-          # حذف پوشه قبلی اگر وجود داشته باشد (اختیاری)
-          rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
-          mkdir -p "${{ github.event.inputs.folder }}"
-          cd "${{ github.event.inputs.folder }}"
-          
-          if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
-            if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              QUALITY="${{ github.event.inputs.quality }}"
-              if [ "$QUALITY" = "best" ]; then
-                FORMAT="bestvideo+bestaudio/best"
-              else
-                HEIGHT="${QUALITY%p}"
-                FORMAT="bestvideo[height<=$HEIGHT]+bestaudio/best"
-              fi
-              yt-dlp -f "$FORMAT" --merge-output-format mp4 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-            else
-              yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-            fi
-          else
-            if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp -f "bestvideo+bestaudio/best" --merge-output-format mp4 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-            else
-              yt-dlp -x --audio-format mp3 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-            fi
-          fi
-          
-          DOWNLOADED_FILE=$(ls | head -1)
-          echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
+      - name: 🐍 Setup Python & yt-dlp
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-      - name: ✂️ Split into zip volumes (if requested)
-        if: github.event.inputs.split_choice == 'split'
-        run: |
-          cd "${{ github.event.inputs.folder }}"
-          FILE="${{ env.DOWNLOADED_FILE }}"
-          SIZE="${{ github.event.inputs.split_size }}"
-          sudo apt-get install -y zip
-          echo "Creating zip volumes of $SIZE from $FILE"
-          zip -s "$SIZE" "${FILE}.zip" "$FILE"
-          rm "$FILE"
-          echo "✅ Zip volumes created:"
-          ls -la
+      - name: ⚙️ Install yt-dlp
+        run: pip install yt-dlp
 
-      - name: ☁️ آپلود به Mega.nz
+      - name: 📦 Install requests (for media_urls download)
+        run: pip install requests
+
+      - name: 🎯 Download selected post
+        env:
+          POST_INDEX: ${{ steps.extract.outputs.post_number }}
+        run: python .github/scripts/download_instagram_by_index.py
+
+      - name: 💾 Commit downloaded files
         run: |
-          CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
-          REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
-          rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
-          rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" --progress --transfers=4 --verbose
-          echo "✅ آپلود با موفقیت انجام شد"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add instagram_downloads/
+          git diff --staged --quiet || git commit -m "📥 دانلود پست #${{ steps.extract.outputs.post_number }}"
+          git push
+
+      - name: 💬 Add success comment to issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          gh issue comment "$ISSUE_NUMBER" --body "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت دانلود شد. فایل در پوشه `instagram_downloads/` قرار دارد."
