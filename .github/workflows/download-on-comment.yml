@@ -12,10 +12,10 @@ jobs:
       issues: write
 
     steps:
-      - name: 📥 Checkout مخزن (برای اسکریپت)
+      - name: 📥 Checkout مخزن
         uses: actions/checkout@v4
 
-      - name: 🔢 استخراج شماره پست از کامنت
+      - name: 🔢 استخراج شماره پست
         id: extract
         run: |
           COMMENT="${{ github.event.comment.body }}"
@@ -26,7 +26,7 @@ jobs:
           fi
           echo "post_number=$NUMBER" >> $GITHUB_OUTPUT
 
-      - name: 🐍 نصب Python و yt-dlp (در صورت نیاز)
+      - name: 🐍 نصب Python و yt-dlp
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -34,71 +34,74 @@ jobs:
       - name: ⚙️ نصب پیش‌نیازها
         run: pip install yt-dlp requests
 
-      - name: 🔄 تلاش برای بازیابی کش (بر اساس شماره پست)
+      - name: 🔄 بازیابی کش
         id: cache
         uses: actions/cache@v4
         with:
           path: instagram_downloads
           key: instagram-post-${{ steps.extract.outputs.post_number }}
 
-      - name: 🎯 دانلود پست (فقط در صورت عدم وجود کش)
+      - name: 🎯 دانلود پست (در صورت عدم کش)
         if: steps.cache.outputs.cache-hit != 'true'
         env:
           POST_INDEX: ${{ steps.extract.outputs.post_number }}
         run: python .github/scripts/download_instagram_by_index.py
 
-      - name: 💾 ذخیره پوشه دانلود در کش (برای دفعات بعد)
+      - name: 💾 ذخیره در کش (برای دفعات بعد)
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: instagram_downloads
           key: instagram-post-${{ steps.extract.outputs.post_number }}
 
-      - name: 🧰 نصب ابزار mega-cmd
+      - name: 🧰 نصب mega-cmd
         run: |
           sudo apt-get update
           wget https://mega.nz/linux/repo/xUbuntu_22.04/amd64/megacmd-xUbuntu_22.04_amd64.deb
           sudo dpkg -i megacmd-xUbuntu_22.04_amd64.deb || sudo apt-get -f install -y
 
-      - name: ☁️ آپلود به مگا (چه از کش، چه از دانلود جدید)
+      - name: ☁️ آپلود به مگا
         id: mega-upload
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
-          
           POST_NUM="${{ steps.extract.outputs.post_number }}"
           LOCAL_DIR="instagram_downloads"
           REMOTE_DIR="/Instagram_Post_$POST_NUM"
-          
-          # حذف پوشه قبلی در مگا (اختیاری) تا تداخل نداشته باشد
           mega-rm "$REMOTE_DIR" --force 2>/dev/null || true
-          
-          # آپلود پوشه محلی
           mega-put --disable-previews "$LOCAL_DIR" "$REMOTE_DIR"
-          
-          # ساخت لینک عمومی و ذخیره در output
           mega-export -a "$REMOTE_DIR" > link.txt
           MEGA_LINK=$(grep -o 'https://mega.nz/[^ ]*' link.txt | head -1)
           echo "link=$MEGA_LINK" >> $GITHUB_OUTPUT
-          
           mega-logout
 
-      - name: 💬 افزودن کامنت موفقیت با لینک مگا
+      - name: 💬 کامنت موفقیت (بدون subshell پیچیده)
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number }}"
+          POST_NUM="${{ steps.extract.outputs.post_number }}"
           MEGA_LINK="${{ steps.mega-upload.outputs.link }}"
-          gh issue comment "$ISSUE_NUMBER" --body "✅ پست شماره ${{ steps.extract.outputs.post_number }} با موفقیت آپلود شد.
-
+          CACHE_HIT="${{ steps.cache.outputs.cache-hit }}"
+          
+          if [ "$CACHE_HIT" = "true" ]; then
+            STATUS_MSG="⚡ (این فایل از روی کش بازیابی شد، دانلود جدید انجام نشد.)"
+          else
+            STATUS_MSG="📥 (این فایل به تازگی دانلود و سپس آپلود شده است.)"
+          fi
+          
+          BODY="✅ پست شماره $POST_NUM با موفقیت آپلود شد.
+          
 🔗 **لینک دانلود از مگا:** $MEGA_LINK
+          
+$STATUS_MSG"
+          
+          gh issue comment "$ISSUE_NUMBER" --body "$BODY"
 
-$( [ '${{ steps.cache.outputs.cache-hit }}' = 'true' ] && echo '⚡ (این فایل از روی کش بازیابی شد، دانلود جدید انجام نشد.)' || echo '📥 (این فایل به تازگی دانلود و سپس آپلود شده است.)' )"
-
-      - name: ❌ کامنت خطا در صورت بروز مشکل
+      - name: ❌ کامنت خطا
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
