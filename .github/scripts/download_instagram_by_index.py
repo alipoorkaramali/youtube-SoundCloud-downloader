@@ -13,27 +13,48 @@ def find_post_in_all_data(shortcode):
     """جستجوی shortcode در تمام فایل‌های JSON داخل پوشه instagram_data"""
     data_dir = Path("instagram_data")
     if not data_dir.exists():
+        print("⚠️ پوشه instagram_data وجود ندارد.")
         return None
-    
-    # همه فایل‌های JSON را بر اساس تاریخ (قدیمی‌ترین به جدیدترین) مرتب کن
-    json_files = sorted(data_dir.glob("*.json"), key=lambda f: f.stat().st_mtime)
-    
-    for json_file in reversed(json_files):  # از آخرین به اولین
+
+    json_files = list(data_dir.glob("*.json"))
+    print(f"📁 تعداد فایل‌های JSON در instagram_data: {len(json_files)}")
+    if not json_files:
+        print("⚠️ هیچ فایل JSON در پوشه instagram_data یافت نشد.")
+        return None
+
+    # مرتب‌سازی بر اساس تاریخ اصلاح (جدیدترین اول)
+    json_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+
+    for json_file in json_files:
+        print(f"🔍 بررسی فایل: {json_file.name}")
         try:
             with open(json_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                # اگر فایل ساختار recent_posts دارد
-                posts = data.get('recent_posts', [])
-                for post in posts:
-                    if post.get('shortcode') == shortcode:
-                        print(f"✅ پیدا شد در فایل: {json_file.name}")
-                        return post
-                # همچنین ممکن است خود فایل مستقیماً یک پست باشد (برخی خروجی‌ها)
+                content = f.read()
+                # بررسی اینکه آیا فایل با timestamp شروع شده (خط اول عدد)
+                lines = content.split('\n', 1)
+                if len(lines) > 1 and lines[0].strip().isdigit():
+                    # حذف خط اول timestamp
+                    data = json.loads(lines[1])
+                else:
+                    data = json.loads(content)
+
+                # حالت 1: فایل شامل recent_posts است (خروجی استاندارد)
+                if 'recent_posts' in data:
+                    posts = data['recent_posts']
+                    print(f"   تعداد پست‌های recent_posts: {len(posts)}")
+                    for post in posts:
+                        if post.get('shortcode') == shortcode:
+                            print(f"   ✅ پیدا شد در recent_posts")
+                            return post
+                # حالت 2: خود فایل مستقیماً یک پست است
                 if data.get('shortcode') == shortcode:
+                    print(f"   ✅ پیدا شد (خود فایل)")
                     return data
+        except json.JSONDecodeError as e:
+            print(f"   ❌ خطا در JSON: {e}")
         except Exception as e:
-            print(f"⚠️ خطا در خواندن {json_file.name}: {e}")
-            continue
+            print(f"   ❌ خطای دیگر: {e}")
+    print(f"❌ shortcode {shortcode} در هیچ فایلی یافت نشد.")
     return None
 
 def download_from_media_urls(media_urls, download_dir, shortcode, post_type):
@@ -80,6 +101,7 @@ def main():
         print("Usage: python download_instagram_by_index.py <shortcode>")
         sys.exit(1)
     shortcode = sys.argv[1]
+    print(f"🔍 شروع جستجو برای shortcode: {shortcode}")
 
     # پیدا کردن اطلاعات پست در پوشه instagram_data
     post = find_post_in_all_data(shortcode)
@@ -93,6 +115,8 @@ def main():
         print(f"📸 اطلاعات پست: {shortcode} - {post_type} - @{username}")
         if media_urls:
             print(f"   media_urls موجود است: {len(media_urls)} مورد")
+        else:
+            print("⚠️ media_urls وجود ندارد، تلاش با yt-dlp...")
     else:
         print(f"❌ shortcode {shortcode} در هیچ فایل JSON یافت نشد.")
         print("لطفاً ابتدا workflow دریافت پست را اجرا کنید.")
@@ -110,7 +134,7 @@ def main():
             with open(download_dir / "info.txt", 'w', encoding='utf-8') as f:
                 f.write(f"Method: media_urls\nShortcode: {shortcode}\nUsername: {username}\nURL: {post_url}\nCaption: {caption}\n")
     else:
-        # اگر media_urls نبود، yt-dlp
+        # اگر media_urls نبود، yt-dlp را امتحان کن
         ytdlp_path = download_dir / f"{shortcode}_ytdlp.mp4"
         cmd = ["yt-dlp", "--no-playlist", "-o", str(ytdlp_path), post_url]
         try:
@@ -119,8 +143,8 @@ def main():
                 downloaded = True
                 with open(download_dir / "info.txt", 'w', encoding='utf-8') as f:
                     f.write(f"Method: yt-dlp\nShortcode: {shortcode}\nUsername: {username}\nURL: {post_url}\nCaption: {caption}\n")
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ yt-dlp failed: {e}")
 
     if downloaded:
         with open(download_dir / "post_info.json", 'w', encoding='utf-8') as f:
