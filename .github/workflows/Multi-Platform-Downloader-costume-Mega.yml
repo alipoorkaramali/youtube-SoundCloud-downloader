@@ -1,144 +1,297 @@
 name: 🎬🎵 costume Downloader + Mega.nz (Stable Ultra Fix)
-
 on:
   workflow_dispatch:
     inputs:
       platform:
+        description: 'Platform'
         required: true
         default: 'youtube'
         type: choice
-        options: [youtube, soundcloud]
+        options:
+          - youtube
+          - soundcloud
       url:
+        description: 'Video/Playlist URL'
         required: true
+        type: string
       type:
+        description: 'Download type'
         required: true
         default: 'audio'
         type: choice
-        options: [audio, video]
+        options:
+          - audio
+          - video
       quality:
+        description: 'Video quality (if video)'
         default: 'best'
         type: choice
-        options: ['144p','240p','360p','480p','720p','1080p','best']
+        options:
+          - '144p'
+          - '240p'
+          - '360p'
+          - '480p'
+          - '720p'
+          - '1080p'
+          - 'best'
       folder:
+        description: 'Output folder name'
         default: 'downloads'
+        type: string
       mega_folder:
-        default: 'YoutubeDownloads'
+        description: 'Mega.nz folder'
+        default: 'YouTubeDownloads'
+        type: string
       split_choice:
+        description: 'Split archive?'
         default: 'single'
         type: choice
-        options: [single, split]
+        options:
+          - single
+          - split
       split_size:
+        description: 'Split size (e.g. 100M, 1G)'
         default: '100M'
+        type: string
+      use_proxy:
+        description: 'Use proxy (set PROXY_URL secret first)'
+        default: 'false'
+        type: boolean
 
 jobs:
   download:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@v4
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
 
-      # ================= COOKIES =================
-      - name: 🔐 Decrypt cookies
+      # ==================== DECRYPT COOKIES ====================
+      - name: 🔐 Decrypt cookies.txt
         run: |
-          gpg --batch --yes \
+          gpg --batch --yes --quiet \
             --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
             --decrypt cookies.txt.gpg > cookies.txt
+          if [ ! -s cookies.txt ]; then
+            echo "❌ Cookies decryption failed or file empty"
+            exit 1
+          fi
 
-      # ================= INSTALL =================
-      - name: ⚙️ Install yt-dlp + ffmpeg
-        uses: AnimMouse/setup-yt-dlp@v3
-        with:
-          ffmpeg: true
-          aria2: true
+      # ==================== DECRYPT RCLONE CONFIG ====================
+      - name: 🔓 Decrypt rclone config
+        run: |
+          mkdir -p ~/.config/rclone
+          gpg --batch --yes --quiet \
+            --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+            rclone_mega.conf.gpg > ~/.config/rclone/rclone.conf
+          if [ ! -s ~/.config/rclone/rclone.conf ]; then
+            echo "❌ Rclone config decryption failed"
+            exit 1
+          fi
 
-      # ✅ FIX اصلی (همونی که ارور تو بود)
-      - name: 📦 Install rclone
+      # ==================== INSTALL DEPENDENCIES ====================
+      - name: ⚙️ Install ffmpeg, aria2, rclone, zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg aria2 zip unzip
+
+      - name: 🐍 Install latest yt-dlp
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install --upgrade yt-dlp
+
+      - name: 📦 Install rclone (latest)
         run: |
           curl https://rclone.org/install.sh | sudo bash
           rclone version
 
-      # ================= RCLONE CONFIG =================
-      - name: 🔓 Load rclone config
-        run: |
-          mkdir -p ~/.config/rclone
-          gpg --batch --yes \
-            --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
-            rclone_mega.conf.gpg > ~/.config/rclone/rclone.conf
-
-      # ================= CLEAN =================
-      - name: 🧹 Clean
+      # ==================== CLEAN PREVIOUS ====================
+      - name: 🧹 Clean previous downloads
         run: rm -rf "${{ github.event.inputs.folder }}" || true
 
-      # ================= YOUTUBE PRO =================
-      - name: ▶️ YouTube Smart Downloader
+      # ==================== YOUTUBE (ANTI-BOT) ====================
+      - name: ▶️ YouTube Downloader (Advanced Anti-Bot)
         if: github.event.inputs.platform == 'youtube'
+        id: youtube
         run: |
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
-
+          
           URL="${{ github.event.inputs.url }}"
-
-          BASE="\
-            --cookies ../cookies.txt \
-            --force-ipv4 \
-            --no-playlist \
-            --retries 8 \
-            --fragment-retries 8 \
-            --sleep-interval 8 \
-            --max-sleep-interval 25 \
-            --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.6367.91 Safari/537.36' \
+          TYPE="${{ github.event.inputs.type }}"
+          QUALITY="${{ github.event.inputs.quality }}"
+          
+          # ---------------- User-Agent random pool ----------------
+          USER_AGENTS=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0"
+          )
+          RANDOM_UA=${USER_AGENTS[$RANDOM % ${#USER_AGENTS[@]}]}
+          
+          # ---------------- Headers (Real browser) ----------------
+          HEADERS="\
+            --add-header 'Accept-Language: en-US,en;q=0.9' \
+            --add-header 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8' \
+            --add-header 'Accept-Encoding: gzip, deflate, br' \
+            --add-header 'Sec-Ch-Ua: \"Google Chrome\";v=\"125\", \"Chromium\";v=\"125\", \"Not.A/Brand\";v=\"24\"' \
+            --add-header 'Sec-Ch-Ua-Mobile: ?0' \
+            --add-header 'Sec-Ch-Ua-Platform: \"Windows\"' \
+            --add-header 'Sec-Fetch-Site: none' \
+            --add-header 'Sec-Fetch-Mode: navigate' \
+            --add-header 'Sec-Fetch-User: ?1' \
+            --add-header 'Sec-Fetch-Dest: document' \
+            --add-header 'Referer: https://www.youtube.com/' \
+            --add-header 'Origin: https://www.youtube.com' \
+            --add-header 'DNT: 1' \
+            --add-header 'Upgrade-Insecure-Requests: 1' \
           "
-
-          if [ "${{ github.event.inputs.type }}" = "video" ]; then
-            FORMAT="bestvideo+bestaudio/best"
-            EXTRA="--merge-output-format mp4"
+          
+          # ---------------- Proxy (optional) ----------------
+          PROXY_OPT=""
+          if [ "${{ github.event.inputs.use_proxy }}" = "true" ] && [ -n "${{ secrets.PROXY_URL }}" ]; then
+            PROXY_OPT="--proxy ${{ secrets.PROXY_URL }}"
+            echo "🛡️ Using proxy: ${{ secrets.PROXY_URL }}"
+          fi
+          
+          # ---------------- Format selection ----------------
+          if [ "$TYPE" = "video" ]; then
+            case "$QUALITY" in
+              "144p")  FORMAT="bestvideo[height<=144]+bestaudio/best[height<=144]" ;;
+              "240p")  FORMAT="bestvideo[height<=240]+bestaudio/best[height<=240]" ;;
+              "360p")  FORMAT="bestvideo[height<=360]+bestaudio/best[height<=360]" ;;
+              "480p")  FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]" ;;
+              "720p")  FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]" ;;
+              "1080p") FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
+              "best")  FORMAT="bestvideo+bestaudio/best" ;;
+            esac
+            EXTRA="--merge-output-format mp4 --recode-video mp4"
           else
             FORMAT="bestaudio/best"
-            EXTRA="-x --audio-format mp3"
+            EXTRA="-x --audio-format mp3 --audio-quality 0"
           fi
-
-          try () {
-            yt-dlp -f "$FORMAT" $EXTRA $BASE \
+          
+          # ---------------- Base yt-dlp options ----------------
+          BASE_OPTS="\
+            --cookies ../cookies.txt \
+            --user-agent \"$RANDOM_UA\" \
+            $HEADERS \
+            $PROXY_OPT \
+            --force-ipv4 \
+            --no-playlist \
+            --retries 15 \
+            --fragment-retries 15 \
+            --skip-unavailable-fragments \
+            --abort-on-error \
+            --sleep-interval 25 \
+            --max-sleep-interval 55 \
+            --sleep-requests 12 \
+            --limit-rate 1.2M \
+            --throttled-rate 50000 \
+            --extractor-args \"youtube:player_sleep_interval=35,youtube:skip=webpage,dash,hls,license_requests,translated_subs\" \
+            --no-check-certificates \
+            --geo-bypass \
+            --no-cache-dir \
+            --verbose \
+          "
+          
+          # ---------------- Function to try different clients ----------------
+          try_client() {
+            echo "🔄 Trying client: $1"
+            yt-dlp -f "$FORMAT" $EXTRA $BASE_OPTS \
               --extractor-args "youtube:player_client=$1" \
-              "$URL" -o "%(title)s.%(ext)s"
+              "$URL" -o "%(title)s.%(ext)s" 2>&1 | tee log.txt
+            return ${PIPESTATUS[0]}
           }
-
-          try android || try web || try ios || try mweb || exit 1
-
-          FILE=$(ls | head -1)
+          
+          # ---------------- Client priority list ----------------
+          CLIENTS=("android_embedded" "android" "web" "ios" "mweb")
+          SUCCESS=false
+          
+          for client in "${CLIENTS[@]}"; do
+            if try_client "$client"; then
+              SUCCESS=true
+              break
+            fi
+            echo "⚠️ Client $client failed, waiting 45 seconds before next attempt..."
+            sleep 45
+          done
+          
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ All clients failed. Last log:"
+            cat log.txt
+            exit 1
+          fi
+          
+          # ---------------- Capture filename ----------------
+          FILE=$(ls -1 | grep -v "log.txt" | head -1)
+          if [ -z "$FILE" ]; then
+            echo "❌ No file downloaded"
+            exit 1
+          fi
+          
           echo "DOWNLOADED_FILE=$FILE" >> $GITHUB_ENV
           echo "VIDEO_TITLE=$(basename "$FILE")" >> $GITHUB_ENV
+          echo "✅ Downloaded: $FILE"
 
-      # ================= SOUNDCLOUD =================
-      - name: ☁️ SoundCloud
+      # ==================== SOUNDCLOUD ====================
+      - name: ☁️ SoundCloud Downloader
         if: github.event.inputs.platform == 'soundcloud'
         run: |
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
-          yt-dlp -x --audio-format mp3 "${{ github.event.inputs.url }}"
-          FILE=$(ls | head -1)
+          yt-dlp -x --audio-format mp3 --audio-quality 0 \
+            --retries 10 --sleep-interval 5 \
+            "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+          FILE=$(ls -1 | head -1)
           echo "DOWNLOADED_FILE=$FILE" >> $GITHUB_ENV
+          echo "VIDEO_TITLE=$(basename "$FILE")" >> $GITHUB_ENV
 
-      # ================= SPLIT =================
-      - name: ✂️ Split
+      # ==================== SPLIT INTO ZIP VOLUMES ====================
+      - name: ✂️ Split archive (if needed)
         if: github.event.inputs.split_choice == 'split'
         run: |
           cd "${{ github.event.inputs.folder }}"
-          sudo apt-get install -y zip
-          zip -s "${{ github.event.inputs.split_size }}" file.zip *
+          zip -s "${{ github.event.inputs.split_size }}" -r split_archive.zip .
+          # Remove original files to only upload split parts
+          find . -type f ! -name "*.z*" ! -name "split_archive.zip" -delete
+          echo "Files split into volumes"
 
-      # ================= MEGA =================
-      - name: ☁️ Upload Mega
+      # ==================== UPLOAD TO MEGA.NZ ====================
+      - name: ☁️ Upload to Mega.nz
         run: |
           rclone copy "${{ github.event.inputs.folder }}" \
             "mega:${{ github.event.inputs.mega_folder }}" \
-            --progress --transfers=4
+            --progress --transfers=4 --checkers=8 \
+            --retries 5 --low-level-retries 10 \
+            --verbose
+          
+          # Create a direct link file (optional)
+          cd "${{ github.event.inputs.folder }}"
+          if [ "${{ github.event.inputs.split_choice }}" = "split" ]; then
+            echo "Split archive uploaded to mega:${{ github.event.inputs.mega_folder }}"
+          else
+            FILE="${{ env.DOWNLOADED_FILE }}"
+            if [ -n "$FILE" ]; then
+              echo "File uploaded: $FILE"
+            fi
+          fi
 
-      # ================= NOTIFY =================
-      - name: 📱 Notify
-        if: success()
+      # ==================== NOTIFICATION (PushBullet) ====================
+      - name: 📱 Send notification
+        if: success() && secrets.PB_TOKEN != ''
         run: |
-          curl -u "${{ secrets.PB_TOKEN }}": \
+          curl -u "${{ secrets.PB_TOKEN }}:" \
             -X POST https://api.pushbullet.com/v2/pushes \
             -H "Content-Type: application/json" \
-            -d "{\"type\":\"note\",\"title\":\"Done\",\"body\":\"${{ env.VIDEO_TITLE }}\"}"
+            -d "{\"type\":\"note\",\"title\":\"✅ دانلود کامل شد\",\"body\":\"${{ env.VIDEO_TITLE }}\nPlatform: ${{ github.event.inputs.platform }}\nFolder: mega:${{ github.event.inputs.mega_folder }}\"}" \
+            --fail --silent || echo "Push notification failed but download succeeded"
+
+      # ==================== CLEANUP COOKIES ====================
+      - name: 🗑️ Cleanup sensitive files
+        if: always()
+        run: |
+          rm -f cookies.txt
+          rm -rf ~/.config/rclone
