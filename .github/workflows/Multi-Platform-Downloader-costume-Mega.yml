@@ -1,157 +1,161 @@
-name: 🎬🎵 Costume Downloader + Mega.nz (with ZIP split)
+name: 🎬🎵 Auto Downloader + Mega.nz (Ultra Pro Anti-Bot)
 
 on:
   workflow_dispatch:
     inputs:
       platform:
-        description: '🌐 پلتفرم'
         required: true
         default: 'youtube'
         type: choice
-        options:
-          - youtube
-          - soundcloud
+        options: [youtube, soundcloud]
       url:
-        description: '🔗 لینک دانلود'
         required: true
       type:
-        description: 'نوع دانلود'
         required: true
         default: 'audio'
         type: choice
-        options:
-          - audio
-          - video
+        options: [audio, video]
       quality:
-        description: '🎬 کیفیت ویدیو (فقط برای حالت ویدیو)'
-        required: false
         default: 'best'
         type: choice
-        options:
-          - '144p'
-          - '240p'
-          - '360p'
-          - '480p'
-          - '720p'
-          - '1080p'
-          - 'best'
+        options: ['144p','240p','360p','480p','720p','1080p','best']
       folder:
-        description: '📁 پوشه موقت'
-        required: false
         default: 'downloads'
       mega_folder:
-        description: '📂 پوشه در Mega.nz'
-        required: false
         default: 'YoutubeDownloads'
       split_choice:
-        description: 'تقسیم فایل به چند قسمت (ZIP volume)؟'
-        required: true
         default: 'single'
         type: choice
-        options:
-          - single
-          - split
+        options: [single, split]
       split_size:
-        description: 'اندازه هر قسمت (مثال: 100M, 500M, 1G)'
-        required: false
         default: '100M'
 
 jobs:
   download:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 📥 Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 🔐 Decrypt cookies (if exists)
+      # ================= COOKIES =================
+      - name: 🔐 Decrypt cookies
         run: |
-          if [ -f cookies.txt.gpg ]; then
-            gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
-          else
-            echo "⚠️ فایل cookies.txt.gpg یافت نشد"
-            touch cookies.txt
-          fi
+          gpg --batch --yes \
+            --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
+            --decrypt cookies.txt.gpg > cookies.txt
 
-      - name: ⚙️ Setup yt-dlp + ffmpeg
+      # ================= INSTALL =================
+      - name: ⚙️ Install tools
         uses: AnimMouse/setup-yt-dlp@v3
         with:
-          aria2: true
           ffmpeg: true
+          aria2: true
 
-      - name: 💾 Cache rclone binary
-        id: cache-rclone
-        uses: actions/cache@v4
-        with:
-          path: /usr/bin/rclone
-          key: ${{ runner.os }}-rclone-v1.74.0
-
-      - name: 📦 Install latest rclone (if not cached)
-        if: steps.cache-rclone.outputs.cache-hit != 'true'
+      # ================= YOUTUBE =================
+      - name: ▶️ YouTube Ultra Anti-Bot
+        if: github.event.inputs.platform == 'youtube'
         run: |
-          curl https://rclone.org/install.sh | sudo bash
-          rclone version
-
-      - name: 🔓 Decrypt rclone config
-        run: |
-          mkdir -p ~/.config/rclone
-          if [ ! -f rclone_mega.conf.gpg ]; then
-            echo "❌ فایل rclone_mega.conf.gpg در ریشه مخزن پیدا نشد!"
-            exit 1
-          fi
-          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
-          chmod 600 ~/.config/rclone/rclone.conf
-          echo "✅ rclone config loaded"
-          rclone --config ~/.config/rclone/rclone.conf listremotes
-
-      - name: ▶️ دانلود فایل
-        id: download
-        run: |
-          # حذف پوشه قبلی اگر وجود داشته باشد (اختیاری)
-          rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
-          
-          if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
-            if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              QUALITY="${{ github.event.inputs.quality }}"
-              if [ "$QUALITY" = "best" ]; then
-                FORMAT="bestvideo+bestaudio/best"
-              else
-                HEIGHT="${QUALITY%p}"
-                FORMAT="bestvideo[height<=$HEIGHT]+bestaudio/best"
-              fi
-              yt-dlp -f "$FORMAT" --merge-output-format mp4 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-            else
-              yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-            fi
-          else
-            if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp -f "bestvideo+bestaudio/best" --merge-output-format mp4 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-            else
-              yt-dlp -x --audio-format mp3 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-            fi
-          fi
-          
-          DOWNLOADED_FILE=$(ls | head -1)
-          echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
 
-      - name: ✂️ Split into zip volumes (if requested)
+          URL="${{ github.event.inputs.url }}"
+
+          BASE="\
+            --cookies ../cookies.txt \
+            --force-ipv4 \
+            --no-playlist \
+            --retries 10 \
+            --fragment-retries 10 \
+            --retry-sleep 5 \
+            --sleep-interval 10 \
+            --max-sleep-interval 30 \
+            --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.6367.91 Safari/537.36' \
+          "
+
+          if [ "${{ github.event.inputs.type }}" = "video" ]; then
+            FORMAT="bestvideo+bestaudio/best"
+            EXTRA="--merge-output-format mp4"
+          else
+            FORMAT="bestaudio/best"
+            EXTRA="-x --audio-format mp3"
+          fi
+
+          attempt () {
+            CLIENT=$1
+            SKIP=$2
+
+            yt-dlp -f "$FORMAT" \
+              $EXTRA \
+              $BASE \
+              --extractor-args "youtube:player_client=$CLIENT" \
+              --extractor-args "youtube:skip=$SKIP" \
+              "$URL" \
+              -o "%(title)s.%(ext)s" 2>&1 | tee log.txt
+
+            if grep -q "Sign in to confirm you're not a bot" log.txt; then
+              return 1
+            fi
+
+            return 0
+          }
+
+          SUCCESS=0
+          DELAY=5
+
+          for CLIENT in android web ios mweb; do
+            for SKIP in webpage ""; do
+              echo "🚀 Trying $CLIENT / skip=$SKIP"
+              attempt $CLIENT $SKIP && SUCCESS=1 && break
+              echo "⏳ Retry after $DELAY sec..."
+              sleep $DELAY
+              DELAY=$((DELAY+5))
+            done
+            [ $SUCCESS -eq 1 ] && break
+          done
+
+          if [ $SUCCESS -eq 0 ]; then
+            echo "❌ All attempts failed"
+            exit 1
+          fi
+
+          FILE=$(ls | head -1)
+          echo "DOWNLOADED_FILE=$FILE" >> $GITHUB_ENV
+          echo "VIDEO_TITLE=$(basename "$FILE")" >> $GITHUB_ENV
+
+      # ================= SOUNDCLOUD =================
+      - name: ☁️ SoundCloud
+        if: github.event.inputs.platform == 'soundcloud'
+        run: |
+          mkdir -p "${{ github.event.inputs.folder }}"
+          cd "${{ github.event.inputs.folder }}"
+          yt-dlp -x --audio-format mp3 "${{ github.event.inputs.url }}"
+          FILE=$(ls | head -1)
+          echo "DOWNLOADED_FILE=$FILE" >> $GITHUB_ENV
+
+      # ================= SPLIT =================
+      - name: ✂️ Split
         if: github.event.inputs.split_choice == 'split'
         run: |
           cd "${{ github.event.inputs.folder }}"
-          FILE="${{ env.DOWNLOADED_FILE }}"
-          SIZE="${{ github.event.inputs.split_size }}"
           sudo apt-get install -y zip
-          echo "Creating zip volumes of $SIZE from $FILE"
-          zip -s "$SIZE" "${FILE}.zip" "$FILE"
-          rm "$FILE"
-          echo "✅ Zip volumes created:"
-          ls -la
+          zip -s "${{ github.event.inputs.split_size }}" file.zip *
 
-      - name: ☁️ آپلود به Mega.nz
+      # ================= MEGA =================
+      - name: ☁️ Upload Mega
         run: |
-          CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
-          REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
-          rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
-          rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" --progress --transfers=4 --verbose
-          echo "✅ آپلود با موفقیت انجام شد"
+          mkdir -p ~/.config/rclone
+          gpg --batch --yes \
+            --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+            rclone_mega.conf.gpg > ~/.config/rclone/rclone.conf
+
+          rclone copy "${{ github.event.inputs.folder }}" \
+            "mega:${{ github.event.inputs.mega_folder }}"
+
+      # ================= NOTIFY =================
+      - name: 📱 Notify
+        if: success()
+        run: |
+          curl -u "${{ secrets.PB_TOKEN }}": \
+            -X POST https://api.pushbullet.com/v2/pushes \
+            -H "Content-Type: application/json" \
+            -d "{\"type\":\"note\",\"title\":\"Done\",\"body\":\"${{ env.VIDEO_TITLE }}\"}"
