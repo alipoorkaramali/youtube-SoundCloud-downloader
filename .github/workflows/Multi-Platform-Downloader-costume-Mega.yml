@@ -1,126 +1,157 @@
-- name: ▶️ YouTube Downloader (Advanced Anti-Bot)
-  if: github.event.inputs.platform == 'youtube'
-  id: youtube
-  run: |
-    mkdir -p "${{ github.event.inputs.folder }}"
-    cd "${{ github.event.inputs.folder }}"
-    
-    URL="${{ github.event.inputs.url }}"
-    TYPE="${{ github.event.inputs.type }}"
-    QUALITY="${{ github.event.inputs.quality }}"
-    
-    # ---------- Random User-Agent ----------
-    UA_LIST=(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36"
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/123.0.0.0 Safari/537.36"
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0"
-    )
-    RANDOM_UA=$(printf "%s\n" "${UA_LIST[@]}" | shuf -n1)
-    
-    # ---------- Headers (درست و سازگار با yt-dlp) ----------
-    # هر هدر با --add-header "Header: value" به عنوان یک آرگومان جداگانه
-    HEADER_ARGS=(
-      --add-header "Accept-Language: en-US,en;q=0.9"
-      --add-header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-      --add-header "Referer: https://www.youtube.com/"
-      --add-header "Origin: https://www.youtube.com"
-      --add-header "DNT: 1"
-    )
-    
-    # ---------- Proxy (اختیاری) ----------
-    PROXY_ARGS=()
-    if [[ "${{ github.event.inputs.use_proxy }}" == "true" && -n "${{ secrets.PROXY_URL }}" ]]; then
-      PROXY_ARGS+=(--proxy "${{ secrets.PROXY_URL }}")
-      echo "🛡️ Proxy enabled"
-    fi
-    
-    # ---------- Format selection ----------
-    if [ "$TYPE" = "video" ]; then
-      case "$QUALITY" in
-        "144p") FORMAT="bestvideo[height<=144]+bestaudio/best" ;;
-        "240p") FORMAT="bestvideo[height<=240]+bestaudio/best" ;;
-        "360p") FORMAT="bestvideo[height<=360]+bestaudio/best" ;;
-        "480p") FORMAT="bestvideo[height<=480]+bestaudio/best" ;;
-        "720p") FORMAT="bestvideo[height<=720]+bestaudio/best" ;;
-        "1080p") FORMAT="bestvideo[height<=1080]+bestaudio/best" ;;
-        *) FORMAT="bestvideo+bestaudio/best" ;;
-      esac
-      EXTRA_ARGS=(--merge-output-format mp4 --recode-video mp4)
-    else
-      FORMAT="bestaudio/best"
-      EXTRA_ARGS=(-x --audio-format mp3 --audio-quality 0)
-    fi
-    
-    # ---------- Base options (بدون extractor-args مربوط به کلاینت) ----------
-    BASE_OPTS=(
-      --cookies ../cookies.txt
-      --user-agent "$RANDOM_UA"
-      "${HEADER_ARGS[@]}"
-      "${PROXY_ARGS[@]}"
-      --force-ipv4
-      --no-playlist
-      --retries 15
-      --fragment-retries 15
-      --skip-unavailable-fragments
-      --abort-on-error
-      --sleep-interval 25
-      --max-sleep-interval 55
-      --sleep-requests 12
-      --limit-rate 1.2M
-      --throttled-rate 50000
-      --no-check-certificates
-      --geo-bypass
-      --no-cache-dir
-      --rm-cache-dir
-      --verbose
-    )
-    
-    # ---------- تابع تست کلاینت ----------
-    try_client() {
-      local client="$1"
-      local logfile="log_${client}.txt"
-      echo "🔄 Trying client: $client"
-      yt-dlp -f "$FORMAT" \
-        "${EXTRA_ARGS[@]}" \
-        "${BASE_OPTS[@]}" \
-        --extractor-args "youtube:player_client=$client,player_sleep_interval=35,skip=webpage" \
-        "$URL" -o "%(title)s.%(ext)s" > "$logfile" 2>&1
-      local exit_code=$?
-      if [ $exit_code -eq 0 ]; then
-        return 0
-      else
-        echo "⚠️ Client $client failed (exit $exit_code). Last 10 lines:"
-        tail -10 "$logfile"
-        return $exit_code
-      fi
-    }
-    
-    # ---------- ترتیب تلاش کلاینت‌ها ----------
-    CLIENTS=("android_embedded" "android" "web" "ios" "mweb")
-    SUCCESS=false
-    
-    for client in "${CLIENTS[@]}"; do
-      if try_client "$client"; then
-        SUCCESS=true
-        break
-      fi
-      echo "⏳ Waiting 45 seconds before next client..."
-      sleep 45
-    done
-    
-    if [ "$SUCCESS" = false ]; then
-      echo "❌ All clients failed. Check logs."
-      exit 1
-    fi
-    
-    # ---------- پیدا کردن فایل دانلود شده ----------
-    FILE=$(ls -1t | grep -v '^log_' | grep -v '\.part$' | head -1)
-    if [ -z "$FILE" ]; then
-      echo "❌ No file downloaded"
-      exit 1
-    fi
-    
-    echo "DOWNLOADED_FILE=$FILE" >> $GITHUB_ENV
-    echo "VIDEO_TITLE=$(basename "$FILE")" >> $GITHUB_ENV
-    echo "✅ Downloaded: $FILE"
+name: 🎬🎵 Costume Downloader + Mega.nz (with ZIP split)
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: '🌐 پلتفرم'
+        required: true
+        default: 'youtube'
+        type: choice
+        options:
+          - youtube
+          - soundcloud
+      url:
+        description: '🔗 لینک دانلود'
+        required: true
+      type:
+        description: 'نوع دانلود'
+        required: true
+        default: 'audio'
+        type: choice
+        options:
+          - audio
+          - video
+      quality:
+        description: '🎬 کیفیت ویدیو (فقط برای حالت ویدیو)'
+        required: false
+        default: 'best'
+        type: choice
+        options:
+          - '144p'
+          - '240p'
+          - '360p'
+          - '480p'
+          - '720p'
+          - '1080p'
+          - 'best'
+      folder:
+        description: '📁 پوشه موقت'
+        required: false
+        default: 'downloads'
+      mega_folder:
+        description: '📂 پوشه در Mega.nz'
+        required: false
+        default: 'YoutubeDownloads'
+      split_choice:
+        description: 'تقسیم فایل به چند قسمت (ZIP volume)؟'
+        required: true
+        default: 'single'
+        type: choice
+        options:
+          - single
+          - split
+      split_size:
+        description: 'اندازه هر قسمت (مثال: 100M, 500M, 1G)'
+        required: false
+        default: '100M'
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Decrypt cookies (if exists)
+        run: |
+          if [ -f cookies.txt.gpg ]; then
+            gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
+          else
+            echo "⚠️ فایل cookies.txt.gpg یافت نشد"
+            touch cookies.txt
+          fi
+
+      - name: ⚙️ Setup yt-dlp + ffmpeg
+        uses: AnimMouse/setup-yt-dlp@v3
+        with:
+          aria2: true
+          ffmpeg: true
+
+      - name: 💾 Cache rclone binary
+        id: cache-rclone
+        uses: actions/cache@v4
+        with:
+          path: /usr/bin/rclone
+          key: ${{ runner.os }}-rclone-v1.74.0
+
+      - name: 📦 Install latest rclone (if not cached)
+        if: steps.cache-rclone.outputs.cache-hit != 'true'
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          rclone version
+
+      - name: 🔓 Decrypt rclone config
+        run: |
+          mkdir -p ~/.config/rclone
+          if [ ! -f rclone_mega.conf.gpg ]; then
+            echo "❌ فایل rclone_mega.conf.gpg در ریشه مخزن پیدا نشد!"
+            exit 1
+          fi
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+          chmod 600 ~/.config/rclone/rclone.conf
+          echo "✅ rclone config loaded"
+          rclone --config ~/.config/rclone/rclone.conf listremotes
+
+      - name: ▶️ دانلود فایل
+        id: download
+        run: |
+          # حذف پوشه قبلی اگر وجود داشته باشد (اختیاری)
+          rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
+          mkdir -p "${{ github.event.inputs.folder }}"
+          cd "${{ github.event.inputs.folder }}"
+          
+          if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
+            if [ "${{ github.event.inputs.type }}" = "video" ]; then
+              QUALITY="${{ github.event.inputs.quality }}"
+              if [ "$QUALITY" = "best" ]; then
+                FORMAT="bestvideo+bestaudio/best"
+              else
+                HEIGHT="${QUALITY%p}"
+                FORMAT="bestvideo[height<=$HEIGHT]+bestaudio/best"
+              fi
+              yt-dlp -f "$FORMAT" --merge-output-format mp4 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+            else
+              yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+            fi
+          else
+            if [ "${{ github.event.inputs.type }}" = "video" ]; then
+              yt-dlp -f "bestvideo+bestaudio/best" --merge-output-format mp4 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+            else
+              yt-dlp -x --audio-format mp3 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+            fi
+          fi
+          
+          DOWNLOADED_FILE=$(ls | head -1)
+          echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
+
+      - name: ✂️ Split into zip volumes (if requested)
+        if: github.event.inputs.split_choice == 'split'
+        run: |
+          cd "${{ github.event.inputs.folder }}"
+          FILE="${{ env.DOWNLOADED_FILE }}"
+          SIZE="${{ github.event.inputs.split_size }}"
+          sudo apt-get install -y zip
+          echo "Creating zip volumes of $SIZE from $FILE"
+          zip -s "$SIZE" "${FILE}.zip" "$FILE"
+          rm "$FILE"
+          echo "✅ Zip volumes created:"
+          ls -la
+
+      - name: ☁️ آپلود به Mega.nz
+        run: |
+          CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
+          REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
+          rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
+          rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" --progress --transfers=4 --verbose
+          echo "✅ آپلود با موفقیت انجام شد"
