@@ -1,4 +1,5 @@
-name: 🎬🎵 costume Downloader + Mega.nz (Stable Ultra Fix)
+name: 🎬🎵 Custom Downloader + Mega.nz (Stable Ultra Fix)
+
 on:
   workflow_dispatch:
     inputs:
@@ -77,6 +78,7 @@ jobs:
             echo "❌ Cookies decryption failed or file empty"
             exit 1
           fi
+          echo "✅ Cookies decrypted successfully"
 
       # ==================== DECRYPT RCLONE CONFIG ====================
       - name: 🔓 Decrypt rclone config
@@ -89,19 +91,20 @@ jobs:
             echo "❌ Rclone config decryption failed"
             exit 1
           fi
+          echo "✅ Rclone config ready"
 
       # ==================== INSTALL DEPENDENCIES ====================
-      - name: ⚙️ Install ffmpeg, aria2, rclone, zip
+      - name: ⚙️ Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg aria2 zip unzip
+          sudo apt-get install -y ffmpeg aria2 zip unzip curl
 
       - name: 🐍 Install latest yt-dlp
         run: |
           python3 -m pip install --upgrade pip
           pip3 install --upgrade yt-dlp
 
-      - name: 📦 Install rclone (latest)
+      - name: 📦 Install rclone
         run: |
           curl https://rclone.org/install.sh | sudo bash
           rclone version
@@ -122,41 +125,41 @@ jobs:
           TYPE="${{ github.event.inputs.type }}"
           QUALITY="${{ github.event.inputs.quality }}"
           
-          # ---------------- User-Agent random pool ----------------
-          USER_AGENTS=(
+          # ---------- Random User-Agent ----------
+          UA_LIST=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0"
           )
-          RANDOM_UA=${USER_AGENTS[$RANDOM % ${#USER_AGENTS[@]}]}
+          RANDOM_UA=$(printf "%s\n" "${UA_LIST[@]}" | shuf -n1)
           
-          # ---------------- Headers (Real browser) ----------------
-          HEADERS="\
-            --add-header 'Accept-Language: en-US,en;q=0.9' \
-            --add-header 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8' \
-            --add-header 'Accept-Encoding: gzip, deflate, br' \
-            --add-header 'Sec-Ch-Ua: \"Google Chrome\";v=\"125\", \"Chromium\";v=\"125\", \"Not.A/Brand\";v=\"24\"' \
-            --add-header 'Sec-Ch-Ua-Mobile: ?0' \
-            --add-header 'Sec-Ch-Ua-Platform: \"Windows\"' \
-            --add-header 'Sec-Fetch-Site: none' \
-            --add-header 'Sec-Fetch-Mode: navigate' \
-            --add-header 'Sec-Fetch-User: ?1' \
-            --add-header 'Sec-Fetch-Dest: document' \
-            --add-header 'Referer: https://www.youtube.com/' \
-            --add-header 'Origin: https://www.youtube.com' \
-            --add-header 'DNT: 1' \
-            --add-header 'Upgrade-Insecure-Requests: 1' \
-          "
+          # ---------- Real browser headers (correct syntax for yt-dlp) ----------
+          HEADERS=(
+            --add-header "Accept-Language: en-US,en;q=0.9"
+            --add-header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            --add-header "Accept-Encoding: gzip, deflate, br"
+            --add-header "Sec-Ch-Ua: \"Google Chrome\";v=\"125\", \"Chromium\";v=\"125\", \"Not.A/Brand\";v=\"24\""
+            --add-header "Sec-Ch-Ua-Mobile: ?0"
+            --add-header "Sec-Ch-Ua-Platform: \"Windows\""
+            --add-header "Sec-Fetch-Site: none"
+            --add-header "Sec-Fetch-Mode: navigate"
+            --add-header "Sec-Fetch-User: ?1"
+            --add-header "Sec-Fetch-Dest: document"
+            --add-header "Referer: https://www.youtube.com/"
+            --add-header "Origin: https://www.youtube.com"
+            --add-header "DNT: 1"
+            --add-header "Upgrade-Insecure-Requests: 1"
+          )
           
-          # ---------------- Proxy (optional) ----------------
+          # ---------- Proxy (optional) ----------
           PROXY_OPT=""
-          if [ "${{ github.event.inputs.use_proxy }}" = "true" ] && [ -n "${{ secrets.PROXY_URL }}" ]; then
+          if [[ "${{ github.event.inputs.use_proxy }}" == "true" && -n "${{ secrets.PROXY_URL }}" ]]; then
             PROXY_OPT="--proxy ${{ secrets.PROXY_URL }}"
             echo "🛡️ Using proxy: ${{ secrets.PROXY_URL }}"
           fi
           
-          # ---------------- Format selection ----------------
+          # ---------- Format selection ----------
           if [ "$TYPE" = "video" ]; then
             case "$QUALITY" in
               "144p")  FORMAT="bestvideo[height<=144]+bestaudio/best[height<=144]" ;;
@@ -167,46 +170,56 @@ jobs:
               "1080p") FORMAT="bestvideo[height<=1080]+bestaudio/best[height<=1080]" ;;
               "best")  FORMAT="bestvideo+bestaudio/best" ;;
             esac
-            EXTRA="--merge-output-format mp4 --recode-video mp4"
+            EXTRA_ARGS="--merge-output-format mp4 --recode-video mp4"
           else
             FORMAT="bestaudio/best"
-            EXTRA="-x --audio-format mp3 --audio-quality 0"
+            EXTRA_ARGS="-x --audio-format mp3 --audio-quality 0"
           fi
           
-          # ---------------- Base yt-dlp options ----------------
-          BASE_OPTS="\
-            --cookies ../cookies.txt \
-            --user-agent \"$RANDOM_UA\" \
-            $HEADERS \
-            $PROXY_OPT \
-            --force-ipv4 \
-            --no-playlist \
-            --retries 15 \
-            --fragment-retries 15 \
-            --skip-unavailable-fragments \
-            --abort-on-error \
-            --sleep-interval 25 \
-            --max-sleep-interval 55 \
-            --sleep-requests 12 \
-            --limit-rate 1.2M \
-            --throttled-rate 50000 \
-            --extractor-args \"youtube:player_sleep_interval=35,youtube:skip=webpage,dash,hls,license_requests,translated_subs\" \
-            --no-check-certificates \
-            --geo-bypass \
-            --no-cache-dir \
-            --verbose \
-          "
+          # ---------- Base options (without extractor-args for client) ----------
+          BASE_OPTS=(
+            --cookies ../cookies.txt
+            --user-agent "$RANDOM_UA"
+            "${HEADERS[@]}"
+            $PROXY_OPT
+            --force-ipv4
+            --no-playlist
+            --retries 15
+            --fragment-retries 15
+            --skip-unavailable-fragments
+            --abort-on-error
+            --sleep-interval 25
+            --max-sleep-interval 55
+            --sleep-requests 12
+            --limit-rate 1.2M
+            --throttled-rate 50000
+            --extractor-args "youtube:player_sleep_interval=35,youtube:skip=webpage,dash,hls,license_requests,translated_subs"
+            --no-check-certificates
+            --geo-bypass
+            --no-cache-dir
+            --rm-cache-dir
+            --verbose
+          )
           
-          # ---------------- Function to try different clients ----------------
+          # ---------- Function to try a client ----------
           try_client() {
-            echo "🔄 Trying client: $1"
-            yt-dlp -f "$FORMAT" $EXTRA $BASE_OPTS \
-              --extractor-args "youtube:player_client=$1" \
-              "$URL" -o "%(title)s.%(ext)s" 2>&1 | tee log.txt
-            return ${PIPESTATUS[0]}
+            local client="$1"
+            local logfile="log_${client}.txt"
+            echo "🔄 Trying client: $client"
+            yt-dlp -f "$FORMAT" $EXTRA_ARGS "${BASE_OPTS[@]}" \
+              --extractor-args "youtube:player_client=$client" \
+              "$URL" -o "%(title)s.%(ext)s" > "$logfile" 2>&1
+            local exit_code=$?
+            if [ $exit_code -eq 0 ]; then
+              return 0
+            else
+              echo "⚠️ Client $client failed (exit $exit_code). Last 10 lines:"
+              tail -10 "$logfile"
+              return $exit_code
+            fi
           }
           
-          # ---------------- Client priority list ----------------
+          # ---------- Client priority list ----------
           CLIENTS=("android_embedded" "android" "web" "ios" "mweb")
           SUCCESS=false
           
@@ -215,18 +228,18 @@ jobs:
               SUCCESS=true
               break
             fi
-            echo "⚠️ Client $client failed, waiting 45 seconds before next attempt..."
+            echo "⏳ Waiting 45 seconds before next client..."
             sleep 45
           done
           
           if [ "$SUCCESS" = false ]; then
-            echo "❌ All clients failed. Last log:"
-            cat log.txt
+            echo "❌ All clients failed. Check logs."
             exit 1
           fi
           
-          # ---------------- Capture filename ----------------
-          FILE=$(ls -1 | grep -v "log.txt" | head -1)
+          # ---------- Capture downloaded filename ----------
+          # Exclude log files and potential .part files
+          FILE=$(ls -1 | grep -v '^log_' | grep -v '\.part$' | head -1)
           if [ -z "$FILE" ]; then
             echo "❌ No file downloaded"
             exit 1
@@ -254,29 +267,29 @@ jobs:
         if: github.event.inputs.split_choice == 'split'
         run: |
           cd "${{ github.event.inputs.folder }}"
-          zip -s "${{ github.event.inputs.split_size }}" -r split_archive.zip .
-          # Remove original files to only upload split parts
-          find . -type f ! -name "*.z*" ! -name "split_archive.zip" -delete
-          echo "Files split into volumes"
+          # Create a split zip archive (volumes)
+          zip -s "${{ github.event.inputs.split_size }}" -r archive.zip .
+          # Remove original files to keep only split parts
+          find . -type f ! -name "archive.z*" -delete
+          # Update DOWNLOADED_FILE to indicate split archive
+          echo "DOWNLOADED_FILE=archive.zip (split into volumes)" >> $GITHUB_ENV
+          echo "Files split into volumes:"
+          ls -la archive.z*
 
       # ==================== UPLOAD TO MEGA.NZ ====================
       - name: ☁️ Upload to Mega.nz
         run: |
+          echo "Uploading contents of ${{ github.event.inputs.folder }} to mega:${{ github.event.inputs.mega_folder }}"
           rclone copy "${{ github.event.inputs.folder }}" \
             "mega:${{ github.event.inputs.mega_folder }}" \
             --progress --transfers=4 --checkers=8 \
             --retries 5 --low-level-retries 10 \
             --verbose
           
-          # Create a direct link file (optional)
-          cd "${{ github.event.inputs.folder }}"
           if [ "${{ github.event.inputs.split_choice }}" = "split" ]; then
-            echo "Split archive uploaded to mega:${{ github.event.inputs.mega_folder }}"
+            echo "✅ Split archive uploaded to mega:${{ github.event.inputs.mega_folder }}"
           else
-            FILE="${{ env.DOWNLOADED_FILE }}"
-            if [ -n "$FILE" ]; then
-              echo "File uploaded: $FILE"
-            fi
+            echo "✅ File uploaded: ${{ env.DOWNLOADED_FILE }}"
           fi
 
       # ==================== NOTIFICATION (PushBullet) ====================
@@ -286,12 +299,13 @@ jobs:
           curl -u "${{ secrets.PB_TOKEN }}:" \
             -X POST https://api.pushbullet.com/v2/pushes \
             -H "Content-Type: application/json" \
-            -d "{\"type\":\"note\",\"title\":\"✅ دانلود کامل شد\",\"body\":\"${{ env.VIDEO_TITLE }}\nPlatform: ${{ github.event.inputs.platform }}\nFolder: mega:${{ github.event.inputs.mega_folder }}\"}" \
-            --fail --silent || echo "Push notification failed but download succeeded"
+            -d "{\"type\":\"note\",\"title\":\"✅ Download completed\",\"body\":\"${{ env.VIDEO_TITLE }}\nPlatform: ${{ github.event.inputs.platform }}\nMega folder: ${{ github.event.inputs.mega_folder }}\"}" \
+            --fail --silent || echo "Push notification failed (download succeeded anyway)"
 
-      # ==================== CLEANUP COOKIES ====================
+      # ==================== CLEANUP SENSITIVE FILES ====================
       - name: 🗑️ Cleanup sensitive files
         if: always()
         run: |
           rm -f cookies.txt
           rm -rf ~/.config/rclone
+          echo "Sensitive data removed"
