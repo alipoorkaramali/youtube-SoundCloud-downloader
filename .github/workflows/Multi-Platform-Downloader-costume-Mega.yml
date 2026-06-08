@@ -1,4 +1,4 @@
-name: 🎬🎵 costume Downloader + Mega.nz (Ultra Pro Anti-Bot)
+name: 🎬🎵 costume Downloader + Mega.nz (Stable Ultra Fix)
 
 on:
   workflow_dispatch:
@@ -45,14 +45,32 @@ jobs:
             --decrypt cookies.txt.gpg > cookies.txt
 
       # ================= INSTALL =================
-      - name: ⚙️ Install tools
+      - name: ⚙️ Install yt-dlp + ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
         with:
           ffmpeg: true
           aria2: true
 
-      # ================= YOUTUBE =================
-      - name: ▶️ YouTube Ultra Anti-Bot
+      # ✅ FIX اصلی (همونی که ارور تو بود)
+      - name: 📦 Install rclone
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          rclone version
+
+      # ================= RCLONE CONFIG =================
+      - name: 🔓 Load rclone config
+        run: |
+          mkdir -p ~/.config/rclone
+          gpg --batch --yes \
+            --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+            rclone_mega.conf.gpg > ~/.config/rclone/rclone.conf
+
+      # ================= CLEAN =================
+      - name: 🧹 Clean
+        run: rm -rf "${{ github.event.inputs.folder }}" || true
+
+      # ================= YOUTUBE PRO =================
+      - name: ▶️ YouTube Smart Downloader
         if: github.event.inputs.platform == 'youtube'
         run: |
           mkdir -p "${{ github.event.inputs.folder }}"
@@ -64,11 +82,10 @@ jobs:
             --cookies ../cookies.txt \
             --force-ipv4 \
             --no-playlist \
-            --retries 10 \
-            --fragment-retries 10 \
-            --retry-sleep 5 \
-            --sleep-interval 10 \
-            --max-sleep-interval 30 \
+            --retries 8 \
+            --fragment-retries 8 \
+            --sleep-interval 8 \
+            --max-sleep-interval 25 \
             --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.6367.91 Safari/537.36' \
           "
 
@@ -80,43 +97,13 @@ jobs:
             EXTRA="-x --audio-format mp3"
           fi
 
-          attempt () {
-            CLIENT=$1
-            SKIP=$2
-
-            yt-dlp -f "$FORMAT" \
-              $EXTRA \
-              $BASE \
-              --extractor-args "youtube:player_client=$CLIENT" \
-              --extractor-args "youtube:skip=$SKIP" \
-              "$URL" \
-              -o "%(title)s.%(ext)s" 2>&1 | tee log.txt
-
-            if grep -q "Sign in to confirm you're not a bot" log.txt; then
-              return 1
-            fi
-
-            return 0
+          try () {
+            yt-dlp -f "$FORMAT" $EXTRA $BASE \
+              --extractor-args "youtube:player_client=$1" \
+              "$URL" -o "%(title)s.%(ext)s"
           }
 
-          SUCCESS=0
-          DELAY=5
-
-          for CLIENT in android web ios mweb; do
-            for SKIP in webpage ""; do
-              echo "🚀 Trying $CLIENT / skip=$SKIP"
-              attempt $CLIENT $SKIP && SUCCESS=1 && break
-              echo "⏳ Retry after $DELAY sec..."
-              sleep $DELAY
-              DELAY=$((DELAY+5))
-            done
-            [ $SUCCESS -eq 1 ] && break
-          done
-
-          if [ $SUCCESS -eq 0 ]; then
-            echo "❌ All attempts failed"
-            exit 1
-          fi
+          try android || try web || try ios || try mweb || exit 1
 
           FILE=$(ls | head -1)
           echo "DOWNLOADED_FILE=$FILE" >> $GITHUB_ENV
@@ -143,13 +130,9 @@ jobs:
       # ================= MEGA =================
       - name: ☁️ Upload Mega
         run: |
-          mkdir -p ~/.config/rclone
-          gpg --batch --yes \
-            --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
-            rclone_mega.conf.gpg > ~/.config/rclone/rclone.conf
-
           rclone copy "${{ github.event.inputs.folder }}" \
-            "mega:${{ github.event.inputs.mega_folder }}"
+            "mega:${{ github.event.inputs.mega_folder }}" \
+            --progress --transfers=4
 
       # ================= NOTIFY =================
       - name: 📱 Notify
