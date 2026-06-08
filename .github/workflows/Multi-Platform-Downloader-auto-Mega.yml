@@ -80,7 +80,7 @@ jobs:
             exit 1
           fi
 
-      - name: ⚙️ نصب yt‑dlp و ffmpeg
+      - name: ⚙️ نصب yt-dlp و ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
         with:
           ejs-node: true
@@ -101,41 +101,49 @@ jobs:
           mkdir -p ~/.local/bin
           cp /usr/bin/rclone ~/.local/bin/
 
-      - name: 🔗 Copy rclone to system PATH (from cache or install)
+      - name: 🔗 Copy rclone to system PATH
         run: |
           if [ ! -f /usr/bin/rclone ]; then
-            if [ -f ~/.local/bin/rclone ]; then
-              sudo cp ~/.local/bin/rclone /usr/bin/rclone
-              sudo chmod +x /usr/bin/rclone
-            else
-              echo "❌ rclone binary not found"
-              exit 1
-            fi
+            sudo cp ~/.local/bin/rclone /usr/bin/rclone
+            sudo chmod +x /usr/bin/rclone
           fi
           rclone version
 
       - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
-          if [ ! -f rclone_mega.conf.gpg ]; then
-            echo "❌ فایل rclone_mega.conf.gpg در ریشه مخزن پیدا نشد!"
-            exit 1
-          fi
-          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+          gpg --quiet --batch --yes \
+            --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+            --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
-          echo "✅ rclone config loaded"
           rclone --config ~/.config/rclone/rclone.conf listremotes
 
-      - name: 🧹 پاکسازی پوشه قبلی (اختیاری)
+      - name: 🧹 پاکسازی پوشه قبلی
         run: rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
 
-      # ============= دانلود از یوتیوب =============
-      - name: ▶️ یوتیوب | دانلود
+      # ================= YOUTUBE (PRO VERSION) =================
+      - name: ▶️ یوتیوب | دانلود (Ultra Smart Anti-Bot)
         if: github.event.inputs.platform == 'youtube'
-        id: download_youtube
         run: |
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
+
+          URL="${{ github.event.inputs.url }}"
+
+          BASE_ARGS="\
+            --cookies ../cookies.txt \
+            --force-ipv4 \
+            --no-playlist \
+            --force-overwrites \
+            --retries 5 \
+            --fragment-retries 5 \
+            --retry-sleep 5 \
+            --sleep-interval 8 \
+            --max-sleep-interval 25 \
+            --sleep-requests 2 \
+            --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.6367.91 Safari/537.36' \
+          "
+
           if [ "${{ github.event.inputs.type }}" = "video" ]; then
             QUALITY="${{ github.event.inputs.quality }}"
             if [ "$QUALITY" = "best" ]; then
@@ -144,110 +152,89 @@ jobs:
               HEIGHT="${QUALITY%p}"
               FORMAT="bestvideo[height<=$HEIGHT]+bestaudio/best"
             fi
-            yt-dlp -f "$FORMAT" \
-              --merge-output-format mp4 \
-              --cookies ../cookies.txt \
-              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
-              --sleep-interval 5 \
-              --max-sleep-interval 15 \
-              --sleep-requests 2 \
-              --force-overwrites \
-              --no-playlist \
-              "${{ github.event.inputs.url }}" \
-              -o "%(title)s.%(ext)s"
+            EXTRA="--merge-output-format mp4"
           else
-            yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" \
-              --audio-format mp3 \
-              --audio-quality 0 \
-              --cookies ../cookies.txt \
-              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
-              --sleep-interval 5 \
-              --max-sleep-interval 15 \
-              --sleep-requests 2 \
-              --force-overwrites \
-              --no-playlist \
-              "${{ github.event.inputs.url }}" \
-              -o "%(title)s.%(ext)s"
+            FORMAT="bestaudio[ext=m4a]/bestaudio/best"
+            EXTRA="-x --audio-format mp3 --audio-quality 0"
           fi
-          DOWNLOADED_FILE=$(ls | head -1)
-          echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
-          VIDEO_TITLE=$(basename "$DOWNLOADED_FILE" | sed 's/\.[^.]*$//')
-          echo "VIDEO_TITLE=$VIDEO_TITLE" >> $GITHUB_ENV
 
-      # ============= دانلود از ساندکلاد =============
+          try_dl () {
+            CLIENT=$1
+            SKIP=$2
+            echo "🚀 client=$CLIENT skip=$SKIP"
+            yt-dlp -f "$FORMAT" \
+              $EXTRA \
+              $BASE_ARGS \
+              --extractor-args "youtube:player_client=$CLIENT" \
+              --extractor-args "youtube:skip=$SKIP" \
+              "$URL" \
+              -o "%(title)s.%(ext)s"
+          }
+
+          SUCCESS=0
+
+          try_dl android webpage && SUCCESS=1
+          [ $SUCCESS -eq 0 ] && try_dl android "" && SUCCESS=1
+          [ $SUCCESS -eq 0 ] && try_dl web webpage && SUCCESS=1
+          [ $SUCCESS -eq 0 ] && try_dl web "" && SUCCESS=1
+          [ $SUCCESS -eq 0 ] && try_dl ios "" && SUCCESS=1
+
+          if [ $SUCCESS -eq 0 ]; then
+            echo "❌ دانلود شکست خورد"
+            exit 1
+          fi
+
+          FILE=$(ls | head -1)
+          echo "DOWNLOADED_FILE=$FILE" >> $GITHUB_ENV
+          TITLE=$(basename "$FILE" | sed 's/\.[^.]*$//')
+          echo "VIDEO_TITLE=$TITLE" >> $GITHUB_ENV
+
+      # ================= SOUNDCLOUD =================
       - name: ☁️ ساندکلاد | دانلود
         if: github.event.inputs.platform == 'soundcloud'
-        id: download_sc
         run: |
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
-          if [ "${{ github.event.inputs.type }}" = "video" ]; then
-            yt-dlp -f bestvideo+bestaudio/best \
-              --merge-output-format mp4 \
-              --no-playlist \
-              --force-ipv4 \
-              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
-              --sleep-interval 5 \
-              --max-sleep-interval 15 \
-              --sleep-requests 2 \
-              "${{ github.event.inputs.url }}" \
-              -o "%(title)s.%(ext)s"
-          else
-            yt-dlp -x --audio-format mp3 --audio-quality 0 \
-              --no-playlist \
-              --force-ipv4 \
-              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
-              --sleep-interval 5 \
-              --max-sleep-interval 15 \
-              --sleep-requests 2 \
-              "${{ github.event.inputs.url }}" \
-              -o "%(title)s.%(ext)s"
-          fi
-          DOWNLOADED_FILE=$(ls | head -1)
-          echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
-          VIDEO_TITLE=$(basename "$DOWNLOADED_FILE" | sed 's/\.[^.]*$//')
-          echo "VIDEO_TITLE=$VIDEO_TITLE" >> $GITHUB_ENV
 
-      # ============= تقسیم فایل به زیپ ولوم (در صورت درخواست) =============
-      - name: ✂️ تقسیم فایل به ZIP volumes (در صورت نیاز)
+          yt-dlp -x --audio-format mp3 --audio-quality 0 \
+            --no-playlist \
+            --force-ipv4 \
+            --sleep-interval 5 \
+            --max-sleep-interval 15 \
+            "${{ github.event.inputs.url }}" \
+            -o "%(title)s.%(ext)s"
+
+          FILE=$(ls | head -1)
+          echo "DOWNLOADED_FILE=$FILE" >> $GITHUB_ENV
+          TITLE=$(basename "$FILE" | sed 's/\.[^.]*$//')
+          echo "VIDEO_TITLE=$TITLE" >> $GITHUB_ENV
+
+      # ================= SPLIT =================
+      - name: ✂️ تقسیم فایل
         if: github.event.inputs.split_choice == 'split'
         run: |
           cd "${{ github.event.inputs.folder }}"
           FILE="${{ env.DOWNLOADED_FILE }}"
           SIZE="${{ github.event.inputs.split_size }}"
           sudo apt-get install -y zip
-          echo "در حال تقسیم $FILE به قطعات $SIZE"
           zip -s "$SIZE" "${FILE}.zip" "$FILE"
           rm "$FILE"
-          echo "✅ قطعات ZIP ساخته شدند:"
-          ls -la
 
-      # ============= آپلود به مگا =============
+      # ================= MEGA =================
       - name: ☁️ آپلود به Mega.nz
         run: |
-          CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
-          REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
-          rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
-          rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
-            --progress --transfers=4 --verbose
-          echo "✅ آپلود با موفقیت انجام شد"
+          CONFIG="$HOME/.config/rclone/rclone.conf"
+          DEST="mega:${{ github.event.inputs.mega_folder }}"
+          rclone --config "$CONFIG" mkdir "$DEST" || true
+          rclone --config "$CONFIG" copy "${{ github.event.inputs.folder }}" "$DEST" \
+            --progress --transfers=4
 
-      # ============= ارسال اعلان به گوشی (Pushbullet) با عنوان ویدیو =============
-      - name: 📱 Send Pushbullet notification on success
+      # ================= NOTIFICATION =================
+      - name: 📱 اعلان
         if: success()
         run: |
-          if [ -z "${{ secrets.PB_TOKEN }}" ]; then
-            echo "⚠️ سکرت PB_TOKEN تنظیم نشده است. اعلان ارسال نمی‌شود."
-            exit 0
-          fi
-          MESSAGE=$(cat <<EOF
-          🎉 دانلود و آپلود خودکار با موفقیت انجام شد!
-          📁 پلتفرم: ${{ github.event.inputs.platform }}
-          🎬 عنوان: ${{ env.VIDEO_TITLE }}
-          📂 پوشه مقصد در مگا: ${{ github.event.inputs.mega_folder }}
-          ✂️ تقسیم: ${{ github.event.inputs.split_choice }} ${{ github.event.inputs.split_choice == 'split' && format('(اندازه {0})', github.event.inputs.split_size) || '' }}
-          EOF
-          )
-          curl -u "${{ secrets.PB_TOKEN }}": -X POST https://api.pushbullet.com/v2/pushes \
+          if [ -z "${{ secrets.PB_TOKEN }}" ]; then exit 0; fi
+          curl -u "${{ secrets.PB_TOKEN }}": \
+            -X POST https://api.pushbullet.com/v2/pushes \
             -H "Content-Type: application/json" \
-            -d "{\"type\": \"note\", \"title\": \"✅ دانلود خودکار به مگا اضافه شد\", \"body\": $(echo "$MESSAGE" | jq -Rs .)}"
+            -d "{\"type\":\"note\",\"title\":\"✅ دانلود انجام شد\",\"body\":\"${{ env.VIDEO_TITLE }}\"}"
