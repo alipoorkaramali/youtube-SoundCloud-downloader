@@ -71,11 +71,13 @@ jobs:
           COOKIE_NUM=$((RANDOM % 4 + 1))
           echo "🎲 Using Cookie #${COOKIE_NUM}"
           
-          cp "cookies${COOKIE_NUM}.txt.gpg" cookies_temp.gpg 2>/dev/null || {
+          # فرض می‌کنیم فایل‌های cookies1.txt.gpg تا cookies4.txt.gpg در ریشه ریپازیتوری هستند
+          if [ ! -f "cookies${COOKIE_NUM}.txt.gpg" ]; then
             echo "❌ فایل cookies${COOKIE_NUM}.txt.gpg پیدا نشد!"
             exit 1
-          }
+          fi
           
+          cp "cookies${COOKIE_NUM}.txt.gpg" cookies_temp.gpg
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
               --decrypt cookies_temp.gpg > cookies.txt || {
             echo "❌ GPG Decrypt Failed!"
@@ -121,14 +123,14 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
 
-            - name: ▶️ دانلود فایل
+      - name: ▶️ دانلود فایل
         id: download
         run: |
           rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
           
-          # گزینه‌های مشترک (بدون نقل قول اضافی)
+          # گزینه‌های مشترک - بدون نقل قول اضافی برای extractor-args
           COMMON_OPTS="--cookies ../cookies.txt \
             --extractor-retries 5 \
             --retries 20 \
@@ -140,14 +142,47 @@ jobs:
             --ignore-errors"
 
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
-          
+            if [ "${{ github.event.inputs.type }}" = "video" ]; then
+              QUALITY="${{ github.event.inputs.quality }}"
+              if [ "$QUALITY" = "best" ]; then
+                FORMAT="bestvideo+bestaudio/best"
+              else
+                HEIGHT="${QUALITY%p}"
+                FORMAT="bestvideo[height<=$HEIGHT]+bestaudio/best"
+              fi
+              yt-dlp $COMMON_OPTS -f "$FORMAT" --merge-output-format mp4 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+            else
+              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+            fi
+          else
+            # soundcloud
+            if [ "${{ github.event.inputs.type }}" = "video" ]; then
+              yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+            else
+              yt-dlp $COMMON_OPTS -x --audio-format mp3 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+            fi
+          fi
+         
+          # پیدا کردن فایل دانلود شده (اولین فایل در پوشه)
+          DOWNLOADED_FILE=$(ls -1 | head -1)
+          if [ -z "$DOWNLOADED_FILE" ]; then
+            echo "❌ هیچ فایلی دانلود نشد!"
+            exit 1
+          fi
+          echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
+          echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
+
       - name: ✂️ Split into zip volumes (if requested)
         if: github.event.inputs.split_choice == 'split'
         run: |
           cd "${{ github.event.inputs.folder }}"
           FILE="${{ env.DOWNLOADED_FILE }}"
           SIZE="${{ github.event.inputs.split_size }}"
-          sudo apt-get install -y zip
+          sudo apt-get update && sudo apt-get install -y zip
           echo "Creating zip volumes of $SIZE from $FILE"
           zip -s "$SIZE" "${FILE}.zip" "$FILE"
           rm "$FILE"
@@ -158,6 +193,9 @@ jobs:
         run: |
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
           REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
+          echo "📂 ایجاد پوشه در صورت نبود..."
           rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
-          rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" --progress --transfers=4 --verbose
+          echo "☁️ شروع آپلود..."
+          rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
+            --progress --transfers=4 --verbose
           echo "✅ آپلود با موفقیت انجام شد"
