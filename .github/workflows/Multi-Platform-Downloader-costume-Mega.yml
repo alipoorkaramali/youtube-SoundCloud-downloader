@@ -100,7 +100,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bin/rclone
-          key: ${{ runner.os }}-rclone-v1.74.1   # تغییر نسخه برای بی‌اثر کردن کش خراب
+          key: ${{ runner.os }}-rclone-v1.74.1
 
       - name: 📦 Install latest rclone (if not cached)
         if: steps.cache-rclone.outputs.cache-hit != 'true'
@@ -153,15 +153,18 @@ jobs:
               yt-dlp $COMMON_OPTS -f "$FORMAT" --merge-output-format mp4 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 \
+              # حالت صوتی یوتیوب - اصلاح شده با -x
+              yt-dlp $COMMON_OPTS -f bestaudio -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           else
+            # soundcloud
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
               yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp $COMMON_OPTS -x --audio-format mp3 \
+              # حالت صوتی ساوندکلاود - اصلاح شده (اختیاری)
+              yt-dlp $COMMON_OPTS -f bestaudio -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           fi
@@ -169,6 +172,8 @@ jobs:
           DOWNLOADED_FILE=$(ls -1 | head -1)
           if [ -z "$DOWNLOADED_FILE" ]; then
             echo "❌ هیچ فایلی دانلود نشد!"
+            echo "📁 محتویات پوشه:"
+            ls -la
             exit 1
           fi
           echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
