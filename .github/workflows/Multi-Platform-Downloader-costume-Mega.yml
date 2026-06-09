@@ -67,23 +67,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 🔐 Decrypt Random Cookie
-        id: decrypt_cookie
         run: |
           mkdir -p cookies_temp
           COOKIE_NUM=$((RANDOM % 4 + 1))
           echo "🎲 Using Cookie #${COOKIE_NUM}"
           
           if [ $COOKIE_NUM -eq 1 ]; then
-            SECRET_NAME="COOKIE1_GPG"
+            echo "${{ secrets.COOKIE1_GPG }}" | base64 -d > cookies_temp/cookies.gpg
           elif [ $COOKIE_NUM -eq 2 ]; then
-            SECRET_NAME="COOKIE2_GPG"
+            echo "${{ secrets.COOKIE2_GPG }}" | base64 -d > cookies_temp/cookies.gpg
           elif [ $COOKIE_NUM -eq 3 ]; then
-            SECRET_NAME="COOKIE3_GPG"
+            echo "${{ secrets.COOKIE3_GPG }}" | base64 -d > cookies_temp/cookies.gpg
           else
-            SECRET_NAME="COOKIE4_GPG"
+            echo "${{ secrets.COOKIE4_GPG }}" | base64 -d > cookies_temp/cookies.gpg
           fi
           
-          echo "${{ secrets[$SECRET_NAME] }}" | base64 -d > cookies_temp/cookies.gpg
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies_temp/cookies.gpg > cookies.txt
           rm -rf cookies_temp
 
