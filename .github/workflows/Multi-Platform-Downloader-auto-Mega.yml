@@ -22,6 +22,18 @@ on:
         description: '📂 پوشه در Mega.nz'
         required: false
         default: 'YoutubeNews'
+      split_choice:
+        description: 'تقسیم فایل به چند قسمت (ZIP volume)؟'
+        required: true
+        default: 'single'
+        type: choice
+        options:
+          - single
+          - split
+      split_size:
+        description: 'اندازه هر قسمت (مثال: 100M, 500M, 1G)'
+        required: false
+        default: '100M'
 
 jobs:
   download:
@@ -92,6 +104,17 @@ jobs:
           echo "FILE_TITLE=$(basename "$DOWNLOADED_FILE" | sed 's/\.[^.]*$//')" >> $GITHUB_ENV
           echo "✅ دانلود انجام شد - فایل: $DOWNLOADED_FILE"
 
+      - name: ✂️ Split into zip volumes (if requested)
+        if: github.event.inputs.split_choice == 'split'
+        run: |
+          cd "${{ github.event.inputs.folder }}"
+          FILE="${{ env.DOWNLOADED_FILE }}"
+          SIZE="${{ github.event.inputs.split_size }}"
+          sudo apt-get update && sudo apt-get install -y zip
+          zip -s "$SIZE" "${FILE}.zip" "$FILE"
+          rm "$FILE"
+          echo "✅ Zip volumes created"
+
       - name: ☁️ آپلود به Mega.nz
         run: |
           rclone copy "${{ github.event.inputs.folder }}" "mega:${{ github.event.inputs.mega_folder }}" \
@@ -105,10 +128,15 @@ jobs:
             echo "⚠️ سکرت PB_TOKEN تنظیم نشده، نوتیفیکیشن ارسال نشد"
             exit 0
           fi
-          TITLE="✅ دانلود و آپلود موفق"
-          BODY="فایل: ${{ env.FILE_TITLE }}\nپلتفرم: ${{ github.event.inputs.platform }}\nلینک: ${{ github.event.inputs.url }}"
+          
+          MESSAGE="✅ دانلود خودکار به مگا اضافه شد: 🎉 دانلود و آپلود خودکار با موفقیت انجام شد!"
+          MESSAGE="${MESSAGE}\n📁 پلتفرم: ${{ github.event.inputs.platform }}"
+          MESSAGE="${MESSAGE}\n🎬 عنوان: ${{ env.FILE_TITLE }}"
+          MESSAGE="${MESSAGE}\n📂 پوشه مقصد در مگا: ${{ github.event.inputs.mega_folder }}"
+          MESSAGE="${MESSAGE}\n✂️ تقسیم: ${{ github.event.inputs.split_choice }}"
+          
           curl -u "${{ secrets.PB_TOKEN }}": \
             -X POST https://api.pushbullet.com/v2/pushes \
             -H "Content-Type: application/json" \
-            -d "{\"type\":\"note\",\"title\":\"$TITLE\",\"body\":\"$BODY\"}"
+            -d "{\"type\":\"note\",\"title\":\"✅ دانلود خودکار به مگا اضافه شد\",\"body\":\"$MESSAGE\"}"
           echo "✅ نوتیفیکیشن ارسال شد"
