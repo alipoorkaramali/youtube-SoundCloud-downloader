@@ -68,22 +68,19 @@ jobs:
 
       - name: 🔐 Decrypt Random Cookie
         run: |
-          mkdir -p cookies_temp
           COOKIE_NUM=$((RANDOM % 4 + 1))
           echo "🎲 Using Cookie #${COOKIE_NUM}"
           
-          if [ $COOKIE_NUM -eq 1 ]; then
-            echo "${{ secrets.COOKIE1_GPG }}" | base64 -d > cookies_temp/cookies.gpg
-          elif [ $COOKIE_NUM -eq 2 ]; then
-            echo "${{ secrets.COOKIE2_GPG }}" | base64 -d > cookies_temp/cookies.gpg
-          elif [ $COOKIE_NUM -eq 3 ]; then
-            echo "${{ secrets.COOKIE3_GPG }}" | base64 -d > cookies_temp/cookies.gpg
-          else
-            echo "${{ secrets.COOKIE4_GPG }}" | base64 -d > cookies_temp/cookies.gpg
-          fi
+          cp "cookies${COOKIE_NUM}.txt.gpg" cookies_temp.gpg
           
-          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies_temp/cookies.gpg > cookies.txt
-          rm -rf cookies_temp
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
+              --decrypt cookies_temp.gpg > cookies.txt || {
+            echo "❌ GPG Decrypt Failed!"
+            exit 1
+          }
+          
+          rm -f cookies_temp.gpg
+          echo "✅ Cookie #${COOKIE_NUM} decrypted successfully"
 
       - name: ⚙️ Setup yt-dlp + ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
