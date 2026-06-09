@@ -71,7 +71,10 @@ jobs:
           COOKIE_NUM=$((RANDOM % 4 + 1))
           echo "🎲 Using Cookie #${COOKIE_NUM}"
           
-          cp "cookies${COOKIE_NUM}.txt.gpg" cookies_temp.gpg
+          cp "cookies${COOKIE_NUM}.txt.gpg" cookies_temp.gpg 2>/dev/null || {
+            echo "❌ فایل cookies${COOKIE_NUM}.txt.gpg پیدا نشد!"
+            exit 1
+          }
           
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
               --decrypt cookies_temp.gpg > cookies.txt || {
@@ -113,7 +116,8 @@ jobs:
             echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
             exit 1
           fi
-          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+              --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
 
@@ -124,7 +128,16 @@ jobs:
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
           
-          COMMON_OPTS="--cookies ../cookies.txt --extractor-retries 5 --retries 20 --fragment-retries 20 --sleep-interval 4 --sleep-subtitles 2 --no-warnings --extractor-args 'youtube:player_client=web,android,ios,web_safari'"
+          # گزینه‌های مشترک
+          COMMON_OPTS="--cookies ../cookies.txt \
+            --extractor-retries 5 \
+            --retries 20 \
+            --fragment-retries 20 \
+            --sleep-interval 4 \
+            --sleep-subtitles 2 \
+            --no-warnings \
+            --extractor-args 'youtube:player_client=web,android,ios,web_safari' \
+            --ignore-errors"
 
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
@@ -135,20 +148,25 @@ jobs:
                 HEIGHT="${QUALITY%p}"
                 FORMAT="bestvideo[height<=$HEIGHT]+bestaudio/best"
               fi
-              yt-dlp $COMMON_OPTS -f "$FORMAT" --merge-output-format mp4 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              yt-dlp $COMMON_OPTS -f "$FORMAT" --merge-output-format mp4 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           else
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp $COMMON_OPTS -x --audio-format mp3 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              yt-dlp $COMMON_OPTS -x --audio-format mp3 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           fi
          
           DOWNLOADED_FILE=$(ls | head -1)
           echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
+          echo "✅ دانلود با موفقیت انجام شد"
 
       - name: ✂️ Split into zip volumes (if requested)
         if: github.event.inputs.split_choice == 'split'
