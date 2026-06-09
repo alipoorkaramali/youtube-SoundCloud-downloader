@@ -68,23 +68,26 @@ jobs:
 
       - name: 🔐 Decrypt Random Cookie
         run: |
-          COOKIE_NUM=$((RANDOM % 4 + 1))
-          echo "🎲 Using Cookie #${COOKIE_NUM}"
-          
-          if [ ! -f "cookies${COOKIE_NUM}.txt.gpg" ]; then
-            echo "❌ فایل cookies${COOKIE_NUM}.txt.gpg پیدا نشد!"
+          # پیدا کردن همه فایل‌های کوکی رمزگذاری شده
+          COOKIE_FILES=(cookies*.txt.gpg)
+          if [ ${#COOKIE_FILES[@]} -eq 0 ]; then
+            echo "❌ هیچ فایل cookies*.txt.gpg یافت نشد!"
             exit 1
           fi
           
-          cp "cookies${COOKIE_NUM}.txt.gpg" cookies_temp.gpg
+          # انتخاب تصادفی یک فایل
+          RANDOM_INDEX=$((RANDOM % ${#COOKIE_FILES[@]}))
+          SELECTED_FILE="${COOKIE_FILES[$RANDOM_INDEX]}"
+          echo "🎲 فایل انتخاب شده: $SELECTED_FILE"
+          
+          # Decrypt فایل انتخاب شده
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
-              --decrypt cookies_temp.gpg > cookies.txt || {
+              --decrypt "$SELECTED_FILE" > cookies.txt || {
             echo "❌ GPG Decrypt Failed!"
             exit 1
           }
           
-          rm -f cookies_temp.gpg
-          echo "✅ Cookie #${COOKIE_NUM} decrypted successfully"
+          echo "✅ کوکی با موفقیت decrypt شد"
 
       - name: ⚙️ Setup yt-dlp + ffmpeg (غیرفعال کردن aria2 و استفاده از نسخه nightly)
         uses: AnimMouse/setup-yt-dlp@v3
