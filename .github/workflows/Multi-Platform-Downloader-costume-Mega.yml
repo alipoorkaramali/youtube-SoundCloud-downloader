@@ -86,7 +86,7 @@ jobs:
           rm -f cookies_temp.gpg
           echo "✅ Cookie #${COOKIE_NUM} decrypted successfully"
 
-      - name: ⚙️ Setup yt-dlp + ffmpeg (با غیرفعال کردن aria2 و استفاده از نسخه nightly)
+      - name: ⚙️ Setup yt-dlp + ffmpeg (غیرفعال کردن aria2 و استفاده از نسخه nightly)
         uses: AnimMouse/setup-yt-dlp@v3
         with:
           aria2: false
@@ -102,14 +102,17 @@ jobs:
         id: cache-rclone
         uses: actions/cache@v4
         with:
-          path: /usr/bin/rclone
+          path: ~/bin/rclone
           key: ${{ runner.os }}-rclone-v1.74.0
 
       - name: 📦 Install latest rclone (if not cached)
         if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
-          curl https://rclone.org/install.sh | sudo bash
-          rclone version
+          mkdir -p ~/bin
+          curl https://rclone.org/install.sh | sudo bash -s -- --disable-check
+          cp /usr/bin/rclone ~/bin/rclone
+          chmod +x ~/bin/rclone
+          ~/bin/rclone version
 
       - name: 🔓 Decrypt rclone config
         run: |
@@ -195,8 +198,8 @@ jobs:
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
           REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
           echo "📂 ایجاد پوشه در صورت نبود..."
-          rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
+          ~/bin/rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
           echo "☁️ شروع آپلود..."
-          rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
+          ~/bin/rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
             --progress --transfers=4 --verbose
           echo "✅ آپلود با موفقیت انجام شد"
