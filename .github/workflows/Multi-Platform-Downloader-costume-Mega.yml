@@ -106,7 +106,7 @@ jobs:
         if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/bin
-          curl -o ~/bin/rclone https://downloads.rclone.org/rclone-current-linux-amd64/rclone
+          curl -L -o ~/bin/rclone https://downloads.rclone.org/rclone-current-linux-amd64/rclone
           chmod +x ~/bin/rclone
           ~/bin/rclone version
 
@@ -121,8 +121,6 @@ jobs:
               --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
-          echo "📄 نمایش 3 خط اول کانفیگ (برای بررسی):"
-          head -n 3 ~/.config/rclone/rclone.conf
 
       - name: ▶️ دانلود فایل
         id: download
@@ -200,20 +198,15 @@ jobs:
           ls -la ~/bin/rclone
           ~/bin/rclone version || { echo "⚠️ rclone قابل اجرا نیست"; exit 1; }
           
-          echo "🟢 بررسی کانفیگ:"
-          ls -la "$CONFIG_FILE"
-          echo "محتوای کانفیگ (۳ خط اول):"
-          head -n 3 "$CONFIG_FILE"
-          
           echo "🔄 تست اتصال به Mega:"
           ~/bin/rclone --config "$CONFIG_FILE" lsd mega: || { echo "❌ اتصال به مگا برقرار نیست"; exit 1; }
           
           echo "📂 ایجاد پوشه در مگا: $REMOTE_PATH"
           ~/bin/rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>&1
           
-          echo "☁️ شروع آپلود با دیباگ کامل..."
+          echo "☁️ شروع آپلود..."
           ~/bin/rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
-            --progress --transfers=1 --log-level=DEBUG --verbose
+            --progress --transfers=4 -vv
           
           echo "🔍 لیست نهایی فایل‌ها در مگا:"
           ~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH"
