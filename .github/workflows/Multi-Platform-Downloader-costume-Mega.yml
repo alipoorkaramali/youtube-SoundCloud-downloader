@@ -71,7 +71,6 @@ jobs:
           COOKIE_NUM=$((RANDOM % 4 + 1))
           echo "🎲 Using Cookie #${COOKIE_NUM}"
           
-          # فرض می‌کنیم فایل‌های cookies1.txt.gpg تا cookies4.txt.gpg در ریشه ریپازیتوری هستند
           if [ ! -f "cookies${COOKIE_NUM}.txt.gpg" ]; then
             echo "❌ فایل cookies${COOKIE_NUM}.txt.gpg پیدا نشد!"
             exit 1
@@ -87,11 +86,12 @@ jobs:
           rm -f cookies_temp.gpg
           echo "✅ Cookie #${COOKIE_NUM} decrypted successfully"
 
-      - name: ⚙️ Setup yt-dlp + ffmpeg
+      - name: ⚙️ Setup yt-dlp + ffmpeg (با غیرفعال کردن aria2 و استفاده از نسخه nightly)
         uses: AnimMouse/setup-yt-dlp@v3
         with:
-          aria2: true
+          aria2: false
           ffmpeg: true
+          yt_dlp_version: nightly
 
       - name: 📦 Install PO Token Plugin
         run: |
@@ -130,7 +130,7 @@ jobs:
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
           
-          # گزینه‌های مشترک - بدون نقل قول اضافی برای extractor-args
+          # گزینه‌های مشترک
           COMMON_OPTS="--cookies ../cookies.txt \
             --extractor-retries 5 \
             --retries 20 \
@@ -139,7 +139,8 @@ jobs:
             --sleep-subtitles 2 \
             --no-warnings \
             --extractor-args youtube:player_client=web,android,ios,web_safari \
-            --ignore-errors"
+            --ignore-errors \
+            --compat-options no-external-downloader-progress"
 
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
@@ -167,7 +168,7 @@ jobs:
             fi
           fi
          
-          # پیدا کردن فایل دانلود شده (اولین فایل در پوشه)
+          # پیدا کردن فایل دانلود شده
           DOWNLOADED_FILE=$(ls -1 | head -1)
           if [ -z "$DOWNLOADED_FILE" ]; then
             echo "❌ هیچ فایلی دانلود نشد!"
