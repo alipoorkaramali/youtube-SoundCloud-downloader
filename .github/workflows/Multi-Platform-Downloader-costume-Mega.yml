@@ -70,8 +70,6 @@ jobs:
         id: decrypt_cookie
         run: |
           mkdir -p cookies_temp
-          
-          # انتخاب تصادفی یکی از ۴ کوکی
           COOKIE_NUM=$((RANDOM % 4 + 1))
           echo "🎲 Using Cookie #${COOKIE_NUM}"
           
