@@ -146,14 +146,21 @@ jobs:
               QUALITY="${{ github.event.inputs.quality }}"
               if [ "$QUALITY" = "best" ]; then
                 FORMAT="bestvideo+bestaudio/best"
+                yt-dlp $COMMON_OPTS -f "$FORMAT" --merge-output-format mp4 \
+                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
               else
                 HEIGHT="${QUALITY%p}"
                 FORMAT="bestvideo[height<=$HEIGHT]+bestaudio/best"
+                echo "🔄 تلاش با کیفیت ${QUALITY}..."
+                yt-dlp $COMMON_OPTS -f "$FORMAT" --merge-output-format mp4 \
+                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || {
+                  echo "⚠️ کیفیت ${QUALITY} در دسترس نیست، استفاده از best..."
+                  yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                    "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+                }
               fi
-              yt-dlp $COMMON_OPTS -f "$FORMAT" --merge-output-format mp4 \
-                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              # حالت صوتی یوتیوب - اصلاح شده با -x
+              # حالت صوتی یوتیوب
               yt-dlp $COMMON_OPTS -f bestaudio -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
@@ -163,7 +170,6 @@ jobs:
               yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              # حالت صوتی ساوندکلاود - اصلاح شده (اختیاری)
               yt-dlp $COMMON_OPTS -f bestaudio -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
@@ -172,7 +178,6 @@ jobs:
           DOWNLOADED_FILE=$(ls -1 | head -1)
           if [ -z "$DOWNLOADED_FILE" ]; then
             echo "❌ هیچ فایلی دانلود نشد!"
-            echo "📁 محتویات پوشه:"
             ls -la
             exit 1
           fi
