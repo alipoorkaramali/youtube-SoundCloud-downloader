@@ -52,10 +52,9 @@ jobs:
           aria2: true
           ffmpeg: true
 
-      - name: 📦 Install rclone
+      - name: 📦 Install rclone (official with mega support)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y rclone
+          curl https://rclone.org/install.sh | sudo bash
           rclone version
 
       - name: 🔓 Decrypt rclone config
@@ -69,8 +68,7 @@ jobs:
               --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
-          # بررسی سریع (اختیاری)
-          rclone listremotes || echo "⚠️ هشدار: لیست ریموت‌ها نمایش داده نشد"
+          rclone listremotes
 
       - name: ▶️ دانلود فایل
         run: |
@@ -83,7 +81,6 @@ jobs:
               "${{ github.event.inputs.url }}" \
               -o "%(title)s.%(ext)s"
           else
-            # soundcloud
             yt-dlp -f "bestaudio" --audio-format mp3 --audio-quality 0 \
               --no-playlist \
               "${{ github.event.inputs.url }}" \
@@ -91,14 +88,13 @@ jobs:
           fi
           
           echo "✅ دانلود انجام شد"
-          echo "فایل‌های موجود در پوشه:"
           ls -la
 
       - name: ☁️ آپلود به Mega.nz
         run: |
           rclone copy "${{ github.event.inputs.folder }}" "mega:${{ github.event.inputs.mega_folder }}" \
             --progress --transfers=4 -vv
-          echo "✅ فایل با موفقیت به Mega.nz آپلود شد!"
+          echo "✅ آپلود به Mega.nz انجام شد"
 
       - name: 🕒 Commit to Repository
         run: |
