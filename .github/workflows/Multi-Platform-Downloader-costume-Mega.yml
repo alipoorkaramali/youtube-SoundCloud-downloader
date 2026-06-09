@@ -88,7 +88,7 @@ jobs:
         with:
           aria2: false
           ffmpeg: true
-          nightly: true   # استفاده از نسخه nightly
+          nightly: true
 
       - name: 📦 Install PO Token Plugin
         run: |
@@ -121,6 +121,8 @@ jobs:
               --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
+          echo "📄 نمایش 3 خط اول کانفیگ (برای بررسی):"
+          head -n 3 ~/.config/rclone/rclone.conf
 
       - name: ▶️ دانلود فایل
         id: download
@@ -194,15 +196,24 @@ jobs:
           echo "📁 محتویات پوشه محلی '${{ github.event.inputs.folder }}':"
           ls -la "${{ github.event.inputs.folder }}"
           
-          echo "📂 ایجاد پوشه در مگا (در صورت نبود)..."
-          ~/bin/rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>&1 || true
+          echo "🟢 بررسی وجود فایل rclone:"
+          ls -la ~/bin/rclone
+          ~/bin/rclone version || { echo "⚠️ rclone قابل اجرا نیست"; exit 1; }
           
-          echo "☁️ شروع آپلود..."
+          echo "🟢 بررسی کانفیگ:"
+          ls -la "$CONFIG_FILE"
+          echo "محتوای کانفیگ (۳ خط اول):"
+          head -n 3 "$CONFIG_FILE"
+          
+          echo "🔄 تست اتصال به Mega:"
+          ~/bin/rclone --config "$CONFIG_FILE" lsd mega: || { echo "❌ اتصال به مگا برقرار نیست"; exit 1; }
+          
+          echo "📂 ایجاد پوشه در مگا: $REMOTE_PATH"
+          ~/bin/rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>&1
+          
+          echo "☁️ شروع آپلود با دیباگ کامل..."
           ~/bin/rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
-            --progress --transfers=4 -vv 2>&1 | tee rclone_output.log
+            --progress --transfers=1 --log-level=DEBUG --verbose
           
-          echo "📋 لاگ آپلود:"
-          cat rclone_output.log 2>/dev/null || echo "لاگی تولید نشد"
-          
-          echo "✅ لیست فایل‌های موجود در مگا:"
-          ~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH" 2>&1
+          echo "🔍 لیست نهایی فایل‌ها در مگا:"
+          ~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH"
