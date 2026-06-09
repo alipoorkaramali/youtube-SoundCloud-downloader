@@ -68,33 +68,27 @@ jobs:
 
       - name: 🔐 Decrypt Random Cookie
         run: |
-          # پیدا کردن همه فایل‌های کوکی رمزگذاری شده
           COOKIE_FILES=(cookies*.txt.gpg)
           if [ ${#COOKIE_FILES[@]} -eq 0 ]; then
             echo "❌ هیچ فایل cookies*.txt.gpg یافت نشد!"
             exit 1
           fi
-          
-          # انتخاب تصادفی یک فایل
           RANDOM_INDEX=$((RANDOM % ${#COOKIE_FILES[@]}))
           SELECTED_FILE="${COOKIE_FILES[$RANDOM_INDEX]}"
           echo "🎲 فایل انتخاب شده: $SELECTED_FILE"
-          
-          # Decrypt فایل انتخاب شده
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
               --decrypt "$SELECTED_FILE" > cookies.txt || {
             echo "❌ GPG Decrypt Failed!"
             exit 1
           }
-          
           echo "✅ کوکی با موفقیت decrypt شد"
 
-      - name: ⚙️ Setup yt-dlp + ffmpeg (غیرفعال کردن aria2 و استفاده از نسخه nightly)
+      - name: ⚙️ Setup yt-dlp + ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
         with:
           aria2: false
           ffmpeg: true
-          yt_dlp_version: nightly
+          nightly: true   # استفاده از نسخه nightly
 
       - name: 📦 Install PO Token Plugin
         run: |
@@ -135,7 +129,6 @@ jobs:
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
           
-          # گزینه‌های مشترک
           COMMON_OPTS="--cookies ../cookies.txt \
             --extractor-retries 5 \
             --retries 20 \
@@ -163,7 +156,6 @@ jobs:
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           else
-            # soundcloud
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
               yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
@@ -173,7 +165,6 @@ jobs:
             fi
           fi
          
-          # پیدا کردن فایل دانلود شده
           DOWNLOADED_FILE=$(ls -1 | head -1)
           if [ -z "$DOWNLOADED_FILE" ]; then
             echo "❌ هیچ فایلی دانلود نشد!"
@@ -201,17 +192,17 @@ jobs:
           REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
           
           echo "📁 محتویات پوشه محلی '${{ github.event.inputs.folder }}':"
-          ls -la "${{ github.event.inputs.folder }}" || echo "پوشه خالی یا وجود ندارد"
+          ls -la "${{ github.event.inputs.folder }}"
           
           echo "📂 ایجاد پوشه در مگا (در صورت نبود)..."
-          ~/bin/rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
+          ~/bin/rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>&1 || true
           
-          echo "☁️ شروع آپلود با verbose بالاتر..."
+          echo "☁️ شروع آپلود..."
           ~/bin/rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
-            --progress --transfers=4 -vv --log-file=rclone.log
+            --progress --transfers=4 -vv 2>&1 | tee rclone_output.log
           
           echo "📋 لاگ آپلود:"
-          cat rclone.log
+          cat rclone_output.log 2>/dev/null || echo "لاگی تولید نشد"
           
-          echo "✅ بررسی نهایی: لیست فایل‌های موجود در مگا:"
-          ~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH"
+          echo "✅ لیست فایل‌های موجود در مگا:"
+          ~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH" 2>&1
