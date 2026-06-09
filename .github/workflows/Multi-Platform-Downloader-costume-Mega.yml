@@ -59,24 +59,44 @@ on:
 jobs:
   download:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🔐 Decrypt cookies (if exists)
+      - name: 🔐 Decrypt Random Cookie
+        id: decrypt_cookie
         run: |
-          if [ -f cookies.txt.gpg ]; then
-            gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
+          mkdir -p cookies_temp
+          
+          # انتخاب تصادفی یکی از ۳ کوکی
+          COOKIE_NUM=$((RANDOM % 3 + 1))
+          echo "🎲 Using Cookie #${COOKIE_NUM}"
+          
+          if [ $COOKIE_NUM -eq 1 ]; then
+            SECRET_NAME="COOKIE1_GPG"
+          elif [ $COOKIE_NUM -eq 2 ]; then
+            SECRET_NAME="COOKIE2_GPG"
           else
-            echo "⚠️ فایل cookies.txt.gpg یافت نشد"
-            touch cookies.txt
+            SECRET_NAME="COOKIE3_GPG"
           fi
+          
+          echo "${{ secrets[$SECRET_NAME] }}" | base64 -d > cookies_temp/cookies.gpg
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies_temp/cookies.gpg > cookies.txt
+          rm -rf cookies_temp
 
       - name: ⚙️ Setup yt-dlp + ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
         with:
           aria2: true
           ffmpeg: true
+
+      - name: 📦 Install PO Token Plugin
+        run: |
+          python3 -m pip install --upgrade bgutil-ytdlp-pot-provider
+          echo "✅ PO Token Plugin installed"
 
       - name: 💾 Cache rclone binary
         id: cache-rclone
@@ -95,22 +115,29 @@ jobs:
         run: |
           mkdir -p ~/.config/rclone
           if [ ! -f rclone_mega.conf.gpg ]; then
-            echo "❌ فایل rclone_mega.conf.gpg در ریشه مخزن پیدا نشد!"
+            echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
             exit 1
           fi
           gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
-          rclone --config ~/.config/rclone/rclone.conf listremotes
 
       - name: ▶️ دانلود فایل
         id: download
         run: |
-          # حذف پوشه قبلی اگر وجود داشته باشد (اختیاری)
           rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
           
+          COMMON_OPTS="--cookies ../cookies.txt \
+            --extractor-retries 5 \
+            --retries 20 \
+            --fragment-retries 20 \
+            --sleep-interval 4 \
+            --sleep-subtitles 2 \
+            --no-warnings \
+            --extractor-args 'youtube:player_client=web,android,ios,web_safari'"
+
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
               QUALITY="${{ github.event.inputs.quality }}"
@@ -120,18 +147,18 @@ jobs:
                 HEIGHT="${QUALITY%p}"
                 FORMAT="bestvideo[height<=$HEIGHT]+bestaudio/best"
               fi
-              yt-dlp -f "$FORMAT" --merge-output-format mp4 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              yt-dlp $COMMON_OPTS -f "$FORMAT" --merge-output-format mp4 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           else
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp -f "bestvideo+bestaudio/best" --merge-output-format mp4 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp -x --audio-format mp3 --cookies ../cookies.txt "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              yt-dlp $COMMON_OPTS -x --audio-format mp3 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           fi
-          
+         
           DOWNLOADED_FILE=$(ls | head -1)
           echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
 
