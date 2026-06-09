@@ -100,13 +100,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bin/rclone
-          key: ${{ runner.os }}-rclone-v1.74.0
+          key: ${{ runner.os }}-rclone-v1.74.1   # تغییر نسخه برای بی‌اثر کردن کش خراب
 
       - name: 📦 Install latest rclone (if not cached)
         if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
+          curl https://rclone.org/install.sh | sudo bash
           mkdir -p ~/bin
-          curl -L -o ~/bin/rclone https://downloads.rclone.org/rclone-current-linux-amd64/rclone
+          cp /usr/bin/rclone ~/bin/rclone
           chmod +x ~/bin/rclone
           ~/bin/rclone version
 
