@@ -58,18 +58,19 @@ jobs:
           sudo apt-get install -y rclone
           rclone version
 
-      - name: 🔧 Setup rclone config
+      - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
-          if [ -z "${{ secrets.RCLONE_CONFIG_BASE64 }}" ]; then
-            echo "❌ سکرت RCLONE_CONFIG_BASE64 تنظیم نشده است!"
+          if [ ! -f rclone_mega.conf.gpg ]; then
+            echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
             exit 1
           fi
-          echo "${{ secrets.RCLONE_CONFIG_BASE64 }}" | base64 -d > ~/.config/rclone/rclone.conf
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+              --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
-          echo "✅ کانفیگ rclone ساخته شد"
-          # تست اولیه: نمایش remoteها (اختیاری)
-          rclone listremotes || echo "⚠️ هشداری در لیست ریموت‌ها"
+          echo "✅ rclone config loaded"
+          # بررسی سریع (اختیاری)
+          rclone listremotes || echo "⚠️ هشدار: لیست ریموت‌ها نمایش داده نشد"
 
       - name: ▶️ دانلود فایل
         run: |
@@ -95,7 +96,6 @@ jobs:
 
       - name: ☁️ آپلود به Mega.nz
         run: |
-          # حذف بک‌اسلش‌های اضافی و استفاده از مسیر صحیح
           rclone copy "${{ github.event.inputs.folder }}" "mega:${{ github.event.inputs.mega_folder }}" \
             --progress --transfers=4 -vv
           echo "✅ فایل با موفقیت به Mega.nz آپلود شد!"
