@@ -71,6 +71,7 @@ jobs:
           rclone listremotes
 
       - name: ▶️ دانلود فایل
+        id: download
         run: |
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
@@ -87,8 +88,9 @@ jobs:
               -o "%(title)s.%(ext)s"
           fi
           
-          echo "✅ دانلود انجام شد"
-          ls -la
+          DOWNLOADED_FILE=$(ls -1 | head -1)
+          echo "FILE_TITLE=$(basename "$DOWNLOADED_FILE" | sed 's/\.[^.]*$//')" >> $GITHUB_ENV
+          echo "✅ دانلود انجام شد - فایل: $DOWNLOADED_FILE"
 
       - name: ☁️ آپلود به Mega.nz
         run: |
@@ -96,10 +98,17 @@ jobs:
             --progress --transfers=4 -vv
           echo "✅ آپلود به Mega.nz انجام شد"
 
-      - name: 🕒 Commit to Repository
+      - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
+        if: success() && env.FILE_TITLE != ''
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add "${{ github.event.inputs.folder }}"
-          git commit -m "Auto download: ${{ github.event.inputs.url }}" || echo "No changes to commit"
-          git push
+          if [ -z "${{ secrets.PB_TOKEN }}" ]; then
+            echo "⚠️ سکرت PB_TOKEN تنظیم نشده، نوتیفیکیشن ارسال نشد"
+            exit 0
+          fi
+          TITLE="✅ دانلود و آپلود موفق"
+          BODY="فایل: ${{ env.FILE_TITLE }}\nپلتفرم: ${{ github.event.inputs.platform }}\nلینک: ${{ github.event.inputs.url }}"
+          curl -u "${{ secrets.PB_TOKEN }}": \
+            -X POST https://api.pushbullet.com/v2/pushes \
+            -H "Content-Type: application/json" \
+            -d "{\"type\":\"note\",\"title\":\"$TITLE\",\"body\":\"$BODY\"}"
+          echo "✅ نوتیفیکیشن ارسال شد"
