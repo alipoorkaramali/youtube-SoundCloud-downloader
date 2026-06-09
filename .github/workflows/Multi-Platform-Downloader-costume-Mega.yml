@@ -112,8 +112,7 @@ jobs:
         if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/bin
-          curl https://rclone.org/install.sh | sudo bash -s -- --disable-check
-          cp /usr/bin/rclone ~/bin/rclone
+          curl -o ~/bin/rclone https://downloads.rclone.org/rclone-current-linux-amd64/rclone
           chmod +x ~/bin/rclone
           ~/bin/rclone version
 
