@@ -199,9 +199,19 @@ jobs:
         run: |
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
           REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
-          echo "📂 ایجاد پوشه در صورت نبود..."
+          
+          echo "📁 محتویات پوشه محلی '${{ github.event.inputs.folder }}':"
+          ls -la "${{ github.event.inputs.folder }}" || echo "پوشه خالی یا وجود ندارد"
+          
+          echo "📂 ایجاد پوشه در مگا (در صورت نبود)..."
           ~/bin/rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>/dev/null || true
-          echo "☁️ شروع آپلود..."
+          
+          echo "☁️ شروع آپلود با verbose بالاتر..."
           ~/bin/rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
-            --progress --transfers=4 --verbose
-          echo "✅ آپلود با موفقیت انجام شد"
+            --progress --transfers=4 -vv --log-file=rclone.log
+          
+          echo "📋 لاگ آپلود:"
+          cat rclone.log
+          
+          echo "✅ بررسی نهایی: لیست فایل‌های موجود در مگا:"
+          ~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH"
