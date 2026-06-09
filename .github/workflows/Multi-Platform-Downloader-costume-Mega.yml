@@ -71,16 +71,18 @@ jobs:
         run: |
           mkdir -p cookies_temp
           
-          # انتخاب تصادفی یکی از ۳ کوکی
-          COOKIE_NUM=$((RANDOM % 3 + 1))
+          # انتخاب تصادفی یکی از ۴ کوکی
+          COOKIE_NUM=$((RANDOM % 4 + 1))
           echo "🎲 Using Cookie #${COOKIE_NUM}"
           
           if [ $COOKIE_NUM -eq 1 ]; then
             SECRET_NAME="COOKIE1_GPG"
           elif [ $COOKIE_NUM -eq 2 ]; then
             SECRET_NAME="COOKIE2_GPG"
-          else
+          elif [ $COOKIE_NUM -eq 3 ]; then
             SECRET_NAME="COOKIE3_GPG"
+          else
+            SECRET_NAME="COOKIE4_GPG"
           fi
           
           echo "${{ secrets[$SECRET_NAME] }}" | base64 -d > cookies_temp/cookies.gpg
@@ -129,14 +131,7 @@ jobs:
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
           
-          COMMON_OPTS="--cookies ../cookies.txt \
-            --extractor-retries 5 \
-            --retries 20 \
-            --fragment-retries 20 \
-            --sleep-interval 4 \
-            --sleep-subtitles 2 \
-            --no-warnings \
-            --extractor-args 'youtube:player_client=web,android,ios,web_safari'"
+          COMMON_OPTS="--cookies ../cookies.txt --extractor-retries 5 --retries 20 --fragment-retries 20 --sleep-interval 4 --sleep-subtitles 2 --no-warnings --extractor-args 'youtube:player_client=web,android,ios,web_safari'"
 
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
