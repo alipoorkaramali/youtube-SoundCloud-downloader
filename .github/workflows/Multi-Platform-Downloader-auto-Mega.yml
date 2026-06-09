@@ -35,7 +35,16 @@ jobs:
 
       - name: 🔐 Decrypt cookies
         run: |
+          if [ ! -f cookies.txt.gpg ]; then
+            echo "❌ فایل cookies.txt.gpg یافت نشد!"
+            exit 1
+          fi
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
+          if [ ! -s cookies.txt ]; then
+            echo "❌ رمزگشایی کوکی ناموفق بود یا فایل خالی است"
+            exit 1
+          fi
+          echo "✅ کوکی با موفقیت رمزگشایی شد"
 
       - name: ⚙️ Setup yt-dlp + ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
@@ -44,24 +53,51 @@ jobs:
           ffmpeg: true
 
       - name: 📦 Install rclone
-        run: sudo apt-get update && sudo apt-get install -y rclone
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rclone
+          rclone version
 
       - name: 🔧 Setup rclone config
         run: |
-          mkdir -p \~/.config/rclone
-          echo "${{ secrets.RCLONE_CONFIG_BASE64 }}" | base64 -d > \~/.config/rclone/rclone.conf
+          mkdir -p ~/.config/rclone
+          if [ -z "${{ secrets.RCLONE_CONFIG_BASE64 }}" ]; then
+            echo "❌ سکرت RCLONE_CONFIG_BASE64 تنظیم نشده است!"
+            exit 1
+          fi
+          echo "${{ secrets.RCLONE_CONFIG_BASE64 }}" | base64 -d > ~/.config/rclone/rclone.conf
+          chmod 600 ~/.config/rclone/rclone.conf
+          echo "✅ کانفیگ rclone ساخته شد"
+          # تست اولیه: نمایش remoteها (اختیاری)
+          rclone listremotes || echo "⚠️ هشداری در لیست ریموت‌ها"
 
       - name: ▶️ دانلود فایل
         run: |
           mkdir -p "${{ github.event.inputs.folder }}"
-          yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 --audio-quality 0 \
-            --cookies cookies.txt --no-playlist \
-            "${{ github.event.inputs.url }}" \
-            -o "${{ github.event.inputs.folder }}/%(title)s.%(ext)s"
+          cd "${{ github.event.inputs.folder }}"
+          
+          if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
+            yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 --audio-quality 0 \
+              --cookies ../cookies.txt --no-playlist \
+              "${{ github.event.inputs.url }}" \
+              -o "%(title)s.%(ext)s"
+          else
+            # soundcloud
+            yt-dlp -f "bestaudio" --audio-format mp3 --audio-quality 0 \
+              --no-playlist \
+              "${{ github.event.inputs.url }}" \
+              -o "%(title)s.%(ext)s"
+          fi
+          
+          echo "✅ دانلود انجام شد"
+          echo "فایل‌های موجود در پوشه:"
+          ls -la
 
       - name: ☁️ آپلود به Mega.nz
         run: |
-          rclone copy "\( {{ github.event.inputs.folder }}" "mega: \){{ github.event.inputs.mega_folder }}" --progress --transfers=4
+          # حذف بک‌اسلش‌های اضافی و استفاده از مسیر صحیح
+          rclone copy "${{ github.event.inputs.folder }}" "mega:${{ github.event.inputs.mega_folder }}" \
+            --progress --transfers=4 -vv
           echo "✅ فایل با موفقیت به Mega.nz آپلود شد!"
 
       - name: 🕒 Commit to Repository
