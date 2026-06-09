@@ -1,0 +1,73 @@
+name: 🎬🎵 Auto Downloader + Mega.nz
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: '🌐 پلتفرم'
+        required: true
+        default: 'youtube'
+        type: choice
+        options:
+          - youtube
+          - soundcloud
+      url:
+        description: '🔗 لینک دانلود'
+        required: true
+      folder:
+        description: '📁 پوشه در مخزن'
+        required: false
+        default: 'news_downloads'
+      mega_folder:
+        description: '📂 پوشه در Mega.nz'
+        required: false
+        default: 'YoutubeNews'
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Decrypt cookies
+        run: |
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
+
+      - name: ⚙️ Setup yt-dlp + ffmpeg
+        uses: AnimMouse/setup-yt-dlp@v3
+        with:
+          aria2: true
+          ffmpeg: true
+
+      - name: 📦 Install rclone
+        run: sudo apt-get update && sudo apt-get install -y rclone
+
+      - name: 🔧 Setup rclone config
+        run: |
+          mkdir -p \~/.config/rclone
+          echo "${{ secrets.RCLONE_CONFIG_BASE64 }}" | base64 -d > \~/.config/rclone/rclone.conf
+
+      - name: ▶️ دانلود فایل
+        run: |
+          mkdir -p "${{ github.event.inputs.folder }}"
+          yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 --audio-quality 0 \
+            --cookies cookies.txt --no-playlist \
+            "${{ github.event.inputs.url }}" \
+            -o "${{ github.event.inputs.folder }}/%(title)s.%(ext)s"
+
+      - name: ☁️ آپلود به Mega.nz
+        run: |
+          rclone copy "\( {{ github.event.inputs.folder }}" "mega: \){{ github.event.inputs.mega_folder }}" --progress --transfers=4
+          echo "✅ فایل با موفقیت به Mega.nz آپلود شد!"
+
+      - name: 🕒 Commit to Repository
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add "${{ github.event.inputs.folder }}"
+          git commit -m "Auto download: ${{ github.event.inputs.url }}" || echo "No changes to commit"
+          git push
