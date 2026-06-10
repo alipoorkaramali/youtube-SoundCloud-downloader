@@ -13,7 +13,7 @@ QUALITY="$5"
 SPLIT_CHOICE="$6"
 SPLIT_SIZE="$7"
 
-MAX_TRIES=5  # 4 کوکی شخصی + 1 عمومی
+MAX_TRIES=5
 cd "$OUTPUT_FOLDER" || exit 1
 
 for TRY in $(seq 1 $MAX_TRIES); do
