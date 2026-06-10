@@ -18,7 +18,7 @@ MAX_TRIES=5
 # ساخت پوشه خروجی (در صورت عدم وجود)
 mkdir -p "$OUTPUT_FOLDER"
 
-# ورود به پوشه خروجی
+# ورود به پوشه خروجی (برای دانلود)
 cd "$OUTPUT_FOLDER" || exit 1
 
 # مسیر کامل فایل کوکی (در ریشه مخزن)
@@ -30,13 +30,19 @@ for TRY in $(seq 1 $MAX_TRIES); do
     
     rm -f "$COOKIE_PATH"
     
+    # === مرحله دریافت کوکی (در ریشه مخزن اجرا شود) ===
+    cd "$GITHUB_WORKSPACE"
+    
     if [ $TRY -le 4 ]; then
         echo "🔑 دریافت کوکی شخصی شماره $TRY ..."
-        python3 "$GITHUB_WORKSPACE/.github/scripts/cookie_manager.py" next
+        python3 .github/scripts/cookie_manager.py next
     else
         echo "🌐 دریافت کوکی از API عمومی ..."
-        python3 "$GITHUB_WORKSPACE/.github/scripts/cookie_manager.py" public
+        python3 .github/scripts/cookie_manager.py public
     fi
+    
+    # === برگرد به پوشه خروجی برای دانلود ===
+    cd "$OUTPUT_FOLDER"
     
     if [ ! -f "$COOKIE_PATH" ]; then
         echo "❌ دریافت کوکی ناموفق بود، تلاش بعدی..."
@@ -88,7 +94,6 @@ for TRY in $(seq 1 $MAX_TRIES); do
             zip -s "$SPLIT_SIZE" "${DOWNLOADED_FILE}.zip" "$DOWNLOADED_FILE"
             rm "$DOWNLOADED_FILE"
             echo "✅ فایل split شد."
-            # پس از split، نام فایل zip را در متغیر محیطی به‌روز می‌کنیم (اختیاری)
             NEW_ZIP=$(ls -1 *.zip 2>/dev/null | head -1)
             if [ -n "$NEW_ZIP" ]; then
                 echo "DOWNLOADED_FILE=$NEW_ZIP" >> $GITHUB_ENV
