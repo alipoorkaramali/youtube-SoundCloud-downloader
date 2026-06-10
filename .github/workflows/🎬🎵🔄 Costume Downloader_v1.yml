@@ -1,4 +1,4 @@
-name: 🎬🎵 Costume Downloader + Mega.nz (with ZIP split & Smart Cookie Failover)
+name: 🎬🔄🎵 Costume Downloader + Mega.nz (with ZIP split & Smart Cookie Failover)
 
 on:
   workflow_dispatch:
