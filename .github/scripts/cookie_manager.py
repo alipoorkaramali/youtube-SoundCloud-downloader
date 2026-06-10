@@ -19,36 +19,43 @@ def decrypt_gpg(gpg_file, passphrase):
         return None
 
 def get_cookie_by_index(index, passphrase):
-    files = sorted(glob.glob("cookies*.txt.gpg"))
-    if index >= len(files):
+    # لیست فایل‌های کوکی با نام‌های صحیح: cookies.txt.gpg, cookies1.txt.gpg, cookies2.txt.gpg, cookies3.txt.gpg
+    base_files = ["cookies.txt.gpg", "cookies1.txt.gpg", "cookies2.txt.gpg", "cookies3.txt.gpg"]
+    existing_files = [f for f in base_files if os.path.exists(f)]
+    if index >= len(existing_files):
         return None, None
-    gpg_file = files[index]
+    gpg_file = existing_files[index]
     cookie = decrypt_gpg(gpg_file, passphrase)
     return cookie, gpg_file
 
 def get_public_cookie():
-    print("🔄 Getting cookie from public API...")
+    print("🔄 دریافت کوکی از API عمومی...")
     try:
-        with urllib.request.urlopen("https://cookies-service.onrender.com/cookies", timeout=15) as response:
+        req = urllib.request.Request(
+            "https://cookies-service.onrender.com/cookies",
+            headers={"User-Agent": "Mozilla/5.0"},
+            method="GET"
+        )
+        with urllib.request.urlopen(req, timeout=20) as response:
             data = json.loads(response.read().decode('utf-8'))
             cookie = data.get("cookie")
             if cookie:
-                print("✅ Public cookie obtained.")
+                print("✅ کوکی عمومی دریافت شد.")
                 return cookie
     except Exception as e:
-        print(f"❌ Public API failed: {e}")
+        print(f"❌ خطا در دریافت کوکی عمومی: {e}")
     return None
 
 def save_cookie(content):
     with open("cookies.txt", "w") as f:
         f.write(content)
-    print("✅ Cookie saved to cookies.txt")
+    print("✅ کوکی ذخیره شد.")
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "next"
     passphrase = os.environ.get("COOKIE_DECRYPT_KEY")
     if not passphrase:
-        print("❌ COOKIE_DECRYPT_KEY environment variable not set.")
+        print("❌ متغیر محیطی COOKIE_DECRYPT_KEY تنظیم نشده است.")
         return 1
 
     if mode == "public":
@@ -65,17 +72,17 @@ def main():
                 last_index = int(f.read().strip())
         else:
             last_index = -1
+        
         next_index = last_index + 1
         cookie, gpg_file = get_cookie_by_index(next_index, passphrase)
         if cookie:
             save_cookie(cookie)
             with open(last_index_file, "w") as f:
                 f.write(str(next_index))
-            print(f"✅ Using cookie from {gpg_file}")
+            print(f"✅ استفاده از کوکی: {gpg_file}")
             return 0
         else:
-            # اگر کوکی‌های شخصی تمام شد، به public برگرد
-            print("⚠️ No more personal cookies. Falling back to public API.")
+            print("⚠️ کوکی شخصی دیگری وجود ندارد. استفاده از API عمومی...")
             cookie = get_public_cookie()
             if cookie:
                 save_cookie(cookie)
