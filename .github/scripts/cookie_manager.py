@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import sys
-import glob
 import urllib.request
 import json
 import subprocess
@@ -19,7 +18,6 @@ def decrypt_gpg(gpg_file, passphrase):
         return None
 
 def get_cookie_by_index(index, passphrase):
-    # لیست فایل‌های کوکی با نام‌های صحیح: cookies.txt.gpg, cookies1.txt.gpg, cookies2.txt.gpg, cookies3.txt.gpg
     base_files = ["cookies.txt.gpg", "cookies1.txt.gpg", "cookies2.txt.gpg", "cookies3.txt.gpg"]
     existing_files = [f for f in base_files if os.path.exists(f)]
     if index >= len(existing_files):
@@ -28,15 +26,29 @@ def get_cookie_by_index(index, passphrase):
     cookie = decrypt_gpg(gpg_file, passphrase)
     return cookie, gpg_file
 
-def get_public_cookie():
-    print("🔄 دریافت کوکی از API عمومی...")
+def test_public_api():
+    """آیا API عمومی پاسخ می‌دهد؟"""
     try:
         req = urllib.request.Request(
             "https://cookies-service.onrender.com/cookies",
             headers={"User-Agent": "Mozilla/5.0"},
             method="GET"
         )
-        with urllib.request.urlopen(req, timeout=20) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            return data.get("cookie") is not None
+    except:
+        return False
+
+def get_public_cookie():
+    print("🌐 دریافت کوکی از API عمومی...")
+    try:
+        req = urllib.request.Request(
+            "https://cookies-service.onrender.com/cookies",
+            headers={"User-Agent": "Mozilla/5.0"},
+            method="GET"
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
             data = json.loads(response.read().decode('utf-8'))
             cookie = data.get("cookie")
             if cookie:
@@ -55,10 +67,19 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "next"
     passphrase = os.environ.get("COOKIE_DECRYPT_KEY")
     if not passphrase:
-        print("❌ متغیر محیطی COOKIE_DECRYPT_KEY تنظیم نشده است.")
+        print("❌ COOKIE_DECRYPT_KEY environment variable not set.")
         return 1
 
-    if mode == "public":
+    if mode == "test_public":
+        # فقط تست می‌کند، بدون ذخیره
+        if test_public_api():
+            print("✅ Public API is reachable and returns a cookie.")
+            return 0
+        else:
+            print("⚠️ Public API is NOT available.")
+            return 1
+
+    elif mode == "public":
         cookie = get_public_cookie()
         if cookie:
             save_cookie(cookie)
@@ -72,17 +93,16 @@ def main():
                 last_index = int(f.read().strip())
         else:
             last_index = -1
-        
         next_index = last_index + 1
         cookie, gpg_file = get_cookie_by_index(next_index, passphrase)
         if cookie:
             save_cookie(cookie)
             with open(last_index_file, "w") as f:
                 f.write(str(next_index))
-            print(f"✅ استفاده از کوکی: {gpg_file}")
+            print(f"✅ استفاده از کوکی شخصی: {gpg_file}")
             return 0
         else:
-            print("⚠️ کوکی شخصی دیگری وجود ندارد. استفاده از API عمومی...")
+            print("⚠️ هیچ کوکی شخصی دیگری موجود نیست. تلاش برای کوکی عمومی...")
             cookie = get_public_cookie()
             if cookie:
                 save_cookie(cookie)
