@@ -13,27 +13,23 @@ QUALITY="$5"
 SPLIT_CHOICE="$6"
 SPLIT_SIZE="$7"
 
-MAX_TRIES=5  # 4 تا کوکی شخصی + 1 بار fallback عمومی
+MAX_TRIES=5
 cd "$OUTPUT_FOLDER" || exit 1
 
 for TRY in $(seq 1 $MAX_TRIES); do
     echo "----------------------------------------"
     echo "🔄 تلاش شماره $TRY از $MAX_TRIES"
     
-    # حذف کوکی قبلی اگر وجود داشته باشد
     rm -f ../cookies.txt
     
     if [ $TRY -le 4 ]; then
-        # تلاش با کوکی‌های شخصی (به ترتیب چرخشی)
         echo "🔑 دریافت کوکی شخصی شماره $TRY ..."
-        python3 .github/scripts/cookie_manager.py next
+        python3 $GITHUB_WORKSPACE/.github/scripts/cookie_manager.py next
     else
-        # آخرین تلاش: دریافت کوکی عمومی
         echo "🌐 دریافت کوکی از API عمومی ..."
-        python3 .github/scripts/cookie_manager.py public
+        python3 $GITHUB_WORKSPACE/.github/scripts/cookie_manager.py public
     fi
     
-    # بررسی وجود فایل کوکی
     if [ ! -f ../cookies.txt ]; then
         echo "❌ دریافت کوکی ناموفق بود، تلاش بعدی..."
         continue
@@ -41,7 +37,6 @@ for TRY in $(seq 1 $MAX_TRIES); do
     
     echo "✅ کوکی دریافت شد. شروع دانلود..."
     
-    # ساخت آرگومان‌های مشترک yt-dlp
     COMMON_OPTS="--cookies ../cookies.txt \
         --extractor-retries 5 \
         --retries 20 \
@@ -53,7 +48,6 @@ for TRY in $(seq 1 $MAX_TRIES); do
         --ignore-errors \
         --compat-options no-external-downloader-progress"
     
-    # دستور دانلود بر اساس پلتفرم و نوع
     if [ "$PLATFORM" = "youtube" ]; then
         if [ "$TYPE" = "video" ]; then
             if [ "$QUALITY" = "best" ]; then
@@ -64,7 +58,6 @@ for TRY in $(seq 1 $MAX_TRIES); do
                 yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s"
             fi
         else
-            # حالت صوتی
             yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 "$URL" -o "%(title)s.%(ext)s"
         fi
     else
@@ -76,13 +69,11 @@ for TRY in $(seq 1 $MAX_TRIES); do
         fi
     fi
     
-    # بررسی موفقیت دانلود
     DOWNLOADED_FILE=$(ls -1 | head -1)
     if [ -n "$DOWNLOADED_FILE" ]; then
-        echo "✅ دانلود با موفقیت انجام شد در تلاش $TRY: $DOWNLOADED_FILE"
+        echo "✅ دانلود موفق در تلاش $TRY: $DOWNLOADED_FILE"
         echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
         
-        # اگر فایل نیاز به split دارد، اینجا انجام می‌شود (اختیاری)
         if [ "$SPLIT_CHOICE" = "split" ]; then
             sudo apt-get update && sudo apt-get install -y zip
             echo "✂️ تقسیم فایل به قسمت‌های ${SPLIT_SIZE}..."
@@ -92,10 +83,10 @@ for TRY in $(seq 1 $MAX_TRIES); do
         fi
         exit 0
     else
-        echo "⚠️ دانلود با کوکی فعلی ناموفق بود. حذف کوکی و تلاش مجدد..."
+        echo "⚠️ دانلود با کوکی فعلی ناموفق بود."
         rm -f ../cookies.txt
     fi
 done
 
-echo "❌ همه تلاش‌ها (۴ کوکی شخصی + عمومی) ناموفق بود."
+echo "❌ همه تلاش‌ها ناموفق بود."
 exit 1
