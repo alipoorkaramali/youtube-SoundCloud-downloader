@@ -15,14 +15,25 @@ SPLIT_SIZE="$7"
 
 MAX_TRIES=5
 
-# ساخت پوشه خروجی (در صورت عدم وجود)
+# ساخت پوشه خروجی
 mkdir -p "$OUTPUT_FOLDER"
-
-# ورود به پوشه خروجی (برای دانلود)
 cd "$OUTPUT_FOLDER" || exit 1
 
-# مسیر کامل فایل کوکی (در ریشه مخزن)
 COOKIE_PATH="$GITHUB_WORKSPACE/cookies.txt"
+
+# تعریف آرایه پایه از آرگومان‌های مشترک yt-dlp
+BASE_ARGS=(
+    --cookies "$COOKIE_PATH"
+    --extractor-retries 5
+    --retries 20
+    --fragment-retries 20
+    --sleep-interval 4
+    --sleep-subtitles 2
+    --no-warnings
+    --extractor-args youtube:player_client=web,android,ios,web_safari
+    --ignore-errors
+    --compat-options no-external-downloader-progress
+)
 
 for TRY in $(seq 1 $MAX_TRIES); do
     echo "----------------------------------------"
@@ -30,7 +41,7 @@ for TRY in $(seq 1 $MAX_TRIES); do
     
     rm -f "$COOKIE_PATH"
     
-    # === مرحله دریافت کوکی (در ریشه مخزن اجرا شود) ===
+    # رفتن به ریشه برای دریافت کوکی
     cd "$GITHUB_WORKSPACE"
     
     if [ $TRY -le 4 ]; then
@@ -41,7 +52,6 @@ for TRY in $(seq 1 $MAX_TRIES); do
         python3 .github/scripts/cookie_manager.py public
     fi
     
-    # === برگرد به پوشه خروجی برای دانلود ===
     cd "$OUTPUT_FOLDER"
     
     if [ ! -f "$COOKIE_PATH" ]; then
@@ -51,35 +61,25 @@ for TRY in $(seq 1 $MAX_TRIES); do
     
     echo "✅ کوکی دریافت شد. شروع دانلود..."
     
-    COMMON_OPTS="--cookies \"$COOKIE_PATH\" \
-        --extractor-retries 5 \
-        --retries 20 \
-        --fragment-retries 20 \
-        --sleep-interval 4 \
-        --sleep-subtitles 2 \
-        --no-warnings \
-        --extractor-args youtube:player_client=web,android,ios,web_safari \
-        --ignore-errors \
-        --compat-options no-external-downloader-progress"
-    
+    # اجرای yt-dlp بر اساس پلتفرم و نوع (بدون eval)
     if [ "$PLATFORM" = "youtube" ]; then
         if [ "$TYPE" = "video" ]; then
             if [ "$QUALITY" = "best" ]; then
-                eval yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s"
+                yt-dlp "${BASE_ARGS[@]}" -f "bestvideo+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s"
             else
                 HEIGHT="${QUALITY%p}"
-                eval yt-dlp $COMMON_OPTS -f "bestvideo[height<=$HEIGHT]+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s" || \
-                eval yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s"
+                yt-dlp "${BASE_ARGS[@]}" -f "bestvideo[height<=$HEIGHT]+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s" || \
+                yt-dlp "${BASE_ARGS[@]}" -f "bestvideo+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s"
             fi
         else
-            eval yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 "$URL" -o "%(title)s.%(ext)s"
+            yt-dlp "${BASE_ARGS[@]}" -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 "$URL" -o "%(title)s.%(ext)s"
         fi
     else
         # SoundCloud
         if [ "$TYPE" = "video" ]; then
-            eval yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s"
+            yt-dlp "${BASE_ARGS[@]}" -f "bestvideo+bestaudio/best" --merge-output-format mp4 "$URL" -o "%(title)s.%(ext)s"
         else
-            eval yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 "$URL" -o "%(title)s.%(ext)s"
+            yt-dlp "${BASE_ARGS[@]}" -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 "$URL" -o "%(title)s.%(ext)s"
         fi
     fi
     
