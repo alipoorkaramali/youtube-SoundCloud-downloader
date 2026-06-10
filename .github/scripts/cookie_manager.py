@@ -2,16 +2,12 @@
 import os
 import sys
 import glob
-import random
-import subprocess
 import urllib.request
 import json
 
-COOKIE_DIR = "."
-OUTPUT_COOKIE = "cookies.txt"
-
 def decrypt_gpg(gpg_file, passphrase):
-    """Decrypt a GPG file and return the content as string."""
+    """Decrypt a GPG file and return content as string."""
+    import subprocess
     try:
         result = subprocess.run(
             ["gpg", "--batch", "--yes", "--decrypt", "--passphrase", passphrase, gpg_file],
@@ -20,93 +16,79 @@ def decrypt_gpg(gpg_file, passphrase):
             check=True
         )
         return result.stdout
-    except subprocess.CalledProcessError:
+    except:
         return None
 
-def validate_cookie(cookie_content):
-    """Check if cookie works by making a test request to YouTube."""
-    if not cookie_content:
-        return False
-    try:
-        # ایجاد یک درخواست تست ساده با کوکی
-        req = urllib.request.Request(
-            "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Cookie": cookie_content.strip()
-            }
-        )
-        # ارسال یک درخواست ساده JSON
-        data = json.dumps({"videoId": "dQw4w9WgXcQ"}).encode('utf-8')
-        with urllib.request.urlopen(req, data=data, timeout=10) as response:
-            return response.getcode() == 200
-    except Exception:
-        return False
+def get_cookie_by_index(index, passphrase):
+    """Return cookie content from cookies[index].txt.gpg (0-based)."""
+    files = sorted(glob.glob("cookies*.txt.gpg"))
+    if index >= len(files):
+        return None, None
+    gpg_file = files[index]
+    cookie = decrypt_gpg(gpg_file, passphrase)
+    if cookie is None:
+        return None, gpg_file
+    return cookie, gpg_file
 
 def get_public_cookie():
     """Fallback: Get a fresh cookie from public API."""
-    print("🔄 Attempting to get cookie from public API...")
+    print("🔄 Getting cookie from public API...")
     try:
         with urllib.request.urlopen("https://cookies-service.onrender.com/cookies", timeout=15) as response:
             data = json.loads(response.read().decode('utf-8'))
             cookie = data.get("cookie")
             if cookie:
-                print("✅ Successfully obtained public cookie.")
+                print("✅ Public cookie obtained.")
                 return cookie
     except Exception as e:
         print(f"❌ Public API failed: {e}")
     return None
 
 def main():
-    # مرحله 1: جستجوی فایل‌های GPG کوکی
-    cookie_files = glob.glob("cookies*.txt.gpg")
-    if not cookie_files:
-        print("⚠️ No encrypted cookie files found. Falling back to public API.")
-        fallback_cookie = get_public_cookie()
-        if fallback_cookie:
-            with open(OUTPUT_COOKIE, "w") as f:
-                f.write(fallback_cookie)
-            print(f"✅ Public cookie saved to {OUTPUT_COOKIE}")
-            return 0
-        else:
-            print("❌ No cookie source available.")
-            return 1
-
-    # مرحله 2: دریافت رمز از secrets (از طریق متغیر محیطی)
+    mode = sys.argv[1] if len(sys.argv) > 1 else "next"
     passphrase = os.environ.get("COOKIE_DECRYPT_KEY")
-    if not passphrase:
-        print("❌ COOKIE_DECRYPT_KEY environment variable not set.")
+    
+    if mode == "public":
+        cookie = get_public_cookie()
+        if cookie:
+            with open("cookies.txt", "w") as f:
+                f.write(cookie)
+            print("✅ Public cookie saved.")
+            return 0
         return 1
-
-    # مرحله 3: چرخش تصادفی و تست کوکی‌ها
-    random.shuffle(cookie_files)
-    for gpg_file in cookie_files:
-        print(f"🎲 Trying cookie from: {gpg_file}")
-        cookie_content = decrypt_gpg(gpg_file, passphrase)
-        if not cookie_content:
-            print(f"⚠️ Failed to decrypt {gpg_file}")
-            continue
+    
+    elif mode == "next":
+        # دریافت آخرین ایندکس استفاده شده (از فایل موقتی)
+        last_index_file = ".last_cookie_index"
+        if os.path.exists(last_index_file):
+            with open(last_index_file, "r") as f:
+                last_index = int(f.read().strip())
+        else:
+            last_index = -1
         
-        if validate_cookie(cookie_content):
-            print(f"✅ Valid cookie found in {gpg_file}")
-            with open(OUTPUT_COOKIE, "w") as f:
-                f.write(cookie_content)
+        next_index = last_index + 1
+        cookie, gpg_file = get_cookie_by_index(next_index, passphrase)
+        if cookie:
+            with open("cookies.txt", "w") as f:
+                f.write(cookie)
+            with open(last_index_file, "w") as f:
+                f.write(str(next_index))
+            print(f"✅ Using cookie from {gpg_file}")
             return 0
         else:
-            print(f"❌ Invalid cookie in {gpg_file}")
+            # اگر کوکی‌ها تمام شد، از public استفاده کن
+            return get_public_cookie_and_save()
+    
+    return 1
 
-    # مرحله 4: اگر همه کوکی‌ها نامعتبر بودند، از API عمومی استفاده کن
-    print("⚠️ All local cookies are invalid. Using public API as fallback.")
-    fallback_cookie = get_public_cookie()
-    if fallback_cookie:
-        with open(OUTPUT_COOKIE, "w") as f:
-            f.write(fallback_cookie)
-        print(f"✅ Public cookie saved to {OUTPUT_COOKIE}")
+def get_public_cookie_and_save():
+    cookie = get_public_cookie()
+    if cookie:
+        with open("cookies.txt", "w") as f:
+            f.write(cookie)
+        print("✅ Public cookie saved.")
         return 0
-    else:
-        print("❌ All cookie sources exhausted. Download may fail.")
-        return 1
+    return 1
 
 if __name__ == "__main__":
     sys.exit(main())
