@@ -1,4 +1,4 @@
-name: 🎬🎵🔄 Costume Downloader + Mega.nz (with ZIP split & Smart Cookie Failover)
+name: 🎬🎵 Costume Downloader + Mega.nz (with ZIP split & Smart Cookie Failover)
 
 on:
   workflow_dispatch:
@@ -66,23 +66,6 @@ jobs:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: 🔐 Decrypt rclone config (برای آپلود به مگا)
-        run: |
-          mkdir -p ~/.config/rclone
-          if [ ! -f rclone_mega.conf.gpg ]; then
-            echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
-            exit 1
-          fi
-          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
-              --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
-          chmod 600 ~/.config/rclone/rclone.conf
-          echo "✅ rclone config loaded"
-
       - name: ⚙️ Setup yt-dlp + ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
         with:
@@ -111,26 +94,187 @@ jobs:
           chmod +x ~/bin/rclone
           ~/bin/rclone version
 
-      - name: 🧹 Clean previous downloads
+      - name: 🔓 Decrypt rclone config
         run: |
-          rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
-          mkdir -p "${{ github.event.inputs.folder }}"
+          mkdir -p ~/.config/rclone
+          if [ ! -f rclone_mega.conf.gpg ]; then
+            echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
+            exit 1
+          fi
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+              --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+          chmod 600 ~/.config/rclone/rclone.conf
+          echo "✅ rclone config loaded"
 
-      - name: 🎯 Smart Download with Retry (Cookie Rotation + Public Fallback)
+      - name: 🔄 Smart Download with Retry (Personal Cookies + Public Fallback)
         id: download
         env:
           COOKIE_DECRYPT_KEY: ${{ secrets.COOKIE_DECRYPT_KEY }}
         run: |
-          chmod +x .github/scripts/download_with_retry.sh
-          .github/scripts/download_with_retry.sh \
-            "${{ github.event.inputs.folder }}" \
-            "${{ github.event.inputs.url }}" \
-            "${{ github.event.inputs.platform }}" \
-            "${{ github.event.inputs.type }}" \
-            "${{ github.event.inputs.quality }}" \
-            "${{ github.event.inputs.split_choice }}" \
-            "${{ github.event.inputs.split_size }}"
-          echo "✅ Download completed successfully"
+          # حذف پوشه قبلی و ایجاد دوباره
+          rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
+          mkdir -p "${{ github.event.inputs.folder }}"
+          
+          # لیست فایل‌های کوکی شخصی (cookies1.txt.gpg تا cookies4.txt.gpg)
+          PERSONAL_COOKIES=()
+          for i in {1..4}; do
+            if [ -f "cookies${i}.txt.gpg" ]; then
+              PERSONAL_COOKIES+=("cookies${i}.txt.gpg")
+            fi
+          done
+          
+          MAX_TRIES=$(( ${#PERSONAL_COOKIES[@]} + 1 ))  # تعداد کوکی‌های شخصی + 1 بار عمومی
+          echo "🔍 تعداد کوکی‌های شخصی یافت شده: ${#PERSONAL_COOKIES[@]}"
+          
+          COMMON_OPTS="--extractor-retries 5 \
+            --retries 20 \
+            --fragment-retries 20 \
+            --sleep-interval 4 \
+            --sleep-subtitles 2 \
+            --no-warnings \
+            --extractor-args youtube:player_client=web,android,ios,web_safari \
+            --ignore-errors \
+            --compat-options no-external-downloader-progress"
+          
+          TRY=1
+          SUCCESS=0
+          
+          # تلاش با کوکی‌های شخصی (به ترتیب شماره)
+          for COOKIE_FILE in "${PERSONAL_COOKIES[@]}"; do
+            echo "----------------------------------------"
+            echo "🔄 تلاش شماره $TRY از $MAX_TRIES"
+            echo "🔑 رمزگشایی کوکی شخصی: $COOKIE_FILE"
+            
+            # رمزگشایی فایل GPG
+            if ! gpg --batch --yes --passphrase "$COOKIE_DECRYPT_KEY" --decrypt "$COOKIE_FILE" > cookies.txt 2>/dev/null; then
+              echo "⚠️ رمزگشایی $COOKIE_FILE ناموفق بود"
+              TRY=$((TRY+1))
+              continue
+            fi
+            
+            echo "✅ کوکی رمزگشایی شد. شروع دانلود..."
+            cd "${{ github.event.inputs.folder }}"
+            
+            # اجرای دانلود با این کوکی
+            if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
+              if [ "${{ github.event.inputs.type }}" = "video" ]; then
+                QUALITY="${{ github.event.inputs.quality }}"
+                if [ "$QUALITY" = "best" ]; then
+                  yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                    "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+                else
+                  HEIGHT="${QUALITY%p}"
+                  echo "🎬 کیفیت درخواستی: ${QUALITY}"
+                  yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestvideo[height<=$HEIGHT]+bestaudio/best" --merge-output-format mp4 \
+                    "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
+                  yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                    "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+                fi
+              else
+                # صوتی
+                yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              fi
+            else
+              # SoundCloud
+              if [ "${{ github.event.inputs.type }}" = "video" ]; then
+                yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              else
+                yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+              fi
+            fi
+            
+            DOWNLOADED_FILE=$(ls -1 | head -1)
+            if [ -n "$DOWNLOADED_FILE" ]; then
+              echo "✅ دانلود موفق با کوکی $COOKIE_FILE در تلاش $TRY"
+              echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
+              SUCCESS=1
+              break
+            else
+              echo "⚠️ دانلود با کوکی $COOKIE_FILE ناموفق بود"
+              rm -f ../cookies.txt
+            fi
+            cd ..
+            TRY=$((TRY+1))
+          done
+          
+          # اگر هیچ کوکی شخصی جواب نداد، از API عمومی استفاده کن
+          if [ $SUCCESS -eq 0 ]; then
+            echo "----------------------------------------"
+            echo "🔄 تلاش شماره $TRY از $MAX_TRIES (آخرین تلاش - API عمومی)"
+            echo "🌐 دریافت کوکی از API عمومی..."
+            
+            # دریافت کوکی از API عمومی (با timeout 20 ثانیه)
+            if curl -s --max-time 20 "https://cookies-service.onrender.com/cookies" > public_cookie.json; then
+              COOKIE=$(jq -r '.cookie' public_cookie.json)
+              if [ -n "$COOKIE" ] && [ "$COOKIE" != "null" ]; then
+                echo "$COOKIE" > cookies.txt
+                echo "✅ کوکی عمومی دریافت شد. شروع دانلود..."
+                cd "${{ github.event.inputs.folder }}"
+                
+                # همان دستورات دانلود با کوکی عمومی
+                if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
+                  if [ "${{ github.event.inputs.type }}" = "video" ]; then
+                    QUALITY="${{ github.event.inputs.quality }}"
+                    if [ "$QUALITY" = "best" ]; then
+                      yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                        "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+                    else
+                      HEIGHT="${QUALITY%p}"
+                      yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestvideo[height<=$HEIGHT]+bestaudio/best" --merge-output-format mp4 \
+                        "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
+                      yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                        "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+                    fi
+                  else
+                    yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+                      "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+                  fi
+                else
+                  if [ "${{ github.event.inputs.type }}" = "video" ]; then
+                    yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                      "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+                  else
+                    yt-dlp $COMMON_OPTS --cookies ../cookies.txt -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+                      "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+                  fi
+                fi
+                
+                DOWNLOADED_FILE=$(ls -1 | head -1)
+                if [ -n "$DOWNLOADED_FILE" ]; then
+                  echo "✅ دانلود موفق با کوکی عمومی در تلاش $TRY"
+                  echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
+                  SUCCESS=1
+                else
+                  echo "❌ دانلود با کوکی عمومی نیز ناموفق بود"
+                fi
+                cd ..
+              else
+                echo "❌ کوکی عمومی معتبر نیست"
+              fi
+            else
+              echo "❌ دریافت کوکی از API عمومی با خطا مواجه شد (timeout یا عدم پاسخ)"
+            fi
+          fi
+          
+          if [ $SUCCESS -eq 0 ]; then
+            echo "❌ همه تلاش‌ها (${#PERSONAL_COOKIES[@]} کوکی شخصی + عمومی) ناموفق بود."
+            exit 1
+          fi
+          
+          # مرحله split (در صورت انتخاب)
+          if [ "${{ github.event.inputs.split_choice }}" = "split" ]; then
+            cd "${{ github.event.inputs.folder }}"
+            FILE="$DOWNLOADED_FILE"
+            SIZE="${{ github.event.inputs.split_size }}"
+            sudo apt-get update && sudo apt-get install -y zip
+            echo "✂️ تقسیم فایل به قسمت‌های $SIZE..."
+            zip -s "$SIZE" "${FILE}.zip" "$FILE"
+            rm "$FILE"
+            echo "✅ فایل split شد."
+          fi
 
       - name: ☁️ Upload to Mega.nz
         run: |
