@@ -1,4 +1,4 @@
-name: 📥 دانلود اینستاگرام (با نام کاربری صحیح)
+name: 📥 دانلود اینستاگرام (سه مرحله‌ای)
 
 on:
   issue_comment:
@@ -10,9 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: استخراج shortcode
         id: sc
@@ -39,11 +42,11 @@ jobs:
             echo "INSTAGRAM_COOKIES_PATH=/tmp/cookies/instagram_cookies.txt" >> $GITHUB_ENV
             echo "✅ کوکی اینستاگرام بارگذاری شد."
           else
-            echo "⚠️ کوکی در دسترس نیست، فقط از روش بدون کوکی استفاده می‌شود."
+            echo "⚠️ کوکی در دسترس نیست."
           fi
 
-      - name: دانلود هوشمند (اولویت لینک مستقیم از JSON → yt-dlp بدون کوکی → yt-dlp با کوکی)
-        run: python .github/scripts/download_from_json_fallback.py ${{ steps.sc.outputs.shortcode }}
+      - name: دانلود با سه مرحله (JSON → yt-dlp بدون کوکی → yt-dlp با کوکی)
+        run: python .github/scripts/download_with_fallback.py ${{ steps.sc.outputs.shortcode }}
 
       - name: خواندن نام کاربری از فایل post_info.json
         id: username
@@ -57,63 +60,55 @@ jobs:
             echo "username=unknown" >> $GITHUB_OUTPUT
           fi
 
-      # ========== rclone cache ==========
-      - name: Cache rclone
-        id: cache-rclone
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/bin/rclone
-          key: rclone-${{ runner.os }}
-
-      - name: Install rclone (if not cached)
-        if: steps.cache-rclone.outputs.cache-hit != 'true'
+      - name: Commit و Push فایل‌های دانلود شده
+        id: commit
         run: |
-          curl https://rclone.org/install.sh | sudo bash
-          mkdir -p ~/.local/bin
-          cp /usr/bin/rclone ~/.local/bin/
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          SHORTCODE="${{ steps.sc.outputs.shortcode }}"
+          git add "instagram_downloads/${SHORTCODE}"
+          if git diff --staged --quiet; then
+            echo "no_changes=true" >> $GITHUB_OUTPUT
+          else
+            git commit -m "📥 افزودن پست اینستاگرام shortcode: ${SHORTCODE}"
+            echo "no_changes=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Enable rclone (cached)
-        if: steps.cache-rclone.outputs.cache-hit == 'true'
+      - name: Push به مخزن
+        if: steps.commit.outputs.no_changes == 'false'
         run: |
-          chmod +x ~/.local/bin/rclone
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          rclone version
+          git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push origin ${{ github.ref_name }}
 
-      - name: Decrypt rclone config
-        run: |
-          mkdir -p ~/.config/rclone
-          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
-          chmod 600 ~/.config/rclone/rclone.conf
-
-      - name: Upload to Mega
-        id: mega
-        env:
-          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
-          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+      - name: ساخت لینک دانلود مستقیم (raw)
+        id: filelink
         run: |
           SHORTCODE="${{ steps.sc.outputs.shortcode }}"
-          USERNAME="${{ steps.username.outputs.username }}"
-          REMOTE="mega:Instagram/${USERNAME}/${SHORTCODE}"
-          rclone mkdir "$REMOTE" 2>/dev/null || true
-          rclone copy "instagram_downloads/$SHORTCODE" "$REMOTE" --transfers=4
-          sudo apt-get update && sudo apt-get install -y megatools
-          LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "/Instagram/${USERNAME}/${SHORTCODE}" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
-          echo "link=$LINK" >> $GITHUB_OUTPUT
+          DOWNLOAD_DIR="instagram_downloads/${SHORTCODE}"
+          # اولین فایل غیر از post_info.json و info.txt را انتخاب کن
+          FILE=$(ls -1 "$DOWNLOAD_DIR" | grep -Ev 'post_info\.json|info\.txt' | head -1)
+          if [ -z "$FILE" ]; then
+            echo "link=⚠️ فایلی یافت نشد" >> $GITHUB_OUTPUT
+          else
+            REPO="${{ github.repository }}"
+            BRANCH="${{ github.ref_name }}"
+            RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DOWNLOAD_DIR}/${FILE}"
+            echo "link=${RAW_URL}" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Comment success
+      - name: پاسخ موفقیت در کامنت
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BODY=$(mktemp)
-          echo "✅ پست ${{ steps.sc.outputs.shortcode }} با موفقیت به مگا آپلود شد." >> $BODY
-          echo "🔗 لینک: ${{ steps.mega.outputs.link }}" >> $BODY
-          echo "📁 مسیر: \`Instagram/${{ steps.username.outputs.username }}/${{ steps.sc.outputs.shortcode }}/\`" >> $BODY
+          echo "✅ پست ${{ steps.sc.outputs.shortcode }} با موفقیت دانلود و به مخزن اضافه شد." >> $BODY
+          echo "🔗 لینک فایل: ${{ steps.filelink.outputs.link }}" >> $BODY
+          echo "📁 مسیر در مخزن: \`instagram_downloads/${{ steps.username.outputs.username }}/${{ steps.sc.outputs.shortcode }}/\`" >> $BODY
           gh issue comment "${{ github.event.issue.number }}" --body-file $BODY
 
-      - name: Comment error
+      - name: پاسخ خطا
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در shortcode ${{ steps.sc.outputs.shortcode }}. لطفاً لاگ را بررسی کنید."
+          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در shortcode ${{ steps.sc.outputs.shortcode }}. لطفاً لاگ اکشن را بررسی کنید."
