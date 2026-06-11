@@ -31,18 +31,116 @@ jobs:
           python-version: '3.10'
       - run: pip install yt-dlp requests
 
+      - name: ایجاد اسکریپت دانلود با fallback
+        run: |
+          mkdir -p .github/scripts
+          cat > .github/scripts/download_with_fallback.py << 'EOF'
+          #!/usr/bin/env python3
+          import os, sys, json, subprocess, requests
+          from pathlib import Path
+
+          def download_file(url, output_path):
+              try:
+                  r = requests.get(url, stream=True, timeout=30)
+                  r.raise_for_status()
+                  with open(output_path, 'wb') as f:
+                      for chunk in r.iter_content(chunk_size=8192):
+                          f.write(chunk)
+                  return True
+              except Exception as e:
+                  print(f"⚠️ مستقیم: {e}")
+                  return False
+
+          def download_with_ytdlp(shortcode, output_dir, cookies_file=None):
+              url = f"https://www.instagram.com/p/{shortcode}/"
+              cmd = ["yt-dlp", "-o", f"{output_dir}/%(title)s.%(ext)s", url]
+              if cookies_file and Path(cookies_file).exists():
+                  cmd.extend(["--cookies", cookies_file])
+              try:
+                  subprocess.run(cmd, check=True, capture_output=True, text=True)
+                  return True
+              except subprocess.CalledProcessError as e:
+                  print(f"❌ yt-dlp: {e.stderr}")
+                  return False
+
+          def main():
+              if len(sys.argv) < 2:
+                  print("❌ استفاده: python download_with_fallback.py <shortcode>")
+                  sys.exit(1)
+              shortcode = sys.argv[1]
+              base_dir = Path("instagram_downloads") / shortcode
+              base_dir.mkdir(parents=True, exist_ok=True)
+              info_json = base_dir / "post_info.json"
+
+              # مرحله 1: لینک مستقیم از JSON
+              if info_json.exists():
+                  print("📄 استخراج لینک از post_info.json")
+                  with open(info_json, encoding='utf-8') as f:
+                      data = json.load(f)
+                  urls = []
+                  def find(obj):
+                      if isinstance(obj, dict):
+                          for v in obj.values():
+                              find(v)
+                      elif isinstance(obj, list):
+                          for i in obj:
+                              find(i)
+                      elif isinstance(obj, str) and ('cdninstagram.com' in obj or 'fbcdn.net' in obj):
+                          urls.append(obj)
+                  find(data)
+                  urls = list(set(urls))
+                  print(f"🔍 {len(urls)} لینک مستقیم")
+                  success = False
+                  for i, url in enumerate(urls):
+                      ext = url.split('?')[0].split('.')[-1] or 'mp4'
+                      out = base_dir / f"media_{i+1}.{ext}"
+                      if download_file(url, out):
+                          print(f"✅ {out.name}")
+                          success = True
+                  if success:
+                      return
+                  print("⚠️ مستقیم ناموفق، رفتن به yt-dlp")
+              else:
+                  print("ℹ️ post_info.json وجود ندارد")
+
+              # مرحله 2: yt-dlp بدون کوکی
+              print("🔄 yt-dlp بدون کوکی...")
+              if download_with_ytdlp(shortcode, base_dir):
+                  print("✅ موفق")
+                  return
+
+              # مرحله 3: yt-dlp با کوکی
+              cookies_path = os.environ.get("INSTAGRAM_COOKIES_PATH")
+              if cookies_path and Path(cookies_path).exists():
+                  print("🍪 yt-dlp با کوکی...")
+                  if download_with_ytdlp(shortcode, base_dir, cookies_path):
+                      print("✅ موفق")
+                      return
+                  else:
+                      print("❌ حتی با کوکی شکست")
+              else:
+                  print("⚠️ کوکی در دسترس نیست")
+              print("💥 دانلود ناموفق")
+              sys.exit(1)
+
+          if __name__ == "__main__":
+              main()
+          EOF
+          chmod +x .github/scripts/download_with_fallback.py
+
       - name: آماده‌سازی کوکی (در صورت وجود)
         run: |
           if [ -n "${{ secrets.INSTAGRAM_COOKIES }}" ]; then
             mkdir -p /tmp/cookies
-            echo "${{ secrets.INSTAGRAM_COOKIES }}" > /tmp/cookies/instagram_cookies.txt
+            # استفاده از printf و cat برای حفظ دقیق محتوا
+            printf '%s' "${{ secrets.INSTAGRAM_COOKIES }}" > /tmp/cookies/instagram_cookies.txt
             echo "INSTAGRAM_COOKIES_PATH=/tmp/cookies/instagram_cookies.txt" >> $GITHUB_ENV
             echo "✅ کوکی اینستاگرام بارگذاری شد."
           else
             echo "⚠️ کوکی در دسترس نیست، فقط از روش بدون کوکی استفاده می‌شود."
           fi
 
-      - name: دانلود پست (با لایه‌بندی: JSON → yt-dlp بدون کوکی → yt-dlp با کوکی)
+      - name: دانلود پست (JSON → yt-dlp بدون کوکی → yt-dlp با کوکی)
         run: python .github/scripts/download_with_fallback.py ${{ steps.sc.outputs.shortcode }}
 
       - name: خواندن نام کاربری از فایل post_info.json
