@@ -1,59 +1,88 @@
 #!/usr/bin/env python3
-# .github/scripts/download_from_json_fallback.py
+# -*- coding: utf-8 -*-
 import os
 import sys
 import json
 import glob
 import subprocess
 import requests
+import zipfile
 from pathlib import Path
+from io import BytesIO
 
-def find_json_for_shortcode(shortcode):
-    """جستجو在所有 فایل‌های JSON داخل instagram_data برای shortcode مورد نظر"""
-    json_files = glob.glob("instagram_data/*.json")
-    for jf in json_files:
+def find_post_by_shortcode(shortcode):
+    """جستجوی shortcode در همه فایل‌های JSON داخل instagram_data (ساختار recent_posts)"""
+    data_dir = Path("instagram_data")
+    if not data_dir.exists():
+        return None
+
+    for json_file in data_dir.glob("*.json"):
         try:
-            with open(jf, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            with open(json_file, "r", encoding="utf-8") as f:
+                content = f.read()
+                # حذف خط اول timestamp اگر وجود داشت
+                lines = content.split("\n", 1)
+                if len(lines) > 1 and lines[0].strip().isdigit():
+                    data = json.loads(lines[1])
+                else:
+                    data = json.loads(content)
+
+            if "recent_posts" in data:
+                for post in data["recent_posts"]:
+                    if post.get("shortcode") == shortcode:
+                        return post
+            if data.get("shortcode") == shortcode:
+                return data
         except:
             continue
+    return None
 
-        # ساختارهای مختلف JSON خروجی Apify یا سایر crawlerها را پوشش می‌دهد
-        # حالت اول: لیست مستقیم از پست‌ها
-        if isinstance(data, list):
-            for post in data:
-                if isinstance(post, dict) and post.get("shortcode") == shortcode:
-                    return post, jf
-        # حالت دوم: دیکشنری با کلیدهای احتمالی حاوی لیست پست‌ها
-        elif isinstance(data, dict):
-            # کلیدهای رایج
-            for key in ["posts", "items", "data", "graphql", "post"]:
-                if key in data and isinstance(data[key], list):
-                    for post in data[key]:
-                        if isinstance(post, dict) and post.get("shortcode") == shortcode:
-                            return post, jf
-            # خود دیکشنری ممکن است خودش یک پست باشد
-            if data.get("shortcode") == shortcode:
-                return data, jf
-    return None, None
-
-def download_file(url, output_path):
-    """دانلود فایل با requests (stream)"""
-    try:
-        r = requests.get(url, stream=True, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
-        r.raise_for_status()
-        with open(output_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-        return True
-    except Exception as e:
-        print(f"⚠️ دانلود مستقیم ناموفق: {e}")
+def download_media_urls(media_urls, download_dir, shortcode, post_type):
+    """دانلود مستقیم از media_urls (تکی یا ZIP برای کاروسل)"""
+    if not media_urls:
         return False
+    print(f"🖼️ دانلود از media_urls (تعداد: {len(media_urls)})...")
 
-def download_with_ytdlp(shortcode, output_dir, cookies_file=None):
-    """اجرای yt-dlp برای دانلود کل پست (عکس/ویدیو/کاروسل)"""
+    if len(media_urls) > 1 or post_type == "CAROUSEL_ALBUM":
+        # ایجاد ZIP
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zf:
+            for idx, url in enumerate(media_urls, start=1):
+                try:
+                    ext = 'jpg' if '.mp4' not in url and 'video' not in url else 'mp4'
+                    fname = f"{shortcode}_{idx}.{ext}"
+                    resp = requests.get(url, stream=True, timeout=30)
+                    resp.raise_for_status()
+                    zf.writestr(fname, resp.content)
+                    print(f"   ✅ {fname} اضافه شد")
+                except Exception as e:
+                    print(f"   ❌ خطا در {url}: {e}")
+        zip_path = download_dir / f"{shortcode}.zip"
+        with open(zip_path, 'wb') as f:
+            f.write(zip_buffer.getvalue())
+        print(f"✅ ZIP ذخیره شد: {zip_path}")
+        return True
+    else:
+        url = media_urls[0]
+        ext = 'jpg' if '.mp4' not in url and 'video' not in url else 'mp4'
+        file_path = download_dir / f"{shortcode}.{ext}"
+        try:
+            resp = requests.get(url, stream=True, timeout=30)
+            resp.raise_for_status()
+            with open(file_path, 'wb') as f:
+                for chunk in resp.iter_content(8192):
+                    f.write(chunk)
+            print(f"✅ فایل ذخیره شد: {file_path}")
+            return True
+        except Exception as e:
+            print(f"❌ دانلود مستقیم ناموفق: {e}")
+            return False
+
+def download_ytdlp(shortcode, output_dir, cookies_file=None):
+    """دانلود با yt-dlp (اختیاری با کوکی)"""
     url = f"https://www.instagram.com/p/{shortcode}/"
-    cmd = ["yt-dlp", "-o", f"{output_dir}/%(title)s.%(ext)s", url]
+    # --no-playlist و --no-overwrites برای اطمینان
+    cmd = ["yt-dlp", "--no-playlist", "-o", f"{output_dir}/%(title)s.%(ext)s", url]
     if cookies_file and Path(cookies_file).exists():
         cmd.extend(["--cookies", cookies_file])
     try:
@@ -63,133 +92,92 @@ def download_with_ytdlp(shortcode, output_dir, cookies_file=None):
         print(f"❌ yt-dlp خطا: {e.stderr}")
         return False
 
-def extract_media_urls(obj):
-    """بازگشتی لینک‌های cdninstagram یا fbcdn را از هر شیء JSON استخراج می‌کند"""
-    urls = []
-    if isinstance(obj, dict):
-        # لینک‌های مستقیم شناخته شده
-        if "display_url" in obj and obj["display_url"]:
-            urls.append(obj["display_url"])
-        if "video_url" in obj and obj["video_url"]:
-            urls.append(obj["video_url"])
-        # carousel (چند رسانه‌ای)
-        if "edge_sidecar_to_children" in obj:
-            edges = obj["edge_sidecar_to_children"].get("edges", [])
-            for edge in edges:
-                node = edge.get("node", {})
-                if "display_url" in node:
-                    urls.append(node["display_url"])
-                if "video_url" in node:
-                    urls.append(node["video_url"])
-        # جستجوی بازگشتی در تمام مقادیر
-        for v in obj.values():
-            urls.extend(extract_media_urls(v))
-    elif isinstance(obj, list):
-        for item in obj:
-            urls.extend(extract_media_urls(item))
-    elif isinstance(obj, str):
-        # فیلتر لینک‌های رسانه
-        if "cdninstagram.com" in obj or "fbcdn.net" in obj:
-            urls.append(obj)
-    return urls
-
 def main():
-    if len(sys.argv) < 2:
-        print("❌ استفاده: python download_from_json_fallback.py <shortcode>")
+    if len(sys.argv) != 2:
+        print("Usage: python download_with_fallback.py <shortcode>")
         sys.exit(1)
 
     shortcode = sys.argv[1]
-    base_dir = Path("instagram_downloads") / shortcode
-    base_dir.mkdir(parents=True, exist_ok=True)
+    print(f"🔍 شروع دانلود برای shortcode: {shortcode}")
 
-    # ---------- مرحله ۱: جستجو در instagram_data ----------
-    post_data, source_file = find_json_for_shortcode(shortcode)
-    if not post_data:
-        print(f"⚠️ shortcode {shortcode} در هیچ فایل JSON داخل instagram_data یافت نشد. رفتن به yt-dlp...")
+    # پیدا کردن پست در JSONهای موجود
+    post = find_post_by_shortcode(shortcode)
+    media_urls = []
+    username = "unknown"
+    post_type = ""
+
+    if post:
+        media_urls = post.get("media_urls", [])
+        username = post.get("owner_username", "unknown")
+        post_type = post.get("post_type", "")
+        print(f"📄 پست در JSON یافت شد. owner: {username}, media_urls: {len(media_urls)}")
     else:
-        print(f"📄 پست در فایل {source_file} پیدا شد.")
-        # استخراج لینک‌های مستقیم
-        urls = extract_media_urls(post_data)
-        urls = list(set(urls))  # حذف تکراری
-        print(f"🔍 {len(urls)} لینک مستقیم استخراج شد.")
+        print("⚠️ پست در فایل‌های JSON یافت نشد. مستقیماً به yt-dlp می‌رویم.")
 
-        # دانلود با requests
-        success = False
-        for i, url in enumerate(urls):
-            # تشخیص پسوند از URL (پس از حذف query string)
-            base_url = url.split("?")[0]
-            ext = base_url.split(".")[-1].lower()
-            if ext not in ["jpg", "jpeg", "png", "mp4", "mov", "gif"]:
-                ext = "mp4" if "video" in url else "jpg"
-            filename = f"media_{i+1}.{ext}"
-            out_path = base_dir / filename
-            if download_file(url, out_path):
-                print(f"✅ دانلود مستقیم: {filename}")
-                success = True
-            else:
-                print(f"❌ شکست در دانلود مستقیم: {url[:100]}...")
+    # پوشه مقصد
+    download_dir = Path("instagram_downloads") / shortcode
+    download_dir.mkdir(parents=True, exist_ok=True)
 
-        if success:
-            print("🎉 همه فایل‌های قابل دانلود با روش مستقیم دریافت شدند.")
-            # ذخیره post_info.json برای خواندن username بعداً
-            # نام کاربری را از post_data استخراج می‌کنیم
-            username = None
-            if "owner" in post_data and isinstance(post_data["owner"], dict):
-                username = post_data["owner"].get("username")
-            if not username:
-                username = post_data.get("username")
-            if not username:
-                username = "unknown"
-            with open(base_dir / "post_info.json", "w", encoding="utf-8") as f:
-                json.dump({"shortcode": shortcode, "username": username}, f)
-            return  # موفقیت، پایان کار
+    success = False
 
-        print("⚠️ هیچ لینک مستقیمی کار نکرد. رفتن به مرحله yt-dlp...")
+    # ---------- مرحله ۱: دانلود مستقیم از media_urls ----------
+    if media_urls:
+        if download_media_urls(media_urls, download_dir, shortcode, post_type):
+            success = True
+            method = "media_urls"
+            print("✅ دانلود با لینک مستقیم موفق بود.")
 
-    # ---------- مرحله ۲: yt-dlp بدون کوکی ----------
-    print("🔄 تلاش با yt-dlp (بدون کوکی)...")
-    if download_with_ytdlp(shortcode, base_dir):
-        print("✅ دانلود با yt-dlp بدون کوکی موفقیت‌آمیز بود.")
-        # استخراج نام کاربری از خروجی yt-dlp (اجرای دوباره --dump-json)
-        try:
-            result = subprocess.run(["yt-dlp", "--dump-json", f"https://www.instagram.com/p/{shortcode}/"],
-                                    capture_output=True, text=True)
-            if result.returncode == 0:
-                info = json.loads(result.stdout)
-                username = info.get("uploader", "unknown")
-                with open(base_dir / "post_info.json", "w", encoding="utf-8") as f:
-                    json.dump({"shortcode": shortcode, "username": username}, f)
-        except:
-            with open(base_dir / "post_info.json", "w", encoding="utf-8") as f:
-                json.dump({"shortcode": shortcode, "username": "unknown"}, f)
-        return
-
-    # ---------- مرحله ۳: yt-dlp با کوکی ----------
-    cookies_path = os.environ.get("INSTAGRAM_COOKIES_PATH")
-    if cookies_path and Path(cookies_path).exists():
-        print("🍪 تلاش با yt-dlp + کوکی...")
-        if download_with_ytdlp(shortcode, base_dir, cookies_path):
-            print("✅ دانلود با کوکی موفقیت‌آمیز بود.")
-            # مثل بالا سعی در استخراج username
+    # ---------- مرحله ۲: در صورت عدم موفقیت، yt-dlp بدون کوکی ----------
+    if not success:
+        print("🔄 مرحله ۲: تلاش با yt-dlp (بدون کوکی)...")
+        if download_ytdlp(shortcode, download_dir):
+            success = True
+            method = "yt-dlp_no_cookie"
+            print("✅ دانلود با yt-dlp بدون کوکی موفق بود.")
+            # سعی در دریافت username از خروجی yt-dlp (اختیاری)
             try:
-                result = subprocess.run(["yt-dlp", "--dump-json", f"https://www.instagram.com/p/{shortcode}/", "--cookies", cookies_path],
+                result = subprocess.run(["yt-dlp", "--dump-json", f"https://www.instagram.com/p/{shortcode}/"],
                                         capture_output=True, text=True)
                 if result.returncode == 0:
                     info = json.loads(result.stdout)
-                    username = info.get("uploader", "unknown")
-                    with open(base_dir / "post_info.json", "w", encoding="utf-8") as f:
-                        json.dump({"shortcode": shortcode, "username": username}, f)
+                    username = info.get("uploader", username)
             except:
-                with open(base_dir / "post_info.json", "w", encoding="utf-8") as f:
-                    json.dump({"shortcode": shortcode, "username": "unknown"}, f)
-            return
-        else:
-            print("❌ حتی با کوکی هم دانلود نشد.")
-    else:
-        print("⚠️ فایل کوکی در دسترس نیست.")
+                pass
 
-    print("💥 دانلود با هیچ روشی انجام نشد.")
-    sys.exit(1)
+    # ---------- مرحله ۳: در صورت عدم موفقیت، yt-dlp با کوکی ----------
+    if not success:
+        cookies_path = os.environ.get("INSTAGRAM_COOKIES_PATH")
+        if cookies_path and Path(cookies_path).exists():
+            print("🍪 مرحله ۳: تلاش با yt-dlp + کوکی...")
+            if download_ytdlp(shortcode, download_dir, cookies_path):
+                success = True
+                method = "yt-dlp_with_cookie"
+                print("✅ دانلود با yt-dlp و کوکی موفق بود.")
+                # استخراج username
+                try:
+                    result = subprocess.run(["yt-dlp", "--dump-json", f"https://www.instagram.com/p/{shortcode}/", "--cookies", cookies_path],
+                                            capture_output=True, text=True)
+                    if result.returncode == 0:
+                        info = json.loads(result.stdout)
+                        username = info.get("uploader", username)
+                except:
+                    pass
+            else:
+                print("❌ حتی با کوکی هم دانلود نشد.")
+        else:
+            print("⚠️ فایل کوکی در دسترس نیست. مرحله ۳ رد شد.")
+
+    if success:
+        # ذخیره post_info.json برای مرحله بعدی workflow
+        with open(download_dir / "post_info.json", "w", encoding="utf-8") as f:
+            json.dump({"shortcode": shortcode, "username": username}, f, indent=2)
+        # همچنین یک info.txt برای جزئیات
+        with open(download_dir / "info.txt", "w", encoding="utf-8") as f:
+            f.write(f"Method: {method}\nShortcode: {shortcode}\nUsername: {username}\n")
+        print(f"🎉 دانلود نهایی موفق برای {shortcode}")
+    else:
+        print(f"💥 همه روش‌ها شکست خوردند: {shortcode}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
