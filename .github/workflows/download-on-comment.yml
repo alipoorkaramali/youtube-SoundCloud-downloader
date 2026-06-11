@@ -25,27 +25,25 @@ jobs:
           fi
           echo "shortcode=$SHORTCODE" >> $GITHUB_OUTPUT
 
+      - name: 🔐 رمزگشایی کوکی اینستاگرام از فایل INSTAGRAM_COOKIES.gpg
+        run: |
+          if [ ! -f INSTAGRAM_COOKIES.gpg ]; then
+            echo "⚠️ فایل INSTAGRAM_COOKIES.gpg یافت نشد. کوکی در دسترس نیست."
+            exit 0
+          fi
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt INSTAGRAM_COOKIES.gpg > cookies.txt
+          if [ ! -s cookies.txt ]; then
+            echo "❌ رمزگشایی کوکی ناموفق بود یا فایل خالی است"
+            exit 1
+          fi
+          echo "✅ کوکی با موفقیت رمزگشایی شد"
+          echo "INSTAGRAM_COOKIES_PATH=$(pwd)/cookies.txt" >> $GITHUB_ENV
+
       - name: نصب Python و کتابخانه‌ها
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       - run: pip install --upgrade yt-dlp requests
-
-      - name: آماده‌سازی کوکی
-        run: |
-          if [ -n "${{ secrets.INSTAGRAM_COOKIES }}" ]; then
-            mkdir -p /tmp/cookies
-            printf '%s' "${{ secrets.INSTAGRAM_COOKIES }}" > /tmp/cookies/instagram_cookies.txt
-            echo "INSTAGRAM_COOKIES_PATH=/tmp/cookies/instagram_cookies.txt" >> $GITHUB_ENV
-            echo "✅ کوکی از secret بارگذاری شد."
-          elif [ -f "cookies.txt.gpg" ] && [ -n "${{ secrets.COOKIE_PASSPHRASE }}" ]; then
-            mkdir -p /tmp/cookies
-            gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.COOKIE_PASSPHRASE }}" --output /tmp/cookies/instagram_cookies.txt cookies.txt.gpg
-            echo "INSTAGRAM_COOKIES_PATH=/tmp/cookies/instagram_cookies.txt" >> $GITHUB_ENV
-            echo "✅ کوکی از فایل gpg بارگذاری شد."
-          else
-            echo "⚠️ کوکی در دسترس نیست."
-          fi
 
       - name: ایجاد اسکریپت دانلود (سه مرحله‌ای)
         run: |
@@ -225,7 +223,7 @@ jobs:
             echo "username=unknown" >> $GITHUB_OUTPUT
           fi
 
-      # ========== rclone cache ==========
+      # ========== rclone با پشتیبانی کش ==========
       - name: Cache rclone
         id: cache-rclone
         uses: actions/cache@v4
@@ -251,7 +249,8 @@ jobs:
       - name: Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
-          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+              --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
 
       - name: Upload to Mega
@@ -270,6 +269,7 @@ jobs:
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
       - name: Comment success
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
