@@ -45,15 +45,16 @@ jobs:
           python-version: '3.10'
       - run: pip install --upgrade yt-dlp requests
 
-      - name: ایجاد اسکریپت دانلود (سه مرحله‌ای)
+      - name: ایجاد اسکریپت دانلود (سه مرحله‌ای + استخراج متادیتا)
         run: |
           mkdir -p .github/scripts
           cat > .github/scripts/download_with_fallback.py << 'EOF'
           #!/usr/bin/env python3
           # -*- coding: utf-8 -*-
-          import os, sys, json, glob, subprocess, requests, zipfile
+          import os, sys, json, subprocess, requests, zipfile
           from pathlib import Path
           from io import BytesIO
+          from datetime import datetime
 
           def find_post_by_shortcode(shortcode):
               data_dir = Path("instagram_data")
@@ -77,6 +78,76 @@ jobs:
                   except:
                       continue
               return None
+
+          def extract_metadata_from_post(post):
+              """استخراج فیلدهای مفید از آبجکت پست (JSON اینستاگرام)"""
+              metadata = {}
+              metadata["shortcode"] = post.get("shortcode")
+              metadata["owner_username"] = post.get("owner_username")
+              metadata["owner_id"] = post.get("owner_id")
+              metadata["caption"] = post.get("caption", "")
+              metadata["like_count"] = post.get("like_count", 0)
+              metadata["comment_count"] = post.get("comment_count", 0)
+              metadata["taken_at"] = post.get("taken_at")
+              if metadata["taken_at"]:
+                  try:
+                      dt = datetime.fromtimestamp(metadata["taken_at"])
+                      metadata["taken_at_str"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                  except:
+                      pass
+              metadata["post_type"] = post.get("post_type")
+              metadata["location"] = post.get("location")
+              metadata["hashtags"] = post.get("hashtags", [])
+              metadata["mentions"] = post.get("mentions", [])
+              metadata["media_urls"] = post.get("media_urls", [])
+              # فیلدهای اضافی احتمالی
+              for extra in ["video_url", "display_url", "thumbnail_url"]:
+                  if extra in post:
+                      metadata[extra] = post[extra]
+              return metadata
+
+          def extract_metadata_from_ytdlp(shortcode, cookies_file=None):
+              """اجرای yt-dlp --dump-json و تبدیل به دیکشنری"""
+              url = f"https://www.instagram.com/p/{shortcode}/"
+              cmd = ["yt-dlp", "--dump-json", "--no-playlist", url]
+              if cookies_file and Path(cookies_file).exists():
+                  cmd.extend(["--cookies", cookies_file])
+              try:
+                  result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                  info = json.loads(result.stdout)
+                  # نگاشت فیلدهای yt-dlp به ساختار مورد نظر ما
+                  metadata = {}
+                  metadata["shortcode"] = shortcode
+                  metadata["owner_username"] = info.get("uploader")
+                  metadata["owner_id"] = info.get("channel_id")
+                  metadata["caption"] = info.get("description", "")
+                  metadata["like_count"] = info.get("like_count")
+                  metadata["comment_count"] = info.get("comment_count")
+                  metadata["taken_at"] = info.get("timestamp")
+                  if metadata["taken_at"]:
+                      try:
+                          dt = datetime.fromtimestamp(metadata["taken_at"])
+                          metadata["taken_at_str"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                      except:
+                          pass
+                  metadata["post_type"] = info.get("extractor_key")  # 'Instagram'
+                  metadata["location"] = info.get("location")
+                  # استخراج هشتگ‌ها و منشن‌ها از کپشن (ساده)
+                  caption = metadata["caption"] or ""
+                  hashtags = [word for word in caption.split() if word.startswith("#")]
+                  mentions = [word for word in caption.split() if word.startswith("@")]
+                  metadata["hashtags"] = hashtags
+                  metadata["mentions"] = mentions
+                  # url رسانه
+                  if "entries" in info and info["entries"]:
+                      # اگر کاروسل باشد
+                      metadata["media_urls"] = [e.get("url") for e in info["entries"] if e.get("url")]
+                  else:
+                      metadata["media_urls"] = [info.get("url")]
+                  return metadata
+              except Exception as e:
+                  print(f"⚠️ خطا در دریافت متادیتا از yt-dlp: {e}")
+                  return None
 
           def download_media_urls(media_urls, download_dir, shortcode, post_type):
               if not media_urls:
@@ -128,6 +199,21 @@ jobs:
                   print(f"❌ yt-dlp خطا: {e.stderr}")
                   return False
 
+          def save_metadata(download_dir, metadata):
+              """ذخیره متادیتا در فایل metadata.json (و همچنین post_info.json برای سازگاری)"""
+              if not metadata:
+                  return
+              # ذخیره کامل
+              with open(download_dir / "metadata.json", "w", encoding="utf-8") as f:
+                  json.dump(metadata, f, indent=2, ensure_ascii=False)
+              # ذخیره ساده برای استفاده قبلی
+              simple = {
+                  "shortcode": metadata.get("shortcode"),
+                  "username": metadata.get("owner_username", "unknown")
+              }
+              with open(download_dir / "post_info.json", "w", encoding="utf-8") as f:
+                  json.dump(simple, f, indent=2)
+
           def main():
               if len(sys.argv) != 2:
                   print("Usage: python download_with_fallback.py <shortcode>")
@@ -135,17 +221,21 @@ jobs:
               shortcode = sys.argv[1]
               print(f"🔍 شروع دانلود برای shortcode: {shortcode}")
 
+              # مرحله 1: جستجو در JSON های موجود
               post = find_post_by_shortcode(shortcode)
+              metadata = None
               media_urls = []
               username = "unknown"
               post_type = ""
+
               if post:
-                  media_urls = post.get("media_urls", [])
-                  username = post.get("owner_username", "unknown")
-                  post_type = post.get("post_type", "")
+                  metadata = extract_metadata_from_post(post)
+                  media_urls = metadata.get("media_urls", [])
+                  username = metadata.get("owner_username", "unknown")
+                  post_type = metadata.get("post_type", "")
                   print(f"📄 پست در JSON یافت شد. owner: {username}, media_urls: {len(media_urls)}")
               else:
-                  print("⚠️ پست در فایل‌های JSON یافت نشد. مستقیماً به yt-dlp می‌رویم.")
+                  print("⚠️ پست در فایل‌های JSON یافت نشد. تلاش برای دریافت متادیتا از yt-dlp...")
 
               download_dir = Path("instagram_downloads") / shortcode
               download_dir.mkdir(parents=True, exist_ok=True)
@@ -153,27 +243,25 @@ jobs:
               success = False
               method = ""
 
+              # دانلود با لینک مستقیم (اگر media_urls موجود باشد)
               if media_urls:
                   if download_media_urls(media_urls, download_dir, shortcode, post_type):
                       success = True
                       method = "media_urls"
                       print("✅ دانلود با لینک مستقیم موفق بود.")
 
+              # مرحله 2: yt-dlp بدون کوکی
               if not success:
                   print("🔄 مرحله ۲: تلاش با yt-dlp (بدون کوکی)...")
                   if download_ytdlp(shortcode, download_dir):
                       success = True
                       method = "yt-dlp_no_cookie"
                       print("✅ دانلود با yt-dlp بدون کوکی موفق بود.")
-                      try:
-                          result = subprocess.run(["yt-dlp", "--dump-json", f"https://www.instagram.com/p/{shortcode}/"],
-                                                  capture_output=True, text=True)
-                          if result.returncode == 0:
-                              info = json.loads(result.stdout)
-                              username = info.get("uploader", username)
-                      except:
-                          pass
+                      # دریافت متادیتا از yt-dlp
+                      if metadata is None:
+                          metadata = extract_metadata_from_ytdlp(shortcode)
 
+              # مرحله 3: yt-dlp با کوکی
               if not success:
                   cookies_path = os.environ.get("INSTAGRAM_COOKIES_PATH")
                   if cookies_path and Path(cookies_path).exists():
@@ -182,22 +270,30 @@ jobs:
                           success = True
                           method = "yt-dlp_with_cookie"
                           print("✅ دانلود با yt-dlp و کوکی موفق بود.")
-                          try:
-                              result = subprocess.run(["yt-dlp", "--dump-json", f"https://www.instagram.com/p/{shortcode}/", "--cookies", cookies_path],
-                                                      capture_output=True, text=True)
-                              if result.returncode == 0:
-                                  info = json.loads(result.stdout)
-                                  username = info.get("uploader", username)
-                          except:
-                              pass
+                          if metadata is None:
+                              metadata = extract_metadata_from_ytdlp(shortcode, cookies_path)
                   else:
                       print("⚠️ فایل کوکی در دسترس نیست. مرحله ۳ رد شد.")
 
+              # در صورت موفقیت، متادیتا را ذخیره کن
               if success:
-                  with open(download_dir / "post_info.json", "w", encoding="utf-8") as f:
-                      json.dump({"shortcode": shortcode, "username": username}, f, indent=2)
+                  if metadata is None:
+                      # حداقل متادیتا را از اطلاعات موجود بساز
+                      metadata = {
+                          "shortcode": shortcode,
+                          "owner_username": username,
+                          "caption": "",
+                          "like_count": 0,
+                          "comment_count": 0
+                      }
+                  # اطمینان از وجود username در metadata برای کامنت بعدی
+                  if "owner_username" not in metadata or not metadata["owner_username"]:
+                      metadata["owner_username"] = username
+                  save_metadata(download_dir, metadata)
+
+                  # ذخیره فایل info.txt (گزارش روش دانلود)
                   with open(download_dir / "info.txt", "w", encoding="utf-8") as f:
-                      f.write(f"Method: {method}\nShortcode: {shortcode}\nUsername: {username}\n")
+                      f.write(f"Method: {method}\nShortcode: {shortcode}\nUsername: {metadata.get('owner_username')}\n")
                   print(f"🎉 دانلود نهایی موفق برای {shortcode}")
               else:
                   print(f"💥 همه روش‌ها شکست خوردند: {shortcode}")
@@ -208,7 +304,7 @@ jobs:
           EOF
           chmod +x .github/scripts/download_with_fallback.py
 
-      - name: دانلود پست (سه مرحله)
+      - name: دانلود پست (سه مرحله + ذخیره متادیتا)
         run: python .github/scripts/download_with_fallback.py ${{ steps.sc.outputs.shortcode }}
 
       - name: خواندن نام کاربری از فایل post_info.json
