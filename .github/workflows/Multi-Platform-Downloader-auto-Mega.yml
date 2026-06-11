@@ -14,6 +14,18 @@ on:
       url:
         description: '🔗 لینک دانلود'
         required: true
+      # ========== دو ورودی جدید که اسکریپت (8) ارسال می‌کند ==========
+      type:
+        description: 'نوع محتوا (audio/video)'
+        required: false
+        default: 'audio'
+        type: string
+      quality:
+        description: 'کیفیت دانلود (best, worst, etc.)'
+        required: false
+        default: 'best'
+        type: string
+      # ==============================================================
       folder:
         description: '📁 پوشه در مخزن'
         required: false
