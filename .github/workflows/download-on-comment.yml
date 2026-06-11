@@ -31,8 +31,19 @@ jobs:
           python-version: '3.10'
       - run: pip install yt-dlp requests
 
-      - name: دانلود پست (با جستجو در instagram_data)
-        run: python .github/scripts/download_instagram_by_index.py ${{ steps.sc.outputs.shortcode }}
+      - name: آماده‌سازی کوکی (در صورت وجود)
+        run: |
+          if [ -n "${{ secrets.INSTAGRAM_COOKIES }}" ]; then
+            mkdir -p /tmp/cookies
+            echo "${{ secrets.INSTAGRAM_COOKIES }}" > /tmp/cookies/instagram_cookies.txt
+            echo "INSTAGRAM_COOKIES_PATH=/tmp/cookies/instagram_cookies.txt" >> $GITHUB_ENV
+            echo "✅ کوکی اینستاگرام بارگذاری شد."
+          else
+            echo "⚠️ کوکی در دسترس نیست، فقط از روش بدون کوکی استفاده می‌شود."
+          fi
+
+      - name: دانلود پست (با لایه‌بندی: JSON → yt-dlp بدون کوکی → yt-dlp با کوکی)
+        run: python .github/scripts/download_with_fallback.py ${{ steps.sc.outputs.shortcode }}
 
       - name: خواندن نام کاربری از فایل post_info.json
         id: username
