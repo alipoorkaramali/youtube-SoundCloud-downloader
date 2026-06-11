@@ -1,4 +1,4 @@
-name: 📥 دانلود اینستاگرام (سه مرحله‌ای)
+name: 📥 دانلود اینستاگرام و آپلود به مگا
 
 on:
   issue_comment:
@@ -10,12 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
-      contents: write
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: استخراج shortcode
         id: sc
@@ -45,8 +42,172 @@ jobs:
             echo "⚠️ کوکی در دسترس نیست."
           fi
 
-      - name: دانلود با سه مرحله (JSON → yt-dlp بدون کوکی → yt-dlp با کوکی)
-        run: python ${GITHUB_WORKSPACE}/.github/scripts/download_with_fallback.py ${{ steps.sc.outputs.shortcode }}
+      - name: ایجاد اسکریپت دانلود (سه مرحله‌ای)
+        run: |
+          mkdir -p .github/scripts
+          cat > .github/scripts/download_with_fallback.py << 'EOF'
+          #!/usr/bin/env python3
+          # -*- coding: utf-8 -*-
+          import os, sys, json, glob, subprocess, requests, zipfile
+          from pathlib import Path
+          from io import BytesIO
+
+          def find_post_by_shortcode(shortcode):
+              data_dir = Path("instagram_data")
+              if not data_dir.exists():
+                  return None
+              for json_file in data_dir.glob("*.json"):
+                  try:
+                      with open(json_file, "r", encoding="utf-8") as f:
+                          content = f.read()
+                          lines = content.split("\n", 1)
+                          if len(lines) > 1 and lines[0].strip().isdigit():
+                              data = json.loads(lines[1])
+                          else:
+                              data = json.loads(content)
+                      if "recent_posts" in data:
+                          for post in data["recent_posts"]:
+                              if post.get("shortcode") == shortcode:
+                                  return post
+                      if data.get("shortcode") == shortcode:
+                          return data
+                  except:
+                      continue
+              return None
+
+          def download_media_urls(media_urls, download_dir, shortcode, post_type):
+              if not media_urls:
+                  return False
+              print(f"🖼️ دانلود از media_urls (تعداد: {len(media_urls)})...")
+              if len(media_urls) > 1 or post_type == "CAROUSEL_ALBUM":
+                  zip_buffer = BytesIO()
+                  with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zf:
+                      for idx, url in enumerate(media_urls, start=1):
+                          try:
+                              ext = 'jpg' if '.mp4' not in url and 'video' not in url else 'mp4'
+                              fname = f"{shortcode}_{idx}.{ext}"
+                              resp = requests.get(url, stream=True, timeout=30)
+                              resp.raise_for_status()
+                              zf.writestr(fname, resp.content)
+                              print(f"   ✅ {fname} اضافه شد")
+                          except Exception as e:
+                              print(f"   ❌ خطا در {url}: {e}")
+                  zip_path = download_dir / f"{shortcode}.zip"
+                  with open(zip_path, 'wb') as f:
+                      f.write(zip_buffer.getvalue())
+                  print(f"✅ ZIP ذخیره شد: {zip_path}")
+                  return True
+              else:
+                  url = media_urls[0]
+                  ext = 'jpg' if '.mp4' not in url and 'video' not in url else 'mp4'
+                  file_path = download_dir / f"{shortcode}.{ext}"
+                  try:
+                      resp = requests.get(url, stream=True, timeout=30)
+                      resp.raise_for_status()
+                      with open(file_path, 'wb') as f:
+                          for chunk in resp.iter_content(8192):
+                              f.write(chunk)
+                      print(f"✅ فایل ذخیره شد: {file_path}")
+                      return True
+                  except Exception as e:
+                      print(f"❌ دانلود مستقیم ناموفق: {e}")
+                      return False
+
+          def download_ytdlp(shortcode, output_dir, cookies_file=None):
+              url = f"https://www.instagram.com/p/{shortcode}/"
+              cmd = ["yt-dlp", "--no-playlist", "-o", f"{output_dir}/%(title)s.%(ext)s", url]
+              if cookies_file and Path(cookies_file).exists():
+                  cmd.extend(["--cookies", cookies_file])
+              try:
+                  subprocess.run(cmd, check=True, capture_output=True, text=True)
+                  return True
+              except subprocess.CalledProcessError as e:
+                  print(f"❌ yt-dlp خطا: {e.stderr}")
+                  return False
+
+          def main():
+              if len(sys.argv) != 2:
+                  print("Usage: python download_with_fallback.py <shortcode>")
+                  sys.exit(1)
+              shortcode = sys.argv[1]
+              print(f"🔍 شروع دانلود برای shortcode: {shortcode}")
+
+              post = find_post_by_shortcode(shortcode)
+              media_urls = []
+              username = "unknown"
+              post_type = ""
+              if post:
+                  media_urls = post.get("media_urls", [])
+                  username = post.get("owner_username", "unknown")
+                  post_type = post.get("post_type", "")
+                  print(f"📄 پست در JSON یافت شد. owner: {username}, media_urls: {len(media_urls)}")
+              else:
+                  print("⚠️ پست در فایل‌های JSON یافت نشد. مستقیماً به yt-dlp می‌رویم.")
+
+              download_dir = Path("instagram_downloads") / shortcode
+              download_dir.mkdir(parents=True, exist_ok=True)
+
+              success = False
+              method = ""
+
+              if media_urls:
+                  if download_media_urls(media_urls, download_dir, shortcode, post_type):
+                      success = True
+                      method = "media_urls"
+                      print("✅ دانلود با لینک مستقیم موفق بود.")
+
+              if not success:
+                  print("🔄 مرحله ۲: تلاش با yt-dlp (بدون کوکی)...")
+                  if download_ytdlp(shortcode, download_dir):
+                      success = True
+                      method = "yt-dlp_no_cookie"
+                      print("✅ دانلود با yt-dlp بدون کوکی موفق بود.")
+                      try:
+                          result = subprocess.run(["yt-dlp", "--dump-json", f"https://www.instagram.com/p/{shortcode}/"],
+                                                  capture_output=True, text=True)
+                          if result.returncode == 0:
+                              info = json.loads(result.stdout)
+                              username = info.get("uploader", username)
+                      except:
+                          pass
+
+              if not success:
+                  cookies_path = os.environ.get("INSTAGRAM_COOKIES_PATH")
+                  if cookies_path and Path(cookies_path).exists():
+                      print("🍪 مرحله ۳: تلاش با yt-dlp + کوکی...")
+                      if download_ytdlp(shortcode, download_dir, cookies_path):
+                          success = True
+                          method = "yt-dlp_with_cookie"
+                          print("✅ دانلود با yt-dlp و کوکی موفق بود.")
+                          try:
+                              result = subprocess.run(["yt-dlp", "--dump-json", f"https://www.instagram.com/p/{shortcode}/", "--cookies", cookies_path],
+                                                      capture_output=True, text=True)
+                              if result.returncode == 0:
+                                  info = json.loads(result.stdout)
+                                  username = info.get("uploader", username)
+                          except:
+                              pass
+                  else:
+                      print("⚠️ فایل کوکی در دسترس نیست. مرحله ۳ رد شد.")
+
+              if success:
+                  with open(download_dir / "post_info.json", "w", encoding="utf-8") as f:
+                      json.dump({"shortcode": shortcode, "username": username}, f, indent=2)
+                  with open(download_dir / "info.txt", "w", encoding="utf-8") as f:
+                      f.write(f"Method: {method}\nShortcode: {shortcode}\nUsername: {username}\n")
+                  print(f"🎉 دانلود نهایی موفق برای {shortcode}")
+              else:
+                  print(f"💥 همه روش‌ها شکست خوردند: {shortcode}")
+                  sys.exit(1)
+
+          if __name__ == "__main__":
+              main()
+          EOF
+          chmod +x .github/scripts/download_with_fallback.py
+
+      - name: دانلود پست (سه مرحله)
+        run: python .github/scripts/download_with_fallback.py ${{ steps.sc.outputs.shortcode }}
+
       - name: خواندن نام کاربری از فایل post_info.json
         id: username
         run: |
@@ -59,55 +220,63 @@ jobs:
             echo "username=unknown" >> $GITHUB_OUTPUT
           fi
 
-      - name: Commit و Push فایل‌های دانلود شده
-        id: commit
+      # ========== rclone cache ==========
+      - name: Cache rclone
+        id: cache-rclone
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/rclone
+          key: rclone-${{ runner.os }}
+
+      - name: Install rclone (if not cached)
+        if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.local/bin
+          cp /usr/bin/rclone ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Enable rclone (cached)
+        if: steps.cache-rclone.outputs.cache-hit == 'true'
+        run: |
+          chmod +x ~/.local/bin/rclone
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          rclone version
+
+      - name: Decrypt rclone config
+        run: |
+          mkdir -p ~/.config/rclone
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+          chmod 600 ~/.config/rclone/rclone.conf
+
+      - name: Upload to Mega
+        id: mega
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
           SHORTCODE="${{ steps.sc.outputs.shortcode }}"
-          git add "instagram_downloads/${SHORTCODE}"
-          if git diff --staged --quiet; then
-            echo "no_changes=true" >> $GITHUB_OUTPUT
-          else
-            git commit -m "📥 افزودن پست اینستاگرام shortcode: ${SHORTCODE}"
-            echo "no_changes=false" >> $GITHUB_OUTPUT
-          fi
+          USERNAME="${{ steps.username.outputs.username }}"
+          REMOTE="mega:Instagram/${USERNAME}/${SHORTCODE}"
+          rclone mkdir "$REMOTE" 2>/dev/null || true
+          rclone copy "instagram_downloads/$SHORTCODE" "$REMOTE" --transfers=4
+          sudo apt-get update && sudo apt-get install -y megatools
+          LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "/Instagram/${USERNAME}/${SHORTCODE}" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
+          echo "link=$LINK" >> $GITHUB_OUTPUT
 
-      - name: Push به مخزن
-        if: steps.commit.outputs.no_changes == 'false'
-        run: |
-          git pull --rebase --autostash origin ${{ github.ref_name }}
-          git push origin ${{ github.ref_name }}
-
-      - name: ساخت لینک دانلود مستقیم (raw)
-        id: filelink
-        run: |
-          SHORTCODE="${{ steps.sc.outputs.shortcode }}"
-          DOWNLOAD_DIR="instagram_downloads/${SHORTCODE}"
-          # اولین فایل غیر از post_info.json و info.txt را انتخاب کن
-          FILE=$(ls -1 "$DOWNLOAD_DIR" | grep -Ev 'post_info\.json|info\.txt' | head -1)
-          if [ -z "$FILE" ]; then
-            echo "link=⚠️ فایلی یافت نشد" >> $GITHUB_OUTPUT
-          else
-            REPO="${{ github.repository }}"
-            BRANCH="${{ github.ref_name }}"
-            RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DOWNLOAD_DIR}/${FILE}"
-            echo "link=${RAW_URL}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: پاسخ موفقیت در کامنت
+      - name: Comment success
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BODY=$(mktemp)
-          echo "✅ پست ${{ steps.sc.outputs.shortcode }} با موفقیت دانلود و به مخزن اضافه شد." >> $BODY
-          echo "🔗 لینک فایل: ${{ steps.filelink.outputs.link }}" >> $BODY
-          echo "📁 مسیر در مخزن: \`instagram_downloads/${{ steps.username.outputs.username }}/${{ steps.sc.outputs.shortcode }}/\`" >> $BODY
+          echo "✅ پست ${{ steps.sc.outputs.shortcode }} با موفقیت به مگا آپلود شد." >> $BODY
+          echo "🔗 لینک: ${{ steps.mega.outputs.link }}" >> $BODY
+          echo "📁 مسیر: \`Instagram/${{ steps.username.outputs.username }}/${{ steps.sc.outputs.shortcode }}/\`" >> $BODY
           gh issue comment "${{ github.event.issue.number }}" --body-file $BODY
 
-      - name: پاسخ خطا
+      - name: Comment error
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در shortcode ${{ steps.sc.outputs.shortcode }}. لطفاً لاگ اکشن را بررسی کنید."
+          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در shortcode ${{ steps.sc.outputs.shortcode }}. لطفاً لاگ را بررسی کنید."
