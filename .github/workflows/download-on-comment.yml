@@ -46,8 +46,7 @@ jobs:
           fi
 
       - name: دانلود با سه مرحله (JSON → yt-dlp بدون کوکی → yt-dlp با کوکی)
-        run: python .github/scripts/download_with_fallback.py ${{ steps.sc.outputs.shortcode }}
-
+        run: python ${GITHUB_WORKSPACE}/.github/scripts/download_with_fallback.py ${{ steps.sc.outputs.shortcode }}
       - name: خواندن نام کاربری از فایل post_info.json
         id: username
         run: |
