@@ -197,23 +197,3 @@ jobs:
           
           echo "❌ پس از $MAX_RETRIES تلاش، پوش ناموفق بود."
           exit 1
-
-      # ================= انتشار در Release (اختیاری) =================
-      - name: 📦 انتشار در Release (فایل‌های کوچک)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          FILE=$(find "${{ github.event.inputs.folder }}" -maxdepth 1 -type f \( -name "*.mp3" -o -name "*.mp4" \) 2>/dev/null | head -1)
-          if [ -z "$FILE" ]; then
-            echo "فایل یکپارچه‌ای یافت نشد."
-            exit 0
-          fi
-          echo "آپلود فایل یکپارچه: $FILE"
-          if gh release view latest &> /dev/null; then
-            gh release upload latest "$FILE" --clobber
-          else
-            gh release create latest "$FILE" \
-              --title "مجموعه دانلودهای چندمنظوره" \
-              --notes "فایل‌های یکپارچه (زیر 30MB) اینجا قرار می‌گیرند."
-          fi
-          echo "📎 لینک Release: https://github.com/${{ github.repository }}/releases/tag/latest"
