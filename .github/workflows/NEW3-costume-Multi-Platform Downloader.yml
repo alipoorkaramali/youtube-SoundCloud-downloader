@@ -42,11 +42,11 @@ jobs:
       # ============= رمزگشایی فایل کوکی =============
       - name: 🔐 رمزگشایی فایل cookies.txt.gpg
         run: |
-          if [ ! -f "cookies.txt.gpg" ]; then
+          if [ ! -f "config/cookies.txt.gpg" ]; then
             echo "❌ خطا: فایل cookies.txt.gpg در مخزن یافت نشد!"
             exit 1
           fi
-          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt config/cookies.txt.gpg > cookies.txt
           if [ -s cookies.txt ]; then
             echo "✅ فایل cookies.txt با موفقیت رمزگشایی شد."
           else
