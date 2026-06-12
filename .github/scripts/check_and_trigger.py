@@ -6,7 +6,7 @@ from pathlib import Path
 
 # ============= تنظیمات =============
 LOG_URL = "https://raw.githubusercontent.com/alipoorkaramali/youtube-news-watcher/main/logs/new_videos.txt"
-STATE_FILE = "processed.txt"
+STATE_FILE = "State/processed.txt"
 TITLE_STATE_FILE = "processed_titles.txt"
 
 REPO_OWNER = "alipoorkaramali"
