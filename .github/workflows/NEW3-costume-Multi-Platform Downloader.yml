@@ -46,7 +46,7 @@ jobs:
             echo "❌ خطا: فایل cookies.txt.gpg در مخزن یافت نشد!"
             exit 1
           fi
-          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt Config/cookies.txt.gpg > cookies.txt
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt config/cookies.txt.gpg > cookies.txt
           if [ -s cookies.txt ]; then
             echo "✅ فایل cookies.txt با موفقیت رمزگشایی شد."
           else
