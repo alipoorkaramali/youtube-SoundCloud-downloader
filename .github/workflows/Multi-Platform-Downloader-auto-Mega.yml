@@ -59,11 +59,11 @@ jobs:
 
       - name: 🔐 Decrypt cookies
         run: |
-          if [ ! -f cookies.txt.gpg ]; then
+          if [ ! -f config/cookies.txt.gpg ]; then
             echo "❌ فایل cookies.txt.gpg یافت نشد!"
             exit 1
           fi
-          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt cookies.txt.gpg > cookies.txt
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt config/cookies.txt.gpg > cookies.txt
           if [ ! -s cookies.txt ]; then
             echo "❌ رمزگشایی کوکی ناموفق بود یا فایل خالی است"
             exit 1
@@ -84,12 +84,12 @@ jobs:
       - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
-          if [ ! -f rclone_mega.conf.gpg ]; then
+          if [ ! -f config/rclone_mega.conf.gpg ]; then
             echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
             exit 1
           fi
           gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
-              --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+              --output ~/.config/rclone/rclone.conf config/rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
           rclone listremotes
