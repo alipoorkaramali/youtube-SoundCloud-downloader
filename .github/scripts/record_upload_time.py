@@ -11,6 +11,7 @@ def main():
     # نام فایل رکورد بر اساس نام پوشه (با جایگزینی / با _)
     safe_folder_name = folder.replace('/', '_')
     times_file = f"upload_times_{safe_folder_name}.txt"
+    os.makedirs("State", exist_ok=True)
 
     # خواندن رکوردهای موجود برای این پوشه
     existing = {}
