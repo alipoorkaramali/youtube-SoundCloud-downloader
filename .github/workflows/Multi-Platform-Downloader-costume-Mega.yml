@@ -68,7 +68,7 @@ jobs:
 
       - name: 🔐 Decrypt Random Cookie
         run: |
-          COOKIE_FILES=(cookies*.txt.gpg)
+          COOKIE_FILES=(config/cookies*.txt.gpg)
           if [ ${#COOKIE_FILES[@]} -eq 0 ]; then
             echo "❌ هیچ فایل cookies*.txt.gpg یافت نشد!"
             exit 1
@@ -114,7 +114,7 @@ jobs:
       - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
-          if [ ! -f rclone_mega.conf.gpg ]; then
+          if [ ! -f config/rclone_mega.conf.gpg ]; then
             echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
             exit 1
           fi
