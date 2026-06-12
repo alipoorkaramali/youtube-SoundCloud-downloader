@@ -119,7 +119,7 @@ jobs:
             exit 1
           fi
           gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
-              --output ~/.config/rclone/rclone.conf rclone_mega.conf.gpg
+              --output ~/.config/rclone/rclone.conf config/rclone_mega.conf.gpg
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
 
