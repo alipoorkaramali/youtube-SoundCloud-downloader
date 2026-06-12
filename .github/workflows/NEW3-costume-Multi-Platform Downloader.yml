@@ -171,13 +171,13 @@ jobs:
             git reset --hard origin/main
             git stash pop || true
             
-            if git status --porcelain | grep -E '^UU.*upload_times_'; then
+            if git status --porcelain | grep -E '^UU.*state/upload_times_'; then
               echo "⚠️ کانفلیکت در فایل رکورد زمان. استفاده از نسخه راه‌دور..."
-              git checkout --theirs upload_times_*.txt 2>/dev/null || true
+              git checkout --theirs state\upload_times_*.txt 2>/dev/null || true
               git add upload_times_*.txt
             fi
             
-            git add "${{ github.event.inputs.folder }}" upload_times_*.txt || true
+            git add "${{ github.event.inputs.folder }}" state/upload_times_*.txt || true
             
             if git diff --staged --quiet; then
               echo "ℹ️ هیچ فایل جدیدی برای commit وجود ندارد."
