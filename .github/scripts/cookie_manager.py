@@ -18,7 +18,7 @@ def decrypt_gpg(gpg_file, passphrase):
         return None
 
 def get_cookie_by_index(index, passphrase):
-    base_files = ["cookies.txt.gpg", "cookies1.txt.gpg", "cookies2.txt.gpg", "cookies3.txt.gpg"]
+    base_files = ["config/cookies.txt.gpg", "config/cookies1.txt.gpg", "config/cookies2.txt.gpg", "config/cookies3.txt.gpg"]
     existing_files = [f for f in base_files if os.path.exists(f)]
     if index >= len(existing_files):
         return None, None
@@ -87,7 +87,7 @@ def main():
         return 1
 
     elif mode == "next":
-        last_index_file = ".last_cookie_index"
+        last_index_file = "State/.last_cookie_index"
         if os.path.exists(last_index_file):
             with open(last_index_file, "r") as f:
                 last_index = int(f.read().strip())
