@@ -14,7 +14,6 @@ on:
       url:
         description: '🔗 لینک دانلود'
         required: true
-      # ========== دو ورودی جدید که اسکریپت (8) ارسال می‌کند ==========
       type:
         description: 'نوع محتوا (audio/video)'
         required: false
@@ -25,9 +24,8 @@ on:
         required: false
         default: 'best'
         type: string
-      # ==============================================================
       folder:
-        description: '📁 پوشه در مخزن'
+        description: '📁 پوشه در مخزن (موقت)'
         required: false
         default: 'news_downloads'
       mega_folder:
@@ -51,7 +49,7 @@ jobs:
   download:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write   # برای commit فایل‌های State
 
     steps:
       - name: 📥 Checkout Repository
@@ -60,7 +58,7 @@ jobs:
       - name: 🔐 Decrypt cookies
         run: |
           if [ ! -f config/cookies.txt.gpg ]; then
-            echo "❌ فایل cookies.txt.gpg یافت نشد!"
+            echo "❌ فایل config/cookies.txt.gpg یافت نشد!"
             exit 1
           fi
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt config/cookies.txt.gpg > cookies.txt
@@ -85,7 +83,7 @@ jobs:
         run: |
           mkdir -p ~/.config/rclone
           if [ ! -f config/rclone_mega.conf.gpg ]; then
-            echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
+            echo "❌ فایل config/rclone_mega.conf.gpg پیدا نشد!"
             exit 1
           fi
           gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
@@ -114,6 +112,7 @@ jobs:
           
           DOWNLOADED_FILE=$(ls -1 | head -1)
           echo "FILE_TITLE=$(basename "$DOWNLOADED_FILE" | sed 's/\.[^.]*$//')" >> $GITHUB_ENV
+          echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
           echo "✅ دانلود انجام شد - فایل: $DOWNLOADED_FILE"
 
       - name: ✂️ Split into zip volumes (if requested)
@@ -126,12 +125,50 @@ jobs:
           zip -s "$SIZE" "${FILE}.zip" "$FILE"
           rm "$FILE"
           echo "✅ Zip volumes created"
+          # به روزرسانی متغیر برای فایل ZIP شده
+          echo "DOWNLOADED_FILE=${FILE}.zip" >> $GITHUB_ENV
 
       - name: ☁️ آپلود به Mega.nz
         run: |
           rclone copy "${{ github.event.inputs.folder }}" "mega:${{ github.event.inputs.mega_folder }}" \
             --progress --transfers=4 -vv
           echo "✅ آپلود به Mega.nz انجام شد"
+
+      - name: 🕒 ثبت زمان آپلود (گزارش در State)
+        run: |
+          python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
+
+      - name: 📌 ذخیره فایل وضعیت (upload_times) در مخزن
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # اضافه کردن فایل‌های وضعیت (State/upload_times_*.txt)
+          git add State/upload_times_*.txt || true
+          if git diff --staged --quiet; then
+            echo "ℹ️ هیچ تغییر جدیدی برای commit وجود ندارد."
+          else
+            git commit -m "Update upload times for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
+            git push
+          fi
+
+      - name: 📝 ثبت گزارش خلاصه در State/mega_upload_log.txt
+        run: |
+          mkdir -p State
+          LOG_FILE="State/mega_upload_log.txt"
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          {
+            echo "[$TIMESTAMP]"
+            echo "Platform: ${{ github.event.inputs.platform }}"
+            echo "URL: ${{ github.event.inputs.url }}"
+            echo "Mega folder: ${{ github.event.inputs.mega_folder }}"
+            echo "Local folder: ${{ github.event.inputs.folder }}"
+            echo "File(s): ${{ env.DOWNLOADED_FILE }}"
+            echo "Split: ${{ github.event.inputs.split_choice }}"
+            echo "---"
+          } >> "$LOG_FILE"
+          git add "$LOG_FILE"
+          git diff --staged --quiet || git commit -m "Add mega upload log for ${{ github.event.inputs.platform }}"
+          git push
 
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
         if: success() && env.FILE_TITLE != ''
