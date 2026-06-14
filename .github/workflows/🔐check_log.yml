@@ -30,14 +30,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python .github/scripts/check_and_trigger.py
 
-      - name: 💾 Commit updated state files
+      - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add State/processed.txt State/processed_titles.txt
-          if git diff --staged --quiet; then
+          git add State/processed.txt
+          git add State/upload_times_Download_audio_downloads.txt   # ← جایگزین processed_titles.txt
+          if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Update processed state"
+            git commit -m "Update processed items and upload times"
             git push
           fi
