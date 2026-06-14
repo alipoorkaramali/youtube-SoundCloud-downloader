@@ -140,14 +140,14 @@ jobs:
           
           UPLOAD_TIMES_FILE="State/upload_times_${{ github.event.inputs.folder }}.txt"
           
-          # 1. هماهنگ‌سازی فایل با remote (بدون تغییرات محلی)
+          # 1. همسان‌سازی کامل branch محلی با remote
           git fetch origin main
-          git checkout origin/main -- "$UPLOAD_TIMES_FILE" 2>/dev/null || true
+          git reset --hard origin/main
           
-          # 2. اجرای اسکریپت (این بار فایل به‌روز می‌شود)
+          # 2. اجرای اسکریپت record_upload_time (append)
           python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
           
-          # 3. commit و push
+          # 3. add, commit, push (fast-forward)
           git add "$UPLOAD_TIMES_FILE"
           if git diff --staged --quiet; then
             echo "ℹ️ هیچ تغییری برای commit وجود ندارد."
