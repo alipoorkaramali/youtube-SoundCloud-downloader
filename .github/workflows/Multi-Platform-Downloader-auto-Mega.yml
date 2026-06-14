@@ -138,24 +138,23 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # ---- مرحله 1: ثبت زمان آپلود در فایل upload_times ----
+          # مرحله 1: ثبت زمان آپلود در فایل upload_times
           python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
           
-          # ---- مرحله 2: خواندن محتوای فعلی mega_upload_log.txt (در صورت وجود) ----
+          # مرحله 2: آماده‌سازی بلوک جدید برای mega_upload_log.txt
           mkdir -p State
           LOG_FILE="State/mega_upload_log.txt"
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           NEW_BLOCK="[$TIMESTAMP]\nPlatform: ${{ github.event.inputs.platform }}\nURL: ${{ github.event.inputs.url }}\nMega folder: ${{ github.event.inputs.mega_folder }}\nLocal folder: ${{ github.event.inputs.folder }}\nFile(s): ${{ env.DOWNLOADED_FILE }}\nSplit: ${{ github.event.inputs.split_choice }}\n---\n"
           
-          # ---- مرحله 3: همگام‌سازی با remote (بدون conflict) ----
+          # مرحله 3: هماهنگ‌سازی فایل mega_upload_log با آخرین نسخه remote
           git fetch origin main
-          # برگرداندن فایل به آخرین نسخه remote (برای جلوگیری از conflict)
           git checkout origin/main -- "$LOG_FILE" 2>/dev/null || true
           
-          # ---- مرحله 4: append کردن بلوک جدید به انتهای فایل ----
+          # مرحله 4: append کردن بلوک جدید
           echo -e "$NEW_BLOCK" >> "$LOG_FILE"
           
-          # ---- مرحله 5: اضافه کردن فایل upload_times و mega_upload_log ----
+          # مرحله 5: افزودن فایل‌ها به stage
           git add State/upload_times_*.txt || true
           git add "$LOG_FILE"
           
@@ -164,10 +163,14 @@ jobs:
             exit 0
           fi
           
-          # ---- مرحله 6: commit و push (بدون نیاز به rebase مجدد) ----
+          # مرحله 6: commit
           git commit -m "Update upload times and mega log for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
-          git push origin main
           
+          # مرحله 7: دریافت آخرین تغییرات remote و rebase (جلوگیری از non-fast-forward)
+          git pull --rebase origin main
+          
+          # مرحله 8: push
+          git push origin main
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
         if: success() && env.FILE_TITLE != ''
         run: |
