@@ -138,21 +138,22 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
+          UPLOAD_TIMES_FILE="State/upload_times_${{ github.event.inputs.folder }}.txt"
+          
+          # 1. هماهنگ‌سازی فایل با remote (بدون تغییرات محلی)
+          git fetch origin main
+          git checkout origin/main -- "$UPLOAD_TIMES_FILE" 2>/dev/null || true
+          
+          # 2. اجرای اسکریپت (این بار فایل به‌روز می‌شود)
           python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
           
-          git add State/upload_times_*.txt || true
+          # 3. commit و push
+          git add "$UPLOAD_TIMES_FILE"
           if git diff --staged --quiet; then
             echo "ℹ️ هیچ تغییری برای commit وجود ندارد."
             exit 0
           fi
-          
-          # 1. commit
           git commit -m "Update upload times for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
-          
-          # 2. دریافت آخرین تغییرات remote و rebase
-          git pull --rebase origin main
-          
-          # 3. push
           git push origin main
 
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
