@@ -49,7 +49,7 @@ jobs:
   download:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # برای commit و push فایل‌های State
+      contents: write
 
     steps:
       - name: 📥 Checkout Repository
@@ -133,44 +133,24 @@ jobs:
             --progress --transfers=4 -vv
           echo "✅ آپلود به Mega.nz انجام شد"
 
-      - name: 🕒 ثبت زمان آپلود و ذخیره گزارش‌ها در State (با مدیریت conflict)
+      - name: 🕒 ثبت زمان آپلود (فقط upload_times)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # مرحله 1: ثبت زمان آپلود در فایل upload_times
           python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
           
-          # مرحله 2: آماده‌سازی بلوک جدید برای mega_upload_log.txt
-          mkdir -p State
-          LOG_FILE="State/mega_upload_log.txt"
-          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          NEW_BLOCK="[$TIMESTAMP]\nPlatform: ${{ github.event.inputs.platform }}\nURL: ${{ github.event.inputs.url }}\nMega folder: ${{ github.event.inputs.mega_folder }}\nLocal folder: ${{ github.event.inputs.folder }}\nFile(s): ${{ env.DOWNLOADED_FILE }}\nSplit: ${{ github.event.inputs.split_choice }}\n---\n"
-          
-          # مرحله 3: هماهنگ‌سازی فایل mega_upload_log با آخرین نسخه remote
-          git fetch origin main
-          git checkout origin/main -- "$LOG_FILE" 2>/dev/null || true
-          
-          # مرحله 4: append کردن بلوک جدید
-          echo -e "$NEW_BLOCK" >> "$LOG_FILE"
-          
-          # مرحله 5: افزودن فایل‌ها به stage
           git add State/upload_times_*.txt || true
-          git add "$LOG_FILE"
-          
           if git diff --staged --quiet; then
-            echo "ℹ️ هیچ تغییر جدیدی برای commit وجود ندارد."
+            echo "ℹ️ هیچ تغییری برای commit وجود ندارد."
             exit 0
           fi
           
-          # مرحله 6: commit
-          git commit -m "Update upload times and mega log for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
-          
-          # مرحله 7: دریافت آخرین تغییرات remote و rebase (جلوگیری از non-fast-forward)
+          # همگام‌سازی با remote و push
           git pull --rebase origin main
-          
-          # مرحله 8: push
+          git commit -m "Update upload times for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
           git push origin main
+
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
         if: success() && env.FILE_TITLE != ''
         run: |
