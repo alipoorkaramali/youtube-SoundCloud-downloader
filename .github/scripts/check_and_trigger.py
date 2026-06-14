@@ -22,7 +22,13 @@ MEGA_LOG_FILE = Path("State/mega_upload_log.txt")  # لاگ آپلودهای م�
 REPO_OWNER = "alipoorkaramali"
 REPO_NAME = "youtube-SoundCloud-downloader"
 WORKFLOW_FILE = "Multi-Platform-Downloader-auto-Mega.yml"
+
+# دریافت توکن‌ها از محیط (GitHub Actions)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GH_PAT1 = os.environ.get("GH_PAT1", "")   # <-- تعریف متغیر برای PAT شخصی
+
+# انتخاب توکن مناسب: اولویت با PAT است (دسترسی بالاتر)
+TOKEN = GH_PAT1 if GH_PAT1 else GITHUB_TOKEN
 
 AUTO_FOLDER = "news_downloads"
 MEGA_FOLDER = "YoutubeNews"
@@ -113,7 +119,7 @@ def trigger_download(video_url: str, platform: str):
     workflow_id = requests.utils.quote(WORKFLOW_FILE, safe='')
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_id}/dispatches"
     headers = {
-        "Authorization": f"token {GH_PAT1}",
+        "Authorization": f"token {TOKEN}",   # استفاده از TOKEN که قبلاً تعریف شده
         "Accept": "application/vnd.github.v3+json"
     }
     payload = {
