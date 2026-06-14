@@ -6,3 +6,11 @@ Local folder: news_downloads
 File(s): اخبار ساعت شش عصر.m4a
 Split: single
 ---
+[2026-06-14 08:39:49 UTC]
+Platform: youtube
+URL: https://www.youtube.com/watch?v=9k-LWqytdkk
+Mega folder: YoutubeNews
+Local folder: news_downloads
+File(s): اخبار بامدادی ｜ یکشنبه ۲۴ خرداد.m4a
+Split: single
+---
