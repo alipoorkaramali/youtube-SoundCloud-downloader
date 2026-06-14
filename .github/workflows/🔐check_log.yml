@@ -37,7 +37,7 @@ jobs:
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"   # <-- صحیح
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           mkdir -p State
           touch State/processed.txt State/seen_titles.txt State/failed_soundcloud_titles.txt
           git add State/processed.txt
