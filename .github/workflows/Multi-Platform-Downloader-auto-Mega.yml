@@ -146,11 +146,14 @@ jobs:
             exit 0
           fi
           
-          # همگام‌سازی با remote و push
-          git pull --rebase origin main
+          # 1. commit
           git commit -m "Update upload times for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
+          
+          # 2. دریافت آخرین تغییرات remote و rebase
+          git pull --rebase origin main
+          
+          # 3. push
           git push origin main
-
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
         if: success() && env.FILE_TITLE != ''
         run: |
