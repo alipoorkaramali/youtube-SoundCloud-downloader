@@ -2,12 +2,15 @@ name: 🔐Check and Trigger Downloads (from news log)
 
 on:
   schedule:
+    # هر ۱۰ دقیقه یکبار اجرا شود (به وقت UTC)
     - cron: '*/10 * * * *'
+  # امکان اجرای دستی از طریق برگه Actions
   workflow_dispatch:
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    # دسترسی لازم برای commit و push تغییرات به مخزن
     permissions:
       contents: write
 
@@ -22,13 +25,20 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # نصب وابستگی‌ها در صورت وجود فایل requirements.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          # نصب کتابخانه requests (مورد نیاز اسکریپت)
           pip install requests
-          
+
       - name: Run check_and_trigger script
         run: python .github/scripts/check_and_trigger.py
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT1 }}
+          # توکن شخصی با دسترسی workflow (برای فراخوانی API و شروع وورک‌فلو دانلودر)
+          GH_PAT1: ${{ secrets.GH_PAT1 }}
+          # توکن پیش‌فرض (در صورت نیاز به عنوان fallback)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Commit changes (processed.txt and mega_upload_log.txt)
         run: |
@@ -36,10 +46,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add State/processed.txt
           git add State/mega_upload_log.txt
+          # اگر تغییری وجود داشت، commit و push کن
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
             git commit -m "Update processed hashes and mega upload log"
             git push
           fi
-          
