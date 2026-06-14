@@ -2,19 +2,19 @@ import os
 import re
 import requests
 import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ============= تنظیمات =============
 LOG_URL = "https://raw.githubusercontent.com/alipoorkaramali/youtube-news-watcher/main/logs/new_videos.txt"
 STATE_FILE = "State/processed.txt"
-TITLE_STATE_FILE = "processed_titles.txt"
+TIMES_FILE = Path("State/upload_times_Download_audio_downloads.txt")   # فایل جدید برای ذخیره عنوان و زمان
 
 REPO_OWNER = "alipoorkaramali"
 REPO_NAME = "youtube-SoundCloud-downloader"
-WORKFLOW_FILE = "Multi-Platform-Downloader-auto-Mega.yml"   # ورک‌فلو جدید مگا
+WORKFLOW_FILE = "Multi-Platform-Downloader-auto-Mega.yml"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
-# پارامترهای ورودی به ورک‌فلو جدید
 AUTO_FOLDER = "news_downloads"
 MEGA_FOLDER = "YoutubeNews"
 QUALITY = "best"
@@ -32,15 +32,33 @@ def save_processed_hashes(hashes):
         for h in hashes:
             f.write(h + "\n")
 
-def load_processed_titles():
-    if not Path(TITLE_STATE_FILE).exists():
+def load_processed_titles_from_times_file():
+    """
+    خواندن عناوین پردازش شده از فایل upload_times...
+    هر خط: filename | timestamp
+    نام فایل (قسمت اول) همان عنوان ویدیو است.
+    """
+    if not TIMES_FILE.exists():
         return set()
-    with open(TITLE_STATE_FILE, encoding='utf-8') as f:
-        return set(line.strip() for line in f if line.strip())
+    titles = set()
+    with open(TIMES_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or " | " not in line:
+                continue
+            filename, _ = line.split(" | ", 1)
+            titles.add(filename)
+    return titles
 
-def add_processed_title(title):
-    with open(TITLE_STATE_FILE, "a", encoding='utf-8') as f:
-        f.write(title + "\n")
+def add_processed_title_to_times_file(title):
+    """
+    افزودن عنوان جدید به انتهای فایل upload_times... با زمان فعلی UTC
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    # اطمینان از وجود پوشه State
+    TIMES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(TIMES_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{title} | {now}\n")
 
 def extract_info(line: str):
     """
@@ -111,7 +129,8 @@ def main():
 
     lines = [line.strip() for line in resp.text.splitlines() if line.strip()]
     processed_hashes = load_processed_hashes()
-    processed_titles = load_processed_titles()
+    # بارگذاری عناوین پردازش شده از فایل جدید
+    processed_titles = load_processed_titles_from_times_file()
     seen_normalized_titles = set()
     new_count = 0
 
@@ -127,10 +146,10 @@ def main():
         if link_hash in processed_hashes:
             continue
 
-        # جلوگیری از تکراری عنوان دقیق
+        # جلوگیری از تکراری عنوان دقیق (با استفاده از فایل جدید)
         if title and title in processed_titles:
-            print(f"⏭️ Duplicate title (from file): {title}")
-            processed_hashes.add(link_hash)
+            print(f"⏭️ Duplicate title (from times file): {title}")
+            processed_hashes.add(link_hash)   # علامت گذاری به عنوان پردازش شده برای جلوگیری از تکرار مجدد
             continue
 
         # جلوگیری از تکراری عنوان نرمالایز شده در همین اجرا
@@ -146,8 +165,9 @@ def main():
         if success:
             processed_hashes.add(link_hash)
             if title:
-                processed_titles.add(title)
-                add_processed_title(title)
+                # افزودن عنوان به فایل times (با زمان فعلی)
+                add_processed_title_to_times_file(title)
+                processed_titles.add(title)   # به روزرسانی set داخل حافظه
             if norm_title:
                 seen_normalized_titles.add(norm_title)
             new_count += 1
