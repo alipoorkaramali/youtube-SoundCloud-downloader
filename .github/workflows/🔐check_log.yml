@@ -15,6 +15,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Pull latest changes
+        run: git pull origin main --rebase
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -31,13 +34,10 @@ jobs:
           GH_PAT1: ${{ secrets.GH_PAT1 }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit changes (processed.txt and mega_upload_log.txt)
+      - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # دریافت آخرین تغییرات از ریموت و ریبیس (برای جلوگیری از خطای push)
-          git pull --rebase origin main
-          # اضافه کردن فایل‌های تغییر کرده
           git add State/processed.txt
           git add State/mega_upload_log.txt
           if git diff --cached --quiet; then
