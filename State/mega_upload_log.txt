@@ -1,1 +1,9 @@
 
+[2026-06-14 11:12:05 UTC]
+Platform: youtube
+URL: https://www.youtube.com/watch?v=9k-LWqytdkk
+Mega folder: YoutubeNews
+Local folder: news_downloads
+File(s): اخبار بامدادی ｜ یکشنبه ۲۴ خرداد.m4a
+Split: single
+---
