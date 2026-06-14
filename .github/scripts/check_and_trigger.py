@@ -113,7 +113,7 @@ def trigger_download(video_url: str, platform: str):
     workflow_id = requests.utils.quote(WORKFLOW_FILE, safe='')
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{workflow_id}/dispatches"
     headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
+        "Authorization": f"token {GH_PAT1}",
         "Accept": "application/vnd.github.v3+json"
     }
     payload = {
