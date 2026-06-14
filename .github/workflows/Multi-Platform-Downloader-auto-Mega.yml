@@ -133,27 +133,58 @@ jobs:
             --progress --transfers=4 -vv
           echo "✅ آپلود به Mega.nz انجام شد"
 
-      - name: 🕒 ثبت زمان آپلود (فقط upload_times)
+      - name: 🕒 ثبت زمان آپلود و ذخیره گزارش‌ها (با مدیریت شکست SoundCloud)
+        id: finalize
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
+          # ثبت زمان آپلود در فایل upload_times
           python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
           
+          # اگر پلتفرم SoundCloud است و کار شکست خورده، هش عنوان را در failed_soundcloud_titles.txt ثبت کن
+          if [ "${{ github.event.inputs.platform }}" = "soundcloud" ] && [ "${{ job.status }}" != "success" ]; then
+            mkdir -p State
+            # محاسبه هش نرمالایز شده عنوان (با استفاده از اسکریپت پایتون)
+            python -c "
+import hashlib, re, sys
+def normalize(title):
+    if not title: return ''
+    title = re.sub(r'\s*[\(\[].*?[\)\]]\s*', ' ', title)
+    title = re.sub(r'(?i)\b(audio|official|video|music|clip|lyrics|hd|4k|mp3|download)\b', '', title)
+    parts = title.split('|')
+    if len(parts) > 1 and re.search(r'\b(hours?|minutes?|ago)\b', parts[-1], re.I):
+        parts = parts[:-1]
+    title = '|'.join(parts).strip()
+    title = re.sub(r'\s+', ' ', title).replace(' | ', '|')
+    return hashlib.md5(title.lower().encode()).hexdigest()
+title = "${{ env.FILE_TITLE }}"
+if title:
+    h = normalize(title)
+    with open('State/failed_soundcloud_titles.txt', 'a') as f:
+        f.write(h + '\n')
+    print(f'Recorded failure for SoundCloud title hash: {h}')
+"
+          fi
+          
+          # افزودن فایل‌های تغییر کرده
           git add State/upload_times_*.txt || true
+          git add State/failed_soundcloud_titles.txt || true
+          
           if git diff --staged --quiet; then
             echo "ℹ️ هیچ تغییری برای commit وجود ندارد."
             exit 0
           fi
           
-          # 1. commit
-          git commit -m "Update upload times for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
+          # commit
+          git commit -m "Update upload times and record failures for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
           
-          # 2. دریافت آخرین تغییرات remote و rebase
+          # دریافت آخرین تغییرات remote و rebase (جلوگیری از non-fast-forward)
           git pull --rebase origin main
           
-          # 3. push
+          # push
           git push origin main
+
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
         if: success() && env.FILE_TITLE != ''
         run: |
