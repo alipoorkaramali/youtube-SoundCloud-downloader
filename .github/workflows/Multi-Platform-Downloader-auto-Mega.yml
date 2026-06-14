@@ -133,15 +133,15 @@ jobs:
             --progress --transfers=4 -vv
           echo "✅ آپلود به Mega.nz انجام شد"
 
-      - name: 🕒 ثبت زمان آپلود و ذخیره گزارش‌ها در State (یک مرحله واحد با pull --rebase)
+      - name: 🕒 ثبت زمان آپلود و ذخیره گزارش‌ها در State
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # ---- مرحله 1: ثبت زمان آپلود در فایل upload_times ----
+          # مرحله 1: ثبت زمان آپلود در فایل upload_times
           python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
           
-          # ---- مرحله 2: افزودن گزارش به mega_upload_log.txt ----
+          # مرحله 2: افزودن گزارش به mega_upload_log.txt
           mkdir -p State
           LOG_FILE="State/mega_upload_log.txt"
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -156,23 +156,26 @@ jobs:
             echo "---"
           } >> "$LOG_FILE"
           
-          # ---- مرحله 3: اضافه کردن فایل‌های تغییر کرده به stage ----
+          # مرحله 3: اضافه کردن فایل‌های تغییر کرده به staging
           git add State/upload_times_*.txt || true
           git add State/mega_upload_log.txt
           
-          # اگر تغییر خاصی وجود ندارد، خروج
+          # اگر تغییری وجود ندارد، خروج
           if git diff --staged --quiet; then
             echo "ℹ️ هیچ تغییر جدیدی برای commit وجود ندارد."
             exit 0
           fi
           
-          # ---- مرحله 4: همگام‌سازی با ریموت (جلوگیری از خطای rejected) ----
-          git pull --rebase origin main || echo "⚠️ No remote changes or rebase skipped"
-          
-          # ---- مرحله 5: commit و push یکپارچه ----
+          # مرحله 4: commit تغییرات (ایجاد commit محلی)
           git commit -m "Update upload times and mega log for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
+          
+          # مرحله 5: همگام‌سازی با remote (fetch + rebase)
+          git fetch origin main
+          git rebase origin/main || (echo "⚠️ Rebase conflict, aborting" && git rebase --abort && exit 1)
+          
+          # مرحله 6: push به remote
           git push origin main
-
+          
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
         if: success() && env.FILE_TITLE != ''
         run: |
