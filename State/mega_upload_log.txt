@@ -1,10 +1,1 @@
 
-
-[2026-06-14 11:46:33 UTC]
-Platform: auto-detected
-URL: (triggered by check_and_trigger)
-Mega folder: YoutubeNews
-Local folder: news_downloads
-File(s): اخبار بامدادی | یکشنبه ۲۴ خرداد | 2 hours ago
-Split: single
----
