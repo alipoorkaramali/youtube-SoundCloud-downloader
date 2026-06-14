@@ -34,13 +34,13 @@ jobs:
           GH_PAT1: ${{ secrets.GH_PAT1 }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit changes (processed.txt, mega_upload_log.txt, seen_titles.txt)
+      - name: Commit changes (processed.txt, seen_titles.txt, failed_soundcloud_titles.txt)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add State/processed.txt
-          git add State/mega_upload_log.txt
           git add State/seen_titles.txt
+          git add State/failed_soundcloud_titles.txt
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
