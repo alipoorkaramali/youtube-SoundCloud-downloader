@@ -49,7 +49,7 @@ jobs:
   download:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # برای commit فایل‌های State
+      contents: write   # برای commit و push فایل‌های State
 
     steps:
       - name: 📥 Checkout Repository
@@ -125,7 +125,6 @@ jobs:
           zip -s "$SIZE" "${FILE}.zip" "$FILE"
           rm "$FILE"
           echo "✅ Zip volumes created"
-          # به روزرسانی متغیر برای فایل ZIP شده
           echo "DOWNLOADED_FILE=${FILE}.zip" >> $GITHUB_ENV
 
       - name: ☁️ آپلود به Mega.nz
@@ -134,25 +133,15 @@ jobs:
             --progress --transfers=4 -vv
           echo "✅ آپلود به Mega.nz انجام شد"
 
-      - name: 🕒 ثبت زمان آپلود (گزارش در State)
-        run: |
-          python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
-
-      - name: 📌 ذخیره فایل وضعیت (upload_times) در مخزن
+      - name: 🕒 ثبت زمان آپلود و ذخیره گزارش‌ها در State (یک مرحله واحد با pull --rebase)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # اضافه کردن فایل‌های وضعیت (State/upload_times_*.txt)
-          git add State/upload_times_*.txt || true
-          if git diff --staged --quiet; then
-            echo "ℹ️ هیچ تغییر جدیدی برای commit وجود ندارد."
-          else
-            git commit -m "Update upload times for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
-            git push
-          fi
-
-      - name: 📝 ثبت گزارش خلاصه در State/mega_upload_log.txt
-        run: |
+          
+          # ---- مرحله 1: ثبت زمان آپلود در فایل upload_times ----
+          python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
+          
+          # ---- مرحله 2: افزودن گزارش به mega_upload_log.txt ----
           mkdir -p State
           LOG_FILE="State/mega_upload_log.txt"
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -166,9 +155,23 @@ jobs:
             echo "Split: ${{ github.event.inputs.split_choice }}"
             echo "---"
           } >> "$LOG_FILE"
-          git add "$LOG_FILE"
-          git diff --staged --quiet || git commit -m "Add mega upload log for ${{ github.event.inputs.platform }}"
-          git push
+          
+          # ---- مرحله 3: اضافه کردن فایل‌های تغییر کرده به stage ----
+          git add State/upload_times_*.txt || true
+          git add State/mega_upload_log.txt
+          
+          # اگر تغییر خاصی وجود ندارد، خروج
+          if git diff --staged --quiet; then
+            echo "ℹ️ هیچ تغییر جدیدی برای commit وجود ندارد."
+            exit 0
+          fi
+          
+          # ---- مرحله 4: همگام‌سازی با ریموت (جلوگیری از خطای rejected) ----
+          git pull --rebase origin main || echo "⚠️ No remote changes or rebase skipped"
+          
+          # ---- مرحله 5: commit و push یکپارچه ----
+          git commit -m "Update upload times and mega log for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
+          git push origin main
 
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
         if: success() && env.FILE_TITLE != ''
