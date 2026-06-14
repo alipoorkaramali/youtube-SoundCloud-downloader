@@ -133,47 +133,39 @@ jobs:
             --progress --transfers=4 -vv
           echo "✅ آپلود به Mega.nz انجام شد"
 
-      - name: 🕒 ثبت زمان آپلود و ذخیره گزارش‌ها در State
+      - name: 🕒 ثبت زمان آپلود و ذخیره گزارش‌ها در State (با مدیریت conflict)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # مرحله 1: ثبت زمان آپلود در فایل upload_times
+          # ---- مرحله 1: ثبت زمان آپلود در فایل upload_times ----
           python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
           
-          # مرحله 2: افزودن گزارش به mega_upload_log.txt
+          # ---- مرحله 2: خواندن محتوای فعلی mega_upload_log.txt (در صورت وجود) ----
           mkdir -p State
           LOG_FILE="State/mega_upload_log.txt"
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          {
-            echo "[$TIMESTAMP]"
-            echo "Platform: ${{ github.event.inputs.platform }}"
-            echo "URL: ${{ github.event.inputs.url }}"
-            echo "Mega folder: ${{ github.event.inputs.mega_folder }}"
-            echo "Local folder: ${{ github.event.inputs.folder }}"
-            echo "File(s): ${{ env.DOWNLOADED_FILE }}"
-            echo "Split: ${{ github.event.inputs.split_choice }}"
-            echo "---"
-          } >> "$LOG_FILE"
+          NEW_BLOCK="[$TIMESTAMP]\nPlatform: ${{ github.event.inputs.platform }}\nURL: ${{ github.event.inputs.url }}\nMega folder: ${{ github.event.inputs.mega_folder }}\nLocal folder: ${{ github.event.inputs.folder }}\nFile(s): ${{ env.DOWNLOADED_FILE }}\nSplit: ${{ github.event.inputs.split_choice }}\n---\n"
           
-          # مرحله 3: اضافه کردن فایل‌های تغییر کرده به staging
+          # ---- مرحله 3: همگام‌سازی با remote (بدون conflict) ----
+          git fetch origin main
+          # برگرداندن فایل به آخرین نسخه remote (برای جلوگیری از conflict)
+          git checkout origin/main -- "$LOG_FILE" 2>/dev/null || true
+          
+          # ---- مرحله 4: append کردن بلوک جدید به انتهای فایل ----
+          echo -e "$NEW_BLOCK" >> "$LOG_FILE"
+          
+          # ---- مرحله 5: اضافه کردن فایل upload_times و mega_upload_log ----
           git add State/upload_times_*.txt || true
-          git add State/mega_upload_log.txt
+          git add "$LOG_FILE"
           
-          # اگر تغییری وجود ندارد، خروج
           if git diff --staged --quiet; then
             echo "ℹ️ هیچ تغییر جدیدی برای commit وجود ندارد."
             exit 0
           fi
           
-          # مرحله 4: commit تغییرات (ایجاد commit محلی)
+          # ---- مرحله 6: commit و push (بدون نیاز به rebase مجدد) ----
           git commit -m "Update upload times and mega log for ${{ github.event.inputs.platform }} - ${{ github.event.inputs.url }}"
-          
-          # مرحله 5: همگام‌سازی با remote (fetch + rebase)
-          git fetch origin main
-          git rebase origin/main || (echo "⚠️ Rebase conflict, aborting" && git rebase --abort && exit 1)
-          
-          # مرحله 6: push به remote
           git push origin main
           
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
