@@ -60,14 +60,14 @@ jobs:
 
       - name: ⚙️ تنظیم متغیرها از تریگر فعال
         run: |
-          echo "PLATFORM=${{ github.event.client_payload.platform || github.event.inputs.platform }}" >> $GITHUB_ENV
+          echo "PLATFORM=${{ github.event.client_payload.platform || github.event.inputs.platform || 'youtube' }}" >> $GITHUB_ENV
           echo "URL=${{ github.event.client_payload.url || github.event.inputs.url }}" >> $GITHUB_ENV
-          echo "CONTENT_TYPE=${{ github.event.client_payload.type || github.event.inputs.type }}" >> $GITHUB_ENV
-          echo "QUALITY=${{ github.event.client_payload.quality || github.event.inputs.quality }}" >> $GITHUB_ENV
-          echo "FOLDER=${{ github.event.client_payload.folder || github.event.inputs.folder }}" >> $GITHUB_ENV
-          echo "MEGA_FOLDER=${{ github.event.client_payload.mega_folder || github.event.inputs.mega_folder }}" >> $GITHUB_ENV
-          echo "SPLIT_CHOICE=${{ github.event.client_payload.split_choice || github.event.inputs.split_choice }}" >> $GITHUB_ENV
-          echo "SPLIT_SIZE=${{ github.event.client_payload.split_size || github.event.inputs.split_size }}" >> $GITHUB_ENV
+          echo "CONTENT_TYPE=${{ github.event.client_payload.type || github.event.inputs.type || 'audio' }}" >> $GITHUB_ENV
+          echo "QUALITY=${{ github.event.client_payload.quality || github.event.inputs.quality || 'best' }}" >> $GITHUB_ENV
+          echo "FOLDER=${{ github.event.client_payload.folder || github.event.inputs.folder || 'news_downloads' }}" >> $GITHUB_ENV
+          echo "MEGA_FOLDER=${{ github.event.client_payload.mega_folder || github.event.inputs.mega_folder || 'YoutubeNews' }}" >> $GITHUB_ENV
+          echo "SPLIT_CHOICE=${{ github.event.client_payload.split_choice || github.event.inputs.split_choice || 'single' }}" >> $GITHUB_ENV
+          echo "SPLIT_SIZE=${{ github.event.client_payload.split_size || github.event.inputs.split_size || '100M' }}" >> $GITHUB_ENV
 
       - name: 🔐 Decrypt cookies
         run: |
