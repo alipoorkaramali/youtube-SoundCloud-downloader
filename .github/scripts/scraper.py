@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import random
+import re
 from pathlib import Path
 from typing import List, Dict
 
@@ -57,7 +58,13 @@ class TelegramChannelScraper:
 
         self.logger.info(f"📁 دایرکتوری خروجی: {self.base_dir}")
 
-    # ═══════════════════ متدهای کمکی برای ضربدر و اسکرین‌شات ═══════════════════
+    # ═══════════════ پاک‌سازی نام فایل (حذف کاراکترهای غیرمجاز) ═══════════════
+    @staticmethod
+    def _sanitize_filename(name: str) -> str:
+        """حذف کاراکترهای غیرمجاز برای NTFS و سازگاری با artifact"""
+        return re.sub(r'[<>:"/\\|?*\[\]]', '_', name)
+
+    # ═══════════════════ رسم ضربدر و اسکرین‌شات (با نام امن) ═══════════════════
     async def _draw_debug_cross(self, page, x: float, y: float, name: str):
         """رسم ضربدر قرمز و ذخیره اسکرین‌شات در debug_screenshots_dir"""
         self.debug_screenshots_dir.mkdir(parents=True, exist_ok=True)
@@ -86,7 +93,8 @@ class TelegramChannelScraper:
                 container.appendChild(cross);
             }}
         """)
-        path = self.debug_screenshots_dir / f"debug_click_{name}.png"
+        safe_name = self._sanitize_filename(name)
+        path = self.debug_screenshots_dir / f"debug_click_{safe_name}.png"
         await page.screenshot(path=path)
         self.logger.info(f"📸 اسکرین‌شات با ضربدر ذخیره شد: {path.name}")
         await page.evaluate("""
@@ -99,12 +107,14 @@ class TelegramChannelScraper:
     async def _take_screenshot(self, page, name: str):
         try:
             self.debug_screenshots_dir.mkdir(parents=True, exist_ok=True)
-            path = self.debug_screenshots_dir / f"debug_{self.channel}_{name}.png"
+            safe_name = self._sanitize_filename(name)
+            path = self.debug_screenshots_dir / f"debug_{self.channel}_{safe_name}.png"
             await page.screenshot(path=path, full_page=True)
             self.logger.info(f"📸 اسکرین‌شات ذخیره شد: {path.name}")
         except Exception as e:
             self.logger.warning(f"⚠️ ذخیره اسکرین‌شات شکست: {e}")
 
+    # ═══════════════════ متد اصلی اجرا ═══════════════════
     async def run(self):
         overall_timeout = self.config.timeout_seconds
         self.logger.info(f"⏱️ تایم‌اوت کلی تنظیم‌شده: {overall_timeout} ثانیه ({overall_timeout//60} دقیقه)")
@@ -150,6 +160,7 @@ class TelegramChannelScraper:
 
         self.logger.info("✅ پایان موفقیت‌آمیز.")
 
+    # ═══════════════════ استخراج پست‌ها از تلگرام ═══════════════════
     async def _fetch_posts_from_telegram(self) -> tuple[List[Dict], any, any]:
         from playwright.async_api import async_playwright
 
@@ -305,7 +316,7 @@ class TelegramChannelScraper:
 
         return items, context, page
 
-    # ═══════════════════ جستجو و ورود به کانال ═══════════════════
+    # ═══════════════════ جستجو و ورود به کانال (روش معمولی) ═══════════════════
     async def _search_and_enter_channel(self, page) -> bool:
         search_input = None
         for sel in [
@@ -387,7 +398,60 @@ class TelegramChannelScraper:
 
         return await self._click_search_result(page, search_term)
 
-    # ═══════════════════ متد جستجو با لینک (با ضربدر) ═══════════════════
+    # ═══════════════════ کلیک روی نتیجه جستجو (کانال) ═══════════════════
+    async def _click_search_result(self, page, search_term: str) -> bool:
+        click_selectors = [
+            'div.chatlist-item', 'div[role="button"]', 'div.search-result',
+            'a[data-peer-id]', 'div[class*="chatlist"] div[class*="item"]',
+            'div[class*="ListItem"]', 'div[class*="search-result"]'
+        ]
+        for sel in click_selectors:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() == 0:
+                    continue
+                await loc.click(timeout=8000, force=True)
+                await human_sleep(5, 0.4)
+                if await page.locator('div.message, div[data-message-id]').count() > 0:
+                    self.logger.info("✅ کانال با موفقیت باز شد (سلکتور %s).", sel)
+                    return True
+            except Exception as e:
+                self.logger.debug("سلکتور %s ناموفق: %s", sel, e)
+
+        self.logger.info("🔄 تلاش کلیک با JavaScript روی عبارت جستجو...")
+        try:
+            await page.evaluate(f'''(term) => {{
+                const els = Array.from(document.querySelectorAll('h3, .fullName, [dir="auto"], div[class*="name"], span[class*="peer-title"]'));
+                const target = els.find(el => el.textContent.trim().toLowerCase() === term.toLowerCase());
+                if (target) {{
+                    target.closest('div[role="button"], div.chatlist-item, a')?.click();
+                }}
+            }}''', search_term)
+            await human_sleep(5, 0.4)
+            if await page.locator('div.message, div[data-message-id]').count() > 0:
+                self.logger.info("✅ با JavaScript (عبارت جستجو) وارد شدیم.")
+                return True
+        except Exception as e:
+            self.logger.debug("JavaScript name click: %s", e)
+
+        self.logger.info("🔄 تلاش کلیک با JavaScript روی اولین نتیجه...")
+        try:
+            await page.evaluate('''() => {
+                const item = document.querySelector('div.chatlist-item, div[role="button"], div.search-result, a[data-peer-id]');
+                if (item) item.click();
+            }''')
+            await human_sleep(5, 0.4)
+            if await page.locator('div.message, div[data-message-id]').count() > 0:
+                self.logger.info("✅ با JavaScript (اولین نتیجه) وارد شدیم.")
+                return True
+        except Exception as e:
+            self.logger.debug("JavaScript generic click: %s", e)
+
+        self.logger.error("❌ تمام روش‌های کلیک شکست خورد.")
+        await self._take_screenshot(page, "click_failed")
+        return False
+
+    # ═══════════════════ جستجو با لینک (پشتیبانی از start_link) ═══════════════════
     async def _navigate_to_start_link(self, page) -> bool:
         self.logger.info(f"🔗 تلاش برای رفتن به لینک: {self.start_link}")
 
@@ -502,13 +566,52 @@ class TelegramChannelScraper:
                 await page.wait_for_selector(f'[data-message-id="{self.target_msg_id}"]', 
                                              state='attached', timeout=15000)
                 self.logger.info("✅ پست هدف در DOM ظاهر شد.")
-                # اسکرین‌شات از پست هدف با ضربدر (اختیاری)
                 target = page.locator(f'[data-message-id="{self.target_msg_id}"]').first
                 box = await target.bounding_box()
                 if box:
                     await self._draw_debug_cross(page, box['x']+box['width']/2, box['y']+box['height']/2, "target_found")
             except Exception:
-                self.logger.warning("⚠️ پست هدف در DOM نیامد، اسکرول دوباره...")
+                self.logger.warning("⚠️ پست هدف در DOM نیامد. بازگشت به نتایج و کلیک دوباره...")
+                # بازگشت به صفحهٔ نتایج جستجو
+                try:
+                    await page.go_back()
+                    await human_sleep(3, 0.5)
+                except Exception:
+                    self.logger.debug("خطا در go_back (احتمالاً صفحهٔ قبلی وجود ندارد).")
+
+                # کلیک دوباره روی اولین نتیجه
+                reclicked = False
+                for sel in result_selectors:
+                    try:
+                        await page.wait_for_selector(sel, timeout=5000)
+                        first = page.locator(sel).first
+                        if await first.count() > 0:
+                            await first.scroll_into_view_if_needed()
+                            # ضربدر و اسکرین‌شات
+                            box = await first.bounding_box()
+                            if box:
+                                await self._draw_debug_cross(page, box['x']+box['width']/2, box['y']+box['height']/2,
+                                                             f"reclick_{sel}_{self.target_msg_id}")
+                            await first.click(timeout=5000, force=True)
+                            self.logger.info(f"🔄 کلیک دوباره روی نتیجه با سلکتور '{sel}' انجام شد.")
+                            reclicked = True
+                            break
+                    except Exception as e:
+                        self.logger.debug(f"کلیک دوباره سلکتور {sel} ناموفق: {e}")
+
+                if reclicked:
+                    # بعد از کلیک دوباره، منتظر بمانیم و دوباره بررسی کنیم
+                    await human_sleep(5, 0.5)
+                    try:
+                        await page.wait_for_selector(f'[data-message-id="{self.target_msg_id}"]', 
+                                                     state='attached', timeout=10000)
+                        self.logger.info("✅ پست هدف پس از کلیک دوباره در DOM ظاهر شد.")
+                    except Exception:
+                        self.logger.warning("⚠️ بعد از کلیک دوباره هم پست هدف ظاهر نشد — ادامه با اسکرول.")
+                else:
+                    self.logger.warning("⚠️ نتوانستیم دوباره روی نتیجه کلیک کنیم.")
+
+                # اسکرول ملایم و اسکرین‌شات برای وضعیت فعلی
                 await page.evaluate("window.scrollBy(0, -500)")
                 await human_sleep(2, 0.3)
                 await self._take_screenshot(page, "target_not_in_dom_yet")
@@ -528,69 +631,7 @@ class TelegramChannelScraper:
                 await self._take_screenshot(page, "no_messages_after_click")
                 return False
 
-    async def _check_text_on_page(self, page, term: str) -> bool:
-        try:
-            return await page.evaluate(f'''(t) => {{
-                const bodyText = document.body.innerText || '';
-                return bodyText.toLowerCase().includes(t.toLowerCase());
-            }}''', term)
-        except Exception:
-            return False
-
-    async def _click_search_result(self, page, search_term: str) -> bool:
-        # (بدون تغییر، فقط برای کامل بودن آورده شده)
-        click_selectors = [
-            'div.chatlist-item', 'div[role="button"]', 'div.search-result',
-            'a[data-peer-id]', 'div[class*="chatlist"] div[class*="item"]',
-            'div[class*="ListItem"]', 'div[class*="search-result"]'
-        ]
-        for sel in click_selectors:
-            try:
-                loc = page.locator(sel).first
-                if await loc.count() == 0:
-                    continue
-                await loc.click(timeout=8000, force=True)
-                await human_sleep(5, 0.4)
-                if await page.locator('div.message, div[data-message-id]').count() > 0:
-                    self.logger.info("✅ کانال با موفقیت باز شد (سلکتور %s).", sel)
-                    return True
-            except Exception as e:
-                self.logger.debug("سلکتور %s ناموفق: %s", sel, e)
-
-        self.logger.info("🔄 تلاش کلیک با JavaScript روی عبارت جستجو...")
-        try:
-            await page.evaluate(f'''(term) => {{
-                const els = Array.from(document.querySelectorAll('h3, .fullName, [dir="auto"], div[class*="name"], span[class*="peer-title"]'));
-                const target = els.find(el => el.textContent.trim().toLowerCase() === term.toLowerCase());
-                if (target) {{
-                    target.closest('div[role="button"], div.chatlist-item, a')?.click();
-                }}
-            }}''', search_term)
-            await human_sleep(5, 0.4)
-            if await page.locator('div.message, div[data-message-id]').count() > 0:
-                self.logger.info("✅ با JavaScript (عبارت جستجو) وارد شدیم.")
-                return True
-        except Exception as e:
-            self.logger.debug("JavaScript name click: %s", e)
-
-        self.logger.info("🔄 تلاش کلیک با JavaScript روی اولین نتیجه...")
-        try:
-            await page.evaluate('''() => {
-                const item = document.querySelector('div.chatlist-item, div[role="button"], div.search-result, a[data-peer-id]');
-                if (item) item.click();
-            }''')
-            await human_sleep(5, 0.4)
-            if await page.locator('div.message, div[data-message-id]').count() > 0:
-                self.logger.info("✅ با JavaScript (اولین نتیجه) وارد شدیم.")
-                return True
-        except Exception as e:
-            self.logger.debug("JavaScript generic click: %s", e)
-
-        self.logger.error("❌ تمام روش‌های کلیک شکست خورد.")
-        await self._take_screenshot(page, "click_failed")
-        return False
-
-    # ═══════ اسکرین‌شات‌ها و دانلود (بدون تغییر) ═══════
+    # ═══════════════ اسکرین‌شات از تکتک پست‌ها ═══════════════
     async def _capture_post_screenshots(self, page, items: List[Dict]):
         self.logger.info(f"📸 گرفتن اسکرین‌شات از {len(items)} پست...")
         for idx, item in enumerate(items):
@@ -620,15 +661,16 @@ class TelegramChannelScraper:
         except Exception as e:
             self.logger.warning(f"⚠️ خطا در ذخیره اسکرین‌شات: {e}")
 
-    async def _take_screenshot(self, page, name: str):
+    async def _check_text_on_page(self, page, term: str) -> bool:
         try:
-            self.debug_screenshots_dir.mkdir(parents=True, exist_ok=True)
-            path = self.debug_screenshots_dir / f"debug_{self.channel}_{name}.png"
-            await page.screenshot(path=path, full_page=True)
-            self.logger.info(f"📸 اسکرین‌شات ذخیره شد: {path.name}")
-        except Exception as e:
-            self.logger.warning(f"⚠️ ذخیره اسکرین‌شات شکست: {e}")
+            return await page.evaluate(f'''(t) => {{
+                const bodyText = document.body.innerText || '';
+                return bodyText.toLowerCase().includes(t.toLowerCase());
+            }}''', term)
+        except Exception:
+            return False
 
+    # ═══════════════ دانلود رسانه‌ها (یکپارچه) ═══════════════
     async def _download_media(self, items: List[Dict], page, context) -> tuple[dict, int]:
         post_ids = [str(item['id']) for item in items]
         media_map = {}
