@@ -52,10 +52,15 @@ class OutputGenerator:
     def generate_html(self):
         html_path = self.base_dir / "posts.html"
         current_iran = (datetime.now(timezone.utc) + timedelta(hours=3, minutes=30)).strftime('%Y/%m/%d - %H:%M')
-        html = self._build_html_content(current_iran)
-        with open(html_path, 'w', encoding='utf-8') as f:
-            f.write(html)
-        self.logger.info(f"🌐 HTML: {html_path}")
+        try:
+            html = self._build_html_content(current_iran)
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(html)
+            self.logger.info(f"🌐 HTML: {html_path}")
+        except FileNotFoundError as e:
+            self.logger.warning(f"⚠️ تولید HTML انجام نشد: {e}")
+        except Exception as e:
+            self.logger.error(f"❌ خطا در تولید HTML: {e}")
 
     def _build_html_content(self, current_iran: str) -> str:
         script_dir = Path(__file__).resolve().parent
