@@ -36,7 +36,8 @@ class PlaywrightDownloader:
 
     def __init__(self, profile_dir: Path, media_dir: Path, max_bytes: int,
                  delay: float = 5.0, max_retries: int = 2,
-                 debug_screenshots_dir: Path = None):
+                 debug_screenshots_dir: Path = None,
+                 quiet_base: int = 20):
         self.profile_dir = profile_dir
         self.media_dir = media_dir
         self.max_bytes = max_bytes
@@ -50,6 +51,8 @@ class PlaywrightDownloader:
         else:
             self.debug_dir = self.media_dir.parent / "debug_rightclick"
         self.debug_dir.mkdir(parents=True, exist_ok=True)
+
+        self.quiet_base = quiet_base   # ← آستانهٔ سکوت پایه برای دانلود هر رسانه
 
     async def download_all(self, page: Page, context, post_ids: List[str],
                            media_map: Optional[Dict[str, List[str]]] = None) -> None:
@@ -302,7 +305,7 @@ class PlaywrightDownloader:
                 if menu_success:
                     await human_sleep(2.5 if visible_count > 4 else 1.5)
 
-                    quiet_threshold = 20 + (visible_count * 4)
+                    quiet_threshold = self.quiet_base + (visible_count * 4)
                     logger.info(f"   ⏳ آستانه سکوت برای این پست: {quiet_threshold} ثانیه")
 
                     absolute_timeout = 600
