@@ -405,21 +405,34 @@ class TelegramChannelScraper:
         await search_input.press("Enter")
         self.logger.info("⏳ منتظر نتایج جستجو...")
 
-        # ۳. انتظار برای بارگذاری نتایج
+        # ۳. انتظار برای بارگذاری اولیهٔ نتایج
         await human_sleep(5, 0.5)
         await self._take_screenshot(page, "search_results_loaded")
 
-        # ۴. کلیک مستقیم روی المان با data-message-id دقیق
+        # ۴. کلیک روی تب Messages (اگر وجود داشته باشد) تا پیام‌ها فیلتر شوند
+        try:
+            messages_tab = page.get_by_role("tab", name="Messages").first
+            if await messages_tab.count() > 0:
+                await messages_tab.click()
+                self.logger.info("📑 تب Messages کلیک شد.")
+                await human_sleep(2, 0.5)
+                await self._take_screenshot(page, "messages_tab_clicked")
+        except Exception as e:
+            self.logger.debug(f"تب Messages کلیک نشد (احتمالاً وجود ندارد): {e}")
+
+        # ۵. حالا المان با data-message-id را در DOM جستجو کن
         target_selector = f'div[data-message-id="{self.target_msg_id}"]'
         self.logger.info(f"🔍 جستجوی المان پیام هدف با سلکتور: {target_selector}")
         try:
-            await page.wait_for_selector(target_selector, timeout=15000)
+            await page.wait_for_selector(target_selector, timeout=10000)
             self.logger.info("✅ المان پیام هدف در نتایج جستجو پیدا شد.")
         except Exception:
-            self.logger.error("❌ المان پیام هدف در نتایج جستجو ظاهر نشد.")
-            await self._take_screenshot(page, "target_not_in_search_results")
-            return False
+            self.logger.warning("⚠️ المان پیام هدف در نتایج جستجو ظاهر نشد.")
+            # fallback: استفاده از روش قدیمی کلیک روی اولین نتیجه
+            self.logger.info("🔄 استفاده از روش fallback (کلیک روی اولین نتیجه)...")
+            return await self._fallback_click_result(page)
 
+        # ۶. کلیک روی المان پیام هدف
         target_element = page.locator(target_selector).first
         try:
             await target_element.scroll_into_view_if_needed()
@@ -441,7 +454,7 @@ class TelegramChannelScraper:
             await self._take_screenshot(page, "click_target_failed")
             return False
 
-        # ۵. منتظر بارگذاری صفحهٔ پیام در نمای چت
+        # ۷. منتظر بارگذاری صفحهٔ پیام در نمای چت
         self.logger.info("⏳ منتظر بارگذاری صفحهٔ پیام...")
         try:
             await page.wait_for_selector(f'div[data-message-id="{self.target_msg_id}"]', timeout=20000)
@@ -462,6 +475,33 @@ class TelegramChannelScraper:
             self.logger.error("❌ پیام هدف در نمای چت پیدا نشد.")
             await self._take_screenshot(page, "message_not_found_after_click")
             return False
+
+    async def _fallback_click_result(self, page) -> bool:
+        """روش قدیمی کلیک روی اولین نتیجه (برای حالتی که المان با data-message-id پیدا نشد)"""
+        result_selectors = [
+            'div[class*="search-result"] a',
+            'div[class*="message"] a',
+            'div[role="button"][class*="item"]',
+            'div.chatlist-item',
+            'a[data-peer-id]',
+        ]
+        for sel in result_selectors:
+            try:
+                await page.wait_for_selector(sel, timeout=5000)
+                first_result = page.locator(sel).first
+                if await first_result.count() > 0:
+                    await first_result.scroll_into_view_if_needed()
+                    await first_result.click(timeout=5000, force=True)
+                    self.logger.info(f"✅ (fallback) روی اولین نتیجه با سلکتور '{sel}' کلیک شد.")
+                    await human_sleep(5, 0.5)
+                    if await page.locator('div[data-message-id]').count() > 0:
+                        return True
+            except Exception as e:
+                self.logger.debug(f"سلکتور {sel} در fallback ناموفق: {e}")
+                continue
+        self.logger.error("❌ fallback هم نتوانست نتیجه را باز کند.")
+        await self._take_screenshot(page, "fallback_failed")
+        return False
 
     # ═══════════════════ متد کمکی: بررسی وجود عبارت در صفحه ═══════════════════
     async def _check_text_on_page(self, page, term: str) -> bool:
