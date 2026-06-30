@@ -141,7 +141,7 @@ jobs:
         timeout-minutes: ${{ fromJSON(github.event.inputs.timeout_minutes) }}
 
       # ════════════════════════════════════════════
-      # بررسی خروجی (همان‌طور که بود)
+      # بررسی خروجی
       # ════════════════════════════════════════════
       - name: 📊 Verify output
         if: ${{ always() }}
@@ -180,7 +180,7 @@ jobs:
           rclone listremotes
 
       # ════════════════════════════════════════════
-      # آپلود فقط پوشه media روی Mega
+      # آپلود حالت عادی (فقط پوشه media)
       # ════════════════════════════════════════════
       - name: ☁️ Upload media to Mega (normal mode)
         if: ${{ !inputs.debug_mode }}
@@ -190,11 +190,13 @@ jobs:
                      --progress --transfers=4 -vv
           echo "✅ پوشه media در مسیر mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}/media قرار گرفت"
 
-      - name: ☁️ Upload media to Mega (debug mode)
+      # ════════════════════════════════════════════
+      # آپلود حالت دیباگ (همهٔ خروجی‌ها)
+      # ════════════════════════════════════════════
+      - name: ☁️ Upload ALL debug outputs to Mega
         if: ${{ inputs.debug_mode }}
         run: |
-          # فقط محتویات داخل media به پوشه debug کپی می‌شوند
-          rclone copy "Download/telegram_downloads/${{ github.event.inputs.channel }}/media/" \
-                     "mega:${{ github.event.inputs.mega_folder }}/debug" \
+          rclone copy "Download/telegram_downloads/${{ github.event.inputs.channel }}" \
+                     "mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}-debug" \
                      --progress --transfers=4 -vv
-          echo "✅ فایل‌های رسانه مستقیماً در mega:${{ github.event.inputs.mega_folder }}/debug آپلود شدند"
+          echo "✅ تمام خروجی‌های دیباگ در مسیر mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}-debug آپلود شد"
