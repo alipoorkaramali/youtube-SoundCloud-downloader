@@ -17,7 +17,8 @@ class Config:
     channel_name: str = ''        # نام نمایشی کانال (اختیاری)
     resume: bool = True           # ادامه خودکار از آخرین نقطه
     start_link: str = ''          # لینک پست برای شروع دستی
-    timeout_seconds: int = 2100   # زمان کلی اجرا به ثانیه (پیش‌فرض: ۳۵ دقیقه)
+    timeout_seconds: int = 2100   # زمان کلی اجرا به ثانیه (پیش‌فرض ۳۵ دقیقه)
+    download_quiet_seconds: int = 20   # آستانهٔ سکوت پایه برای دانلود هر رسانه (ثانیه)
 
 def load_config(path: str = "config.yaml") -> Config:
     """بارگذاری تنظیمات از فایل YAML"""
@@ -29,7 +30,6 @@ def load_config(path: str = "config.yaml") -> Config:
         data = yaml.safe_load(f)
 
     # اعتبارسنجی
-    # اگر start_link وجود نداشته باشد، channel الزامی است
     if not data.get('channel') and not data.get('start_link'):
         raise ValueError("❌ یا نام کانال (channel) یا لینک شروع (start_link) باید در config.yaml تنظیم شود.")
     if data.get('limit', 0) <= 0:
@@ -39,8 +39,9 @@ def load_config(path: str = "config.yaml") -> Config:
     if not data.get('profile_dir'):
         raise ValueError("❌ پوشهٔ پروفایل (profile_dir) مشخص نشده است.")
 
-    # خواندن timeout_seconds از فایل (اگر وجود ندارد ۳۵ دقیقه)
+    # خواندن فیلدهای اختیاری با پیش‌فرض
     timeout_seconds = data.get('timeout_seconds', 2100)
+    download_quiet_seconds = data.get('download_quiet_seconds', 20)
 
     return Config(
         channel=data['channel'].lstrip('@'),
@@ -52,5 +53,6 @@ def load_config(path: str = "config.yaml") -> Config:
         channel_name=data.get('channel_name', ''),
         resume=data.get('resume', True),
         start_link=data.get('start_link', ''),
-        timeout_seconds=timeout_seconds
+        timeout_seconds=timeout_seconds,
+        download_quiet_seconds=download_quiet_seconds
     )
