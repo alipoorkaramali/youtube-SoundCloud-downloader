@@ -17,7 +17,8 @@ class Config:
     channel_name: str = ''        # نام نمایشی کانال (اختیاری)
     resume: bool = True           # ادامه خودکار از آخرین نقطه
     start_link: str = ''          # لینک پست برای شروع دستی
-    
+    timeout_seconds: int = 2100   # زمان کلی اجرا به ثانیه (پیش‌فرض: ۳۵ دقیقه)
+
 def load_config(path: str = "config.yaml") -> Config:
     """بارگذاری تنظیمات از فایل YAML"""
     config_path = Path(path)
@@ -38,6 +39,9 @@ def load_config(path: str = "config.yaml") -> Config:
     if not data.get('profile_dir'):
         raise ValueError("❌ پوشهٔ پروفایل (profile_dir) مشخص نشده است.")
 
+    # خواندن timeout_seconds از فایل (اگر وجود ندارد ۳۵ دقیقه)
+    timeout_seconds = data.get('timeout_seconds', 2100)
+
     return Config(
         channel=data['channel'].lstrip('@'),
         limit=data['limit'],
@@ -47,5 +51,6 @@ def load_config(path: str = "config.yaml") -> Config:
         delay_between_posts=data.get('delay_between_posts', 1.5),
         channel_name=data.get('channel_name', ''),
         resume=data.get('resume', True),
-        start_link=data.get('start_link', '')
+        start_link=data.get('start_link', ''),
+        timeout_seconds=timeout_seconds
     )
