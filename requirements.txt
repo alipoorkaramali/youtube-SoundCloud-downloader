@@ -1,1 +1,7 @@
 requests
+PyYAML
+aiohttp
+tqdm
+Jinja2
+cryptography
+playwright
