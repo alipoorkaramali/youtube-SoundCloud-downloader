@@ -200,3 +200,35 @@ jobs:
                      "mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}-debug" \
                      --progress --transfers=4 -vv
           echo "✅ تمام خروجی‌های دیباگ در مسیر mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}-debug آپلود شد"
+
+      # ════════════════════════════════════════════
+      # مدیریت آرتیفکت اسکرین‌شات‌ها (همیشه)
+      # ════════════════════════════════════════════
+      - name: 🗑️ Delete old screenshot artifacts for this channel
+        if: ${{ always() }}
+        run: |
+          ARTIFACT_NAME="screenshots-${{ github.event.inputs.channel }}"
+          echo "🔍 در حال حذف آرتیفکت‌های قبلی با نام ${ARTIFACT_NAME}..."
+          ids=$(gh api repos/${{ github.repository }}/actions/artifacts \
+            --jq ".artifacts[] | select(.name == \"${ARTIFACT_NAME}\") | .id")
+          for id in $ids; do
+            echo "  حذف آرتیفکت با id=$id"
+            gh api repos/${{ github.repository }}/actions/artifacts/$id -X DELETE
+          done
+          if [ -z "$ids" ]; then
+            echo "ℹ️ هیچ آرتیفکت قبلی برای حذف وجود نداشت."
+          else
+            echo "✅ آرتیفکت‌های قبلی حذف شدند."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📤 Upload screenshots as artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.event.inputs.channel }}
+          path: |
+            Download/telegram_downloads/${{ github.event.inputs.channel }}/debug_screenshots/
+            Download/telegram_downloads/${{ github.event.inputs.channel }}/post_screenshots/
+          if-no-files-found: ignore
