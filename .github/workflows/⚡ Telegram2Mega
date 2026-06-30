@@ -1,4 +1,4 @@
-name: 🎬📡 Telegram Scraper + Mega.nz   # ← اسم پیشنهادی
+name: 🌀 Scrape Telegram & Save to Mega
 
 on:
   workflow_dispatch:
@@ -126,15 +126,15 @@ jobs:
       - name: 🚀 Run Telegram Scraper
         if: ${{ !inputs.debug_mode }}
         run: xvfb-run python .github/scripts/main.py --config config/config.yaml
-        timeout-minutes: ${{ fromJSON(github.event.inputs.timeout_minutes) }}   # ← استفاده از ورودی
+        timeout-minutes: ${{ fromJSON(github.event.inputs.timeout_minutes) }}
 
       - name: 🐞 Run Debug Scraper
         if: ${{ inputs.debug_mode }}
         run: xvfb-run python .github/scripts/debug_scraper.py
-        timeout-minutes: ${{ fromJSON(github.event.inputs.timeout_minutes) }}   # ← استفاده از ورودی
+        timeout-minutes: ${{ fromJSON(github.event.inputs.timeout_minutes) }}
 
       # ════════════════════════════════════════════
-      # بررسی خروجی
+      # بررسی خروجی (همان‌طور که بود)
       # ════════════════════════════════════════════
       - name: 📊 Verify output
         if: ${{ always() }}
@@ -152,7 +152,7 @@ jobs:
           fi
 
       # ════════════════════════════════════════════
-      # نصب rclone و آپلود به Mega
+      # نصب و پیکربندی rclone
       # ════════════════════════════════════════════
       - name: 📦 Install rclone (official with mega support)
         run: |
@@ -172,18 +172,22 @@ jobs:
           echo "✅ rclone config loaded"
           rclone listremotes
 
-      - name: ☁️ Upload to Mega.nz (normal mode)
+      # ════════════════════════════════════════════
+      # آپلود فقط پوشه media روی Mega
+      # ════════════════════════════════════════════
+      - name: ☁️ Upload media to Mega (normal mode)
         if: ${{ !inputs.debug_mode }}
         run: |
-          rclone copy "Download/telegram_downloads/${{ github.event.inputs.channel }}" \
-                     "mega:${{ github.event.inputs.mega_folder }}" \
+          rclone copy "Download/telegram_downloads/${{ github.event.inputs.channel }}/media" \
+                     "mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}" \
                      --progress --transfers=4 -vv
-          echo "✅ آپلود به Mega.nz در مسیر mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }} انجام شد"
+          echo "✅ پوشه media در مسیر mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}/media قرار گرفت"
 
-      - name: ☁️ Upload to Mega.nz (debug mode)
+      - name: ☁️ Upload media to Mega (debug mode)
         if: ${{ inputs.debug_mode }}
         run: |
-          rclone copy "Download/telegram_downloads/${{ github.event.inputs.channel }}/" \
+          # فقط محتویات داخل media به پوشه debug کپی می‌شوند
+          rclone copy "Download/telegram_downloads/${{ github.event.inputs.channel }}/media/" \
                      "mega:${{ github.event.inputs.mega_folder }}/debug" \
                      --progress --transfers=4 -vv
-          echo "✅ آپلود دیباگ به mega:${{ github.event.inputs.mega_folder }}/debug انجام شد"
+          echo "✅ فایل‌های رسانه مستقیماً در mega:${{ github.event.inputs.mega_folder }}/debug آپلود شدند"
