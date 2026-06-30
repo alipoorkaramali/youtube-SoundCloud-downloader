@@ -36,6 +36,10 @@ on:
         description: '⏱️ حداکثر زمان اجرای اسکرپر (دقیقه) - برای فایل‌های حجیم افزایش دهید'
         required: false
         default: '35'
+      download_quiet_timeout:
+        description: '⏳ آستانه سکوت برای اتمام دانلود (ثانیه)'
+        required: false
+        default: '20'
 
 permissions:
   contents: write
@@ -107,6 +111,7 @@ jobs:
 
       - name: ⚙️ Update config.yaml with inputs
         run: |
+          pip install pyyaml
           python -c "
           import yaml
           with open('config/config.yaml', 'r') as f:
@@ -116,6 +121,8 @@ jobs:
           c['start_link'] = '${{ github.event.inputs.start_link }}'
           c['limit'] = ${{ github.event.inputs.limit }}
           c['max_media_mb'] = ${{ github.event.inputs.max_media_mb }}
+          c['timeout_seconds'] = int(${{ github.event.inputs.timeout_minutes }}) * 60
+          c['download_quiet_seconds'] = int(${{ github.event.inputs.download_quiet_timeout }})
           with open('config/config.yaml', 'w') as f:
               yaml.dump(c, f, default_flow_style=False, allow_unicode=True)
           "
