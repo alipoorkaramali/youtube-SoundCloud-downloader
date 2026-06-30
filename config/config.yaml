@@ -1,16 +1,19 @@
-- name: ⚙️ Update config.yaml with inputs
-  run: |
-    python -c "
-    import yaml
-    with open('config/config.yaml', 'r') as f:
-        c = yaml.safe_load(f)
-    c['channel'] = '${{ github.event.inputs.channel }}' or 'unknown'
-    c['channel_name'] = '${{ github.event.inputs.channel_name }}'
-    c['start_link'] = '${{ github.event.inputs.start_link }}'
-    c['limit'] = ${{ github.event.inputs.limit }}
-    c['max_media_mb'] = ${{ github.event.inputs.max_media_mb }}
-    # ↓↓↓ خط جدید برای تایم‌اوت ↓↓↓
-    c['timeout_seconds'] = int(${{ github.event.inputs.timeout_minutes }}) * 60
-    with open('config/config.yaml', 'w') as f:
-        yaml.dump(c, f, default_flow_style=False, allow_unicode=True)
-    "
+# ═══════════════════ پیکربندی اصلی ═══════════════════
+
+# نام کانال تلگرام بدون @ (مثال: bbcpersian)
+channel: "bbcpersian"
+
+# تعداد پست‌هایی که از کانال واکشی می‌شود
+limit: 15
+
+# حداکثر حجم مجاز برای دانلود هر فایل رسانه (مگابایت)
+max_media_mb: 80
+
+# پوشهٔ اصلی خروجی (همهٔ فایل‌های دانلودشده و گزارش‌ها اینجا ذخیره می‌شوند)
+output_dir: "Download"
+
+# پوشهٔ پروفایل دائمی مرورگر (همان که با save_session.py ساخته شد)
+profile_dir: "config/browser_profile"
+
+# فاصلهٔ زمانی (ثانیه) بین بارگذاری هر پست (جلوگیری از فشار روی تلگرام)
+delay_between_posts: 1.5
