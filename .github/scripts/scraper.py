@@ -15,7 +15,6 @@ from output_generator import OutputGenerator
 MAX_SCROLL_ATTEMPTS = 8
 SCROLL_UP = -1200
 HOME_URL = "https://web.telegram.org/a/"
-OVERALL_TIMEOUT = 35 * 60
 
 # ═══════════════════ Human-like sleep ═══════════════════
 async def human_sleep(base: float, jitter: float = 0.4):
@@ -65,8 +64,11 @@ class TelegramChannelScraper:
 
     # ═══════════════════ متد اصلی ═══════════════════
     async def run(self):
+        # زمان کلی از تنظیمات (با پیش‌فرض ۲۱۰۰ ثانیه = ۳۵ دقیقه)
+        overall_timeout = self.config.timeout_seconds
+        self.logger.info(f"⏱️ تایم‌اوت کلی تنظیم‌شده: {overall_timeout} ثانیه ({overall_timeout//60} دقیقه)")
         try:
-            await asyncio.wait_for(self._run_impl(), timeout=OVERALL_TIMEOUT)
+            await asyncio.wait_for(self._run_impl(), timeout=overall_timeout)
         except asyncio.TimeoutError:
             self.logger.error("⏰ اسکریپت به دلیل محدودیت زمانی کلی متوقف شد.")
         except Exception as e:
@@ -192,9 +194,6 @@ class TelegramChannelScraper:
                 self.logger.warning(f"⚠️ خطا در انتقال پیام هدف به بالای صفحه: {e}")
 
         # حلقه‌ی اصلی جمع‌آوری
-        # 🔑 نکته کلیدی: در حالت start_link باید از پیام هدف شروع کنیم، نه از جدیدترین پیام.
-        # برای این کار، از یک پرچم start_collecting استفاده می‌کنیم که تنها زمانی فعال می‌شود
-        # که به پیام هدف رسیده باشیم. سپس از آن نقطه به بالا (قدیمی‌تر) می‌رویم.
         start_collecting = False
 
         while len(items) < self.limit and scroll_attempts < MAX_SCROLL_ATTEMPTS:
@@ -312,14 +311,12 @@ class TelegramChannelScraper:
             return False
 
         # ۲. تایپ مقاوم نام کاربری (username) در نوار جستجو
-        #     ابتدا کلیک، پاک‌سازی، سپس تایپ انسانی
         await search_input.click()
         await human_sleep(0.3, 0.2)
-        await search_input.fill('')                     # پاک‌سازی کامل
+        await search_input.fill('')
         await human_sleep(0.2, 0.1)
-        await search_input.type(self.channel, delay=random.randint(80, 150))   # تایپ انسانی
+        await search_input.type(self.channel, delay=random.randint(80, 150))
         self.logger.info(f"🔍 در حال جستجوی: @{self.channel}")
-        # 🌟 اسکرین‌شات بلافاصله بعد از تایپ
         await self._take_screenshot(page, "search_input_filled")
         await human_sleep(1.5, 0.3)
         await search_input.press("Enter")
@@ -654,7 +651,8 @@ class TelegramChannelScraper:
                 self.media_dir,
                 self.max_media_bytes,
                 self.delay_between_posts,
-                debug_screenshots_dir=self.debug_screenshots_dir  # اضافه کنید
+                debug_screenshots_dir=self.debug_screenshots_dir,
+                quiet_base=self.config.download_quiet_seconds   # ← استفاده از آستانهٔ سکوت
             )
             await downloader.download_all(page, context, post_ids, media_map)
 
