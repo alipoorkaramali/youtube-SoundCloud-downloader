@@ -18,7 +18,6 @@ HOME_URL = "https://web.telegram.org/a/"
 
 # ═══════════════════ Human-like sleep ═══════════════════
 async def human_sleep(base: float, jitter: float = 0.4):
-    """خواب با زمان تصادفی حول مقدار base (base ± jitter) برای شبیه‌سازی رفتار انسانی"""
     time = base * (1 + random.uniform(-jitter, jitter))
     await asyncio.sleep(max(0.1, time))
 
@@ -57,6 +56,54 @@ class TelegramChannelScraper:
             self.logger.addHandler(ch)
 
         self.logger.info(f"📁 دایرکتوری خروجی: {self.base_dir}")
+
+    # ═══════════════════ متدهای کمکی برای ضربدر و اسکرین‌شات ═══════════════════
+    async def _draw_debug_cross(self, page, x: float, y: float, name: str):
+        """رسم ضربدر قرمز و ذخیره اسکرین‌شات در debug_screenshots_dir"""
+        self.debug_screenshots_dir.mkdir(parents=True, exist_ok=True)
+        await page.evaluate(f"""
+            () => {{
+                const container = document.createElement('div');
+                container.id = 'debug-cross-container';
+                container.style.position = 'fixed';
+                container.style.left = '0px';
+                container.style.top = '0px';
+                container.style.zIndex = '99999';
+                container.style.pointerEvents = 'none';
+                document.body.appendChild(container);
+                const cross = document.createElement('div');
+                cross.style.position = 'absolute';
+                cross.style.left = '{x}px';
+                cross.style.top = '{y}px';
+                cross.style.width = '24px';
+                cross.style.height = '24px';
+                cross.style.transform = 'translate(-50%, -50%)';
+                cross.innerHTML = `
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <line x1="2" y1="2" x2="22" y2="22" stroke="red" stroke-width="3"/>
+                        <line x1="22" y1="2" x2="2" y2="22" stroke="red" stroke-width="3"/>
+                    </svg>`;
+                container.appendChild(cross);
+            }}
+        """)
+        path = self.debug_screenshots_dir / f"debug_click_{name}.png"
+        await page.screenshot(path=path)
+        self.logger.info(f"📸 اسکرین‌شات با ضربدر ذخیره شد: {path.name}")
+        await page.evaluate("""
+            () => {
+                const container = document.getElementById('debug-cross-container');
+                if (container) container.remove();
+            }
+        """)
+
+    async def _take_screenshot(self, page, name: str):
+        try:
+            self.debug_screenshots_dir.mkdir(parents=True, exist_ok=True)
+            path = self.debug_screenshots_dir / f"debug_{self.channel}_{name}.png"
+            await page.screenshot(path=path, full_page=True)
+            self.logger.info(f"📸 اسکرین‌شات ذخیره شد: {path.name}")
+        except Exception as e:
+            self.logger.warning(f"⚠️ ذخیره اسکرین‌شات شکست: {e}")
 
     async def run(self):
         overall_timeout = self.config.timeout_seconds
@@ -136,7 +183,6 @@ class TelegramChannelScraper:
         if not self.start_link:
             self.logger.info("⬇️ تلاش برای پرش به جدیدترین پست‌ها...")
             clicked = False
-
             scroll_button_selectors = [
                 'button[title="Go to bottom"]',
                 'div[class*="scroll-to-bottom"]',
@@ -144,7 +190,6 @@ class TelegramChannelScraper:
                 '[aria-label="Scroll to bottom"]',
                 'button:has(svg[class*="arrow-down"])',
             ]
-
             for sel in scroll_button_selectors:
                 try:
                     btn = page.locator(sel).first
@@ -156,7 +201,6 @@ class TelegramChannelScraper:
                         break
                 except Exception:
                     continue
-
             if not clicked:
                 self.logger.info("   ℹ️ دکمهٔ پرش به پایین پیدا نشد یا کلیک نشد. ادامه با وضعیت فعلی صفحه.")
         else:
@@ -185,7 +229,6 @@ class TelegramChannelScraper:
         while len(items) < self.limit and scroll_attempts < MAX_SCROLL_ATTEMPTS:
             try:
                 messages = await page.locator('div[data-message-id]').all()
-
                 if self.start_link:
                     msg_iter = messages
                 else:
@@ -264,7 +307,6 @@ class TelegramChannelScraper:
 
     # ═══════════════════ جستجو و ورود به کانال ═══════════════════
     async def _search_and_enter_channel(self, page) -> bool:
-        # (بدون تغییر – همان کد قبلی)
         search_input = None
         for sel in [
             'input[placeholder*="Search"]',
@@ -345,6 +387,7 @@ class TelegramChannelScraper:
 
         return await self._click_search_result(page, search_term)
 
+    # ═══════════════════ متد جستجو با لینک (با ضربدر) ═══════════════════
     async def _navigate_to_start_link(self, page) -> bool:
         self.logger.info(f"🔗 تلاش برای رفتن به لینک: {self.start_link}")
 
@@ -390,6 +433,7 @@ class TelegramChannelScraper:
         await human_sleep(5, 0.5)
         await self._take_screenshot(page, "search_results_loaded")
 
+        # ──────── کلیک روی اولین نتیجه (با ضربدر و اسکرین‌شات) ────────
         clicked_result = False
         result_selectors = [
             'div[data-message-id]',
@@ -406,16 +450,14 @@ class TelegramChannelScraper:
                 first_result = page.locator(sel).first
                 if await first_result.count() > 0:
                     await first_result.scroll_into_view_if_needed()
-                    try:
-                        await page.evaluate('''(element) => {
-                            element.style.outline = '3px solid red';
-                            element.style.outlineOffset = '2px';
-                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }''', await first_result.element_handle())
-                        await human_sleep(1, 0.3)
-                        await self._take_screenshot(page, "before_click_highlighted")
-                    except Exception as e:
-                        self.logger.debug(f"خطا در هایلایت کردن: {e}")
+
+                    # دریافت مختصات برای ضربدر
+                    box = await first_result.bounding_box()
+                    if box:
+                        x = box['x'] + box['width'] / 2
+                        y = box['y'] + box['height'] / 2
+                        await self._draw_debug_cross(page, x, y, f"before_click_{sel}_{self.target_msg_id}")
+                        self.logger.info(f"📸 ضربدر روی المان با سلکتور '{sel}' در ({x:.0f},{y:.0f})")
 
                     await first_result.click(timeout=5000, force=True)
                     self.logger.info(f"✅ روی اولین نتیجه با سلکتور '{sel}' کلیک شد.")
@@ -451,7 +493,7 @@ class TelegramChannelScraper:
             await self._take_screenshot(page, "click_result_failed")
             return False
 
-        # ۵. منتظر بارگذاری صفحه پیام و ظاهر شدن پست هدف (اصلاح‌شده)
+        # ۵. منتظر بارگذاری صفحه پیام و ظاهر شدن پست هدف
         self.logger.info("⏳ منتظر بارگذاری صفحه پیام...")
         await human_sleep(5, 0.5)
 
@@ -460,10 +502,16 @@ class TelegramChannelScraper:
                 await page.wait_for_selector(f'[data-message-id="{self.target_msg_id}"]', 
                                              state='attached', timeout=15000)
                 self.logger.info("✅ پست هدف در DOM ظاهر شد.")
+                # اسکرین‌شات از پست هدف با ضربدر (اختیاری)
+                target = page.locator(f'[data-message-id="{self.target_msg_id}"]').first
+                box = await target.bounding_box()
+                if box:
+                    await self._draw_debug_cross(page, box['x']+box['width']/2, box['y']+box['height']/2, "target_found")
             except Exception:
                 self.logger.warning("⚠️ پست هدف در DOM نیامد، اسکرول دوباره...")
                 await page.evaluate("window.scrollBy(0, -500)")
                 await human_sleep(2, 0.3)
+                await self._take_screenshot(page, "target_not_in_dom_yet")
 
         if await page.locator('div[data-message-id]').count() > 0:
             self.logger.info("✅ صفحه پیام‌ها با موفقیت بارگذاری شد.")
@@ -490,6 +538,7 @@ class TelegramChannelScraper:
             return False
 
     async def _click_search_result(self, page, search_term: str) -> bool:
+        # (بدون تغییر، فقط برای کامل بودن آورده شده)
         click_selectors = [
             'div.chatlist-item', 'div[role="button"]', 'div.search-result',
             'a[data-peer-id]', 'div[class*="chatlist"] div[class*="item"]',
@@ -541,6 +590,7 @@ class TelegramChannelScraper:
         await self._take_screenshot(page, "click_failed")
         return False
 
+    # ═══════ اسکرین‌شات‌ها و دانلود (بدون تغییر) ═══════
     async def _capture_post_screenshots(self, page, items: List[Dict]):
         self.logger.info(f"📸 گرفتن اسکرین‌شات از {len(items)} پست...")
         for idx, item in enumerate(items):
