@@ -24,7 +24,6 @@ class PlaywrightDownloader:
     برای پست‌های صوتی/ویس، هدف راست‌کلیک را دقیق‌تر روی المان صوتی تنظیم می‌کند.
     اسکرول‌ها به‌گونه‌ای تنظیم شده‌اند که از چت خارج نشوند (حل مشکل پست‌های نامرئی).
     در صورت شکست منوی context، لینک مستقیم را از DOM استخراج و دانلود می‌کند.
-    اگر dry_run=True باشد، دانلود انجام نمی‌شود و فقط اسکرین‌شات‌های دیباگ گرفته می‌شود.
     """
 
     MIME_TO_EXT = {
@@ -38,8 +37,7 @@ class PlaywrightDownloader:
     def __init__(self, profile_dir: Path, media_dir: Path, max_bytes: int,
                  delay: float = 5.0, max_retries: int = 2,
                  debug_screenshots_dir: Path = None,
-                 quiet_base: int = 20,
-                 dry_run: bool = False):
+                 quiet_base: int = 20):
         self.profile_dir = profile_dir
         self.media_dir = media_dir
         self.max_bytes = max_bytes
@@ -47,15 +45,14 @@ class PlaywrightDownloader:
         self.max_retries = max_retries
         self.media_dir.mkdir(parents=True, exist_ok=True)
 
-        # پوشهٔ اسکرین‌شات‌های دیباگ
+        # ✅ استفاده از مسیر پاس‌داده‌شده یا ساخت مسیر پیش‌فرض
         if debug_screenshots_dir:
             self.debug_dir = debug_screenshots_dir
         else:
             self.debug_dir = self.media_dir.parent / "debug_rightclick"
         self.debug_dir.mkdir(parents=True, exist_ok=True)
 
-        self.quiet_base = quiet_base
-        self.dry_run = dry_run   # ← جدید
+        self.quiet_base = quiet_base   # ← آستانهٔ سکوت پایه برای دانلود هر رسانه
 
     async def download_all(self, page: Page, context, post_ids: List[str],
                            media_map: Optional[Dict[str, List[str]]] = None) -> None:
@@ -98,9 +95,11 @@ class PlaywrightDownloader:
             try:
                 logger.debug(f"   🔄 تلاش {attempt}/{max_attempts} برای پیدا کردن پست {post_id}")
 
+                # چک وجود المان در DOM
                 await page.wait_for_selector(f'[data-message-id="{post_id}"]',
                                              state='attached', timeout=10000)
 
+                # روش اصلی: scroll_into_view_if_needed – ایمن‌ترین و دقیق‌ترین
                 await message_locator.scroll_into_view_if_needed(timeout=15000)
                 await human_sleep(1.0 if attempt == 1 else 0.8, 0.3)
 
@@ -112,12 +111,16 @@ class PlaywrightDownloader:
                     logger.info(f"   ✅ پست {post_id} پیدا و نمایان شد (تلاش {attempt})")
                     break
 
+                # اسکرول کمکی فقط در صورت نیاز (مقادیر کم، بدون خروج از کانال)
                 if attempt < max_attempts:
                     if attempt <= 2:
+                        # کمی بالا برای رد شدن از پست‌های پین‌شده
                         await page.evaluate("window.scrollBy(0, -800)")
                     elif attempt <= 4:
+                        # کمی پایین برای بارگذاری محتوای جدید
                         await page.evaluate("window.scrollBy(0, 1200)")
                     else:
+                        # برگشت مختصر به وسط برای تازه‌سازی
                         await page.evaluate("window.scrollBy(0, -600)")
 
                     await human_sleep(2.0, 0.5)
@@ -127,6 +130,7 @@ class PlaywrightDownloader:
 
         if not success:
             logger.warning(f"⚠️ پست {post_id} بعد از {max_attempts} تلاش پیدا نشد.")
+
             try:
                 element_exists = await page.locator(f'[data-message-id="{post_id}"]').count() > 0
                 if element_exists:
@@ -180,10 +184,6 @@ class PlaywrightDownloader:
 
         async def on_download(download: Download):
             nonlocal file_index, seen_suggested
-            if self.dry_run:
-                # در حالت dry_run فایلی ذخیره نکن، فقط لاگ
-                logger.info(f"   🏜️ [dry_run] دریافت رویداد دانلود: {download.suggested_filename} (نادیده گرفته شد)")
-                return
             try:
                 suggested = download.suggested_filename or f"unknown_{int(time.time())}_{file_index}.bin"
 
@@ -351,7 +351,7 @@ class PlaywrightDownloader:
         page.remove_listener("download", on_download)
 
         # Fallback مستقیم + پشتیبانی از <audio src="...">
-        if not menu_success and not downloaded_files and not self.dry_run:
+        if not menu_success and not downloaded_files:
             logger.info(f"   🔄 منوی context ناموفق – استفاده از دانلود مستقیم...")
             links = await message_locator.evaluate('''(el) => {
                 const links = new Set();
@@ -376,9 +376,7 @@ class PlaywrightDownloader:
 
     async def _download_link(self, page: Page, link: str, post_id: str, idx: int,
                              media_map: Dict[str, List[str]]):
-        if self.dry_run:
-            logger.info(f"   🏜️ [dry_run] دانلود مستقیم نادیده گرفته شد: {link}")
-            return
+        """کمکی برای دانلود یک لینک مستقیم و اضافه کردن به media_map"""
         for attempt in range(self.max_retries + 1):
             try:
                 resp = await page.request.get(link, headers={"Referer": "https://web.telegram.org/"})
