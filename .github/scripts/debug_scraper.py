@@ -3,8 +3,8 @@
 """
 اسکریپت دیباگ برای Telegram Channel Scraper
 – تمام مراحل اسکرپینگ (جستجو، ورود، اسکرول، استخراج) را انجام می‌دهد.
+– رسانه‌ها را دانلود نمی‌کند، اما اسکرین‌شات‌های راست‌کلیک و ضربدرها را می‌گیرد.
 – از همان تنظیمات config.yaml استفاده می‌کند (پشتیبانی از start_link).
-– رسانه‌ها را دانلود نمی‌کند (فقط لاگ).
 – اسکرین‌شات‌های بیشتری برای تحلیل مراحل ذخیره می‌کند.
 – خروجی JSON را برای بررسی داده‌های استخراج‌شده ذخیره می‌کند.
 """
@@ -21,33 +21,45 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config_loader import load_config
 from scraper import TelegramChannelScraper
 from output_generator import OutputGenerator
+from playwright_downloader import PlaywrightDownloader
 
 
 class DebugTelegramChannelScraper(TelegramChannelScraper):
     """
     نسخه‌ی دیباگ اسکرپر – تمام مراحل اسکرپینگ را انجام می‌دهد اما رسانه‌ها را دانلود نمی‌کند.
-    همچنین اسکرین‌شات‌های بیشتری برای تحلیل مراحل ذخیره می‌کند.
+    با این حال، فرایند راست‌کلیک و اسکرین‌شات‌های ضربدر را شبیه‌سازی می‌کند.
     """
 
     def __init__(self, config, debug_screenshots: bool = True):
         super().__init__(config)
         self.debug_screenshots = debug_screenshots
-        # استفاده از self.debug_screenshots_dir که در کلاس پایه تعریف شده
         self.debug_screenshots_dir.mkdir(parents=True, exist_ok=True)
-        self.debug_mode = True  # فعال‌سازی دیباگ برای OutputGenerator
+        self.debug_mode = True
         self.logger.info("🐞 حالت دیباگ فعال است – دانلود رسانه انجام نمی‌شود.")
         self.logger.info(f"🐞 پوشه اسکرین‌شات‌های دیباگ: {self.debug_screenshots_dir}")
 
     async def _download_media(self, items: List[Dict], page, context) -> tuple[dict, int]:
         """
-        در حالت دیباگ، به‌جای دانلود، فقط اطلاعات رسانه‌ها را لاگ می‌کند.
+        در حالت دیباگ، دانلود واقعی انجام نمی‌شود، اما یک Downloader خشک (dry_run)
+        اجرا می‌شود تا اسکرین‌شات‌های راست‌کلیک و ضربدرها در پوشهٔ debug_screenshots ذخیره شوند.
         """
-        self.logger.info("🐞 حالت دیباگ: دانلود رسانه غیرفعال است.")
+        self.logger.info("🐞 حالت دیباگ: شبیه‌سازی دانلود با dry_run (فقط اسکرین‌شات‌های ضربدر)")
+        post_ids = [str(item['id']) for item in items]
         media_map = {}
-        for item in items:
-            msg_id = item['id']
-            self.logger.info(f"   🖼️ [دیباگ] پست {msg_id}: دانلود رسانه انجام نشد (حالت دیباگ).")
-            media_map[msg_id] = []  # خالی
+
+        if post_ids:
+            downloader = PlaywrightDownloader(
+                self.profile_dir,
+                self.media_dir,
+                self.max_media_bytes,
+                self.delay_between_posts,
+                debug_screenshots_dir=self.debug_screenshots_dir,
+                quiet_base=self.config.download_quiet_seconds,
+                dry_run=True   # ← فعال‌سازی حالت خشک
+            )
+            await downloader.download_all(page, context, post_ids, media_map)
+
+        # چون dry_run است، media_map خالی خواهد ماند
         return media_map, 0
 
     async def _save_debug_screenshot(self, page, name: str):
@@ -73,7 +85,6 @@ class DebugTelegramChannelScraper(TelegramChannelScraper):
             result = await super()._fetch_posts_from_telegram()
             items, context, page = result
 
-            # اسکرین‌شات بعد از اتمام جمع‌آوری
             if page and items:
                 await self._save_debug_screenshot(page, "final_debug")
                 self.logger.info(f"🐞 {len(items)} پست در حالت دیباگ استخراج شد.")
@@ -81,7 +92,6 @@ class DebugTelegramChannelScraper(TelegramChannelScraper):
                 self.logger.warning("🐞 هیچ پستی استخراج نشد. بررسی اسکرین‌شات‌ها...")
                 await self._save_debug_screenshot(page, "no_posts_debug")
 
-            # اسکرین‌شات از وضعیت نهایی صفحه
             if page:
                 await self._save_debug_screenshot(page, "final_page_state")
 
@@ -114,7 +124,6 @@ class DebugTelegramChannelScraper(TelegramChannelScraper):
         except Exception as e:
             self.logger.warning(f"⚠️ خطا در ذخیره خلاصه دیباگ: {e}")
 
-    # ═══════════════════ Override متد _run_impl برای دیباگ ═══════════════════
     async def _run_impl(self):
         """
         Override برای ذخیره‌ی آیتم‌ها در متغیر کلاس و ارسال debug_mode به OutputGenerator
@@ -125,7 +134,7 @@ class DebugTelegramChannelScraper(TelegramChannelScraper):
             self.logger.info(f"🚀 شروع اسکریپر دیباگ برای @{self.channel} (limit={self.limit})")
 
         items, context, page = await self._fetch_posts_from_telegram()
-        self._last_items = items  # ذخیره برای خلاصه
+        self._last_items = items
 
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
@@ -135,23 +144,21 @@ class DebugTelegramChannelScraper(TelegramChannelScraper):
 
         self.logger.info(f"📥 {len(items)} پست استخراج شد (حالت دیباگ).")
 
-        # ═══════════════ ساخت OutputGenerator با debug_mode=True ═══════════════
-        try:
-            # در حالت دیباگ، media_map خالی است (چون دانلود نشده)
-            gen = OutputGenerator(
-                self.base_dir,
-                self.channel,
-                items,
-                {},  # media_map خالی
-                debug_mode=self.debug_mode  # ارسال debug_mode به OutputGenerator
-            )
-            gen.generate_json()
-            gen.generate_csv()
-            gen.generate_html()
-            gen.create_zip()
-            self.logger.info(f"🐞 فایل‌های خروجی دیباگ در: {self.base_dir}")
-        except Exception as e:
-            self.logger.warning(f"⚠️ خطا در تولید خروجی دیباگ: {e}", exc_info=True)
+        # حالا دانلود dry_run را اجرا کن (اسکرین‌شات‌ها گرفته می‌شوند)
+        media_map, downloaded = await self._download_media(items, page, context)
+        self.logger.info(f"🐞 {downloaded} فایل (dry_run) – اسکرین‌شات‌های ضربدر گرفته شد.")
+
+        gen = OutputGenerator(
+            self.base_dir,
+            self.channel,
+            items,
+            media_map,
+            debug_mode=self.debug_mode
+        )
+        gen.generate_json()
+        gen.generate_csv()
+        gen.generate_html()
+        gen.create_zip()
 
         if context:
             await context.close()
@@ -160,14 +167,10 @@ class DebugTelegramChannelScraper(TelegramChannelScraper):
 
 
 async def main():
-    """
-    تابع اصلی اجرای اسکریپت دیباگ
-    """
     print("🐞 ========================================")
     print("🐞 Telegram Channel Scraper - حالت دیباگ")
     print("🐞 ========================================")
 
-    # بارگذاری تنظیمات از config.yaml
     config_path = "config/config.yaml"
     try:
         config = load_config(config_path)
@@ -183,10 +186,8 @@ async def main():
         print(f"❌ خطا در بارگذاری کانفیگ: {e}")
         sys.exit(1)
 
-    # ایجاد نمونه از اسکرپر دیباگ
     scraper = DebugTelegramChannelScraper(config, debug_screenshots=True)
 
-    # اجرای اسکرپر
     try:
         await scraper.run()
         print("\n🐞 دیباگ با موفقیت کامل شد.")
