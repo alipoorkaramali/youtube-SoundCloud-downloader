@@ -1,4 +1,4 @@
-```markdown
+```
 # 🎬🎵 دانلودر حرفه‌ای چندپلتفرمی + آپلود مستقیم به Mega.nz
 
 [![GitHub release](https://img.shields.io/github/v/release/alipoorkaramali/youtube-SoundCloud-downloader)](https://github.com/alipoorkaramali/youtube-SoundCloud-downloader/releases/latest)
@@ -83,7 +83,7 @@ playwright install chromium
 python save_session.py
 # پس از ورود موفق (اسکن QR یا شماره تلفن)، پروفایل ذخیره می‌شود:
 tar -czf config/browser_profile.tar.gz -C config browser_profile
-```
+
 
 سپس فایل browser_profile.tar.gz را با GPG رمزگذاری کنید و در مخزن قرار دهید.
 
@@ -126,7 +126,7 @@ processed.txt, processed_titles.txt وضعیت دانلود خودکار
 ```bash
 git clone https://github.com/alipoorkaramali/youtube-SoundCloud-downloader.git
 cd youtube-SoundCloud-downloader
-```
+
 
 ۲. تنظیم Secrets در GitHub
 
@@ -173,8 +173,5 @@ cd youtube-SoundCloud-downloader
 تهیه‌شده با ❤️ برای کاربران فارسی‌زبان
 هر سوال یا پیشنهادی دارید، در بخش Issues مطرح کنید.
 
+
 ```
-
----
-
-فایل کاملاً آماده‌ی کپی است. پس از جایگزینی، حتماً تغییرات را `commit` و `push` کنید تا در مخزن شما به‌روز شود. اگر نکته‌ی دیگری مد نظر دارید، بفرمایید تا ویرایش کنم.
