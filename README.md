@@ -1,33 +1,23 @@
-🎬🎵 دانلودر چندپلتفرمی با آپلود مستقیم به Mega.nz
 
-""GitHub release" (https://img.shields.io/github/v/release/alipoorkaramali/youtube-SoundCloud-downloader)" (https://github.com/alipoorkaramali/youtube-SoundCloud-downloader/releases/latest)
-""GitHub Actions" (https://img.shields.io/github/actions/workflow/status/alipoorkaramali/youtube-SoundCloud-downloader/.github/workflows/Multi-Platform-Downloader-auto-Mega.yml)" (https://github.com/alipoorkaramali/youtube-SoundCloud-downloader/actions)
-""License" (https://img.shields.io/badge/license-MIT-blue.svg)" (LICENSE)
-""Mega.nz" (https://img.shields.io/badge/Storage-Mega.nz-red)" (https://mega.nz)
+```
+# 🎬🎵 دانلودر حرفه‌ای چندپلتفرمی + آپلود مستقیم به Mega.nz
 
-ابزاری برای دانلود و مدیریت خودکار محتوا از YouTube، SoundCloud، Instagram و Telegram با آپلود مستقیم به Mega.nz. این پروژه از اجرای دستی و کاملاً خودکار پشتیبانی می‌کند، امکان انتخاب کیفیت، تقسیم فایل‌های بزرگ، استفاده از کوکی‌ها برای محتوای محدود و نگهداری امن اطلاعات حساس با GPG را فراهم می‌سازد.
+[![GitHub release](https://img.shields.io/github/v/release/alipoorkaramali/youtube-SoundCloud-downloader)](https://github.com/alipoorkaramali/youtube-SoundCloud-downloader/releases/latest)
+[![GitHub Actions](https://img.shields.io/github/actions/workflow/status/alipoorkaramali/youtube-SoundCloud-downloader/.github/workflows/Multi-Platform-Downloader-auto-Mega.yml)](https://github.com/alipoorkaramali/youtube-SoundCloud-downloader/actions)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Mega.nz](https://img.shields.io/badge/Storage-Mega.nz-red)](https://mega.nz)
+
+**یک راه‌حل کامل، سریع و امن** برای دانلود از **YouTube • SoundCloud • Instagram • Telegram** و آپلود مستقیم به فضای ابری **Mega.nz** – بدون ردپا، کاملاً خودکار یا دستی، با قابلیت تقسیم فایل و کنترل کیفیت.
+
+> ✨ **برجسته‌ترین ویژگی‌ها**  
+> - **دانلود دستی** با انتخاب کیفیت، نوع خروجی و پوشه مقصد  
+> - **دانلود خودکار** از کانال‌های مورد نظر (به‌کمک مخزن `youtube-news-watcher`)  
+> - **دانلود اینستاگرام** با کامنت `/download shortcode` در Issues  
+> - **دانلود از تلگرام** (کانال‌های عمومی) با سشن دائمی  
+> - **امنیت کامل** – همه اطلاعات حساس با GPG رمزگذاری می‌شوند  
+> - **بدون باقی‌ماندن فایل** در مخزن گیت‌هاب  
 
 ---
-
-✨ ویژگی‌های کلیدی
-
-- 🎯 دانلود دستی با انتخاب پلتفرم، کیفیت، نوع خروجی و پوشه مقصد
-- 🤖 دانلود خودکار ویدئوهای جدید از کانال‌های YouTube و SoundCloud با استفاده از مخزن "youtube-news-watcher"
-- 📸 دانلود از Instagram از طریق کامنت "/download" در GitHub Issues
-- 📱 دانلود از کانال‌های عمومی Telegram با استفاده از سشن دائمی
-- ☁️ آپلود مستقیم به Mega.nz بدون نیاز به دخالت کاربر
-- 📦 تقسیم فایل‌های بزرگ به ZIP چندبخشی با اندازه دلخواه
-- 🔐 رمزگذاری فایل‌های حساس (کوکی‌ها، تنظیمات و سشن‌ها) با GPG
-- 🧹 پاک‌سازی خودکار فایل‌های موقت پس از پایان پردازش
-
- ✨ **برجسته‌ترین ویژگی‌ها**  
- - **دانلود دستی** با انتخاب کیفیت، نوع خروجی و پوشه مقصد  
- - **دانلود خودکار** از کانال‌های مورد نظر (به‌کمک مخزن `youtube-news-watcher`)  
- - **دانلود اینستاگرام** با کامنت `/download shortcode` در Issues  
- - **دانلود از تلگرام** (کانال‌های عمومی) با سشن دائمی  
- - **امنیت کامل** – همه اطلاعات حساس با GPG رمزگذاری می‌شوند  
- - **بدون باقی‌ماندن فایل** در مخزن گیت‌هاب  
-
 
 ## 🚀 چرا این پروژه؟
 
