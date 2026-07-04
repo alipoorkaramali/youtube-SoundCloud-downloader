@@ -15,10 +15,18 @@ on:
         description: 'لینک مستقیم به یک پست (اختیاری، مثال: https://t.me/example/123)'
         required: false
         default: ''
+      scroll_direction:
+        description: '🧭 جهت اسکرول: up = پست‌های قدیمی‌تر (بالا)، down = پست‌های جدیدتر (پایین)'
+        required: false
+        default: 'up'
+        type: choice
+        options:
+          - 'up'
+          - 'down'
       limit:
         description: 'تعداد پست‌ها'
         required: false
-        default: '15'
+        default: '35'
       max_media_mb:
         description: 'حداکثر حجم رسانه (MB)'
         required: false
@@ -119,10 +127,14 @@ jobs:
           c['channel'] = '${{ github.event.inputs.channel }}' or 'unknown'
           c['channel_name'] = '${{ github.event.inputs.channel_name }}'
           c['start_link'] = '${{ github.event.inputs.start_link }}'
+          c['scroll_direction'] = '${{ github.event.inputs.scroll_direction }}' or 'up'
           c['limit'] = ${{ github.event.inputs.limit }}
           c['max_media_mb'] = ${{ github.event.inputs.max_media_mb }}
           c['timeout_seconds'] = int(${{ github.event.inputs.timeout_minutes }}) * 60
           c['download_quiet_seconds'] = int(${{ github.event.inputs.download_quiet_timeout }})
+          # اگر start_link خالی باشد، کلید را حذف می‌کنیم تا از شرط‌های خالی جلوگیری شود
+          if not c.get('start_link'):
+              c.pop('start_link', None)
           with open('config/config.yaml', 'w') as f:
               yaml.dump(c, f, default_flow_style=False, allow_unicode=True)
           "
