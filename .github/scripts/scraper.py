@@ -48,11 +48,6 @@ class TelegramChannelScraper:
         self.save_screenshots = getattr(config, 'save_screenshots', True)
 
         # ─── پارامتر جدید: جهت اسکرول ───
-        self.scroll_direction = getattr(config, 'scroll_direction', 'up').lower()
-        if self.scroll_direction not in ['up', 'down']:
-            self.logger.warning(f"⚠️ مقدار نامعتبر برای scroll_direction: {self.scroll_direction}. استفاده از 'up'.")
-            self.scroll_direction = 'up'
-        self.logger.info(f"📸 ذخیره اسکرین‌شات: {'فعال' if self.save_screenshots else 'غیرفعال'}")
         self.logger = logging.getLogger("TelegramScraper")
         self.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
@@ -67,6 +62,12 @@ class TelegramChannelScraper:
         self.logger.info(f"📁 دایرکتوری خروجی: {self.base_dir}")
         self.logger.info(f"🐞 حالت دیباگ: {'فعال' if self.debug_mode else 'غیرفعال'}")
         self.logger.info(f"🧭 جهت اسکرول: {'بالا (قدیمی‌تر)' if self.scroll_direction == 'up' else 'پایین (جدیدتر)'}")
+        self.logger.info(f"📸 ذخیره اسکرین‌شات: {'فعال' if self.save_screenshots else 'غیرفعال'}")
+
+        # ─── اعتبارسنجی جهت اسکرول (بعد از تعریف logger) ───
+        if self.scroll_direction not in ['up', 'down']:
+            self.logger.warning(f"⚠️ مقدار نامعتبر برای scroll_direction: {self.scroll_direction}. استفاده از 'up'.")
+            self.scroll_direction = 'up'
 
     # ═══════════════════ متد کمکی: پاک‌سازی نام فایل ═══════════════════
     @staticmethod
