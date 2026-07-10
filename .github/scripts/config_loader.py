@@ -20,7 +20,7 @@ class Config:
     timeout_seconds: int = 2100
     download_quiet_seconds: int = 20
     scroll_direction: str = 'up'   # ← این خط جدید
-    
+    save_screenshots: bool = True
 def load_config(path: str = "config.yaml") -> Config:
     """بارگذاری تنظیمات از فایل YAML"""
     config_path = Path(path)
@@ -44,6 +44,7 @@ def load_config(path: str = "config.yaml") -> Config:
     timeout_seconds = data.get('timeout_seconds', 2100)
     download_quiet_seconds = data.get('download_quiet_seconds', 20)
     scroll_direction = data.get('scroll_direction', 'up')
+    save_screenshots = data.get('save_screenshots', True)    
     if scroll_direction not in ['up', 'down']:
         scroll_direction = 'up'
         
@@ -59,5 +60,6 @@ def load_config(path: str = "config.yaml") -> Config:
         start_link=data.get('start_link', ''),
         timeout_seconds=timeout_seconds,
         download_quiet_seconds=download_quiet_seconds,
-        scroll_direction=scroll_direction
+        scroll_direction=scroll_direction,
+        save_screenshots=save_screenshots
     )
