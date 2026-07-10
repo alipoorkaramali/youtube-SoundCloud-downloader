@@ -17,10 +17,8 @@ class Config:
     channel_name: str = ''        # نام نمایشی کانال (اختیاری)
     resume: bool = True           # ادامه خودکار از آخرین نقطه
     start_link: str = ''          # لینک پست برای شروع دستی
-    timeout_seconds: int = 0      # 0 = نامحدود (تمدید خودکار در صورت نیاز)
-    auto_extend_timeout: bool = True   # تمدید خودکار زمان در صورت ادامهٔ موفق اسکرپینگ
-    save_screenshots: bool = True      # اگر False باشد، اسکرین‌شات ذخیره نمی‌شود
-    scroll_direction: str = 'up'       # جهت اسکرول (up یا down)
+    timeout_seconds: int = 2100   # زمان کلی اجرا به ثانیه (پیش‌فرض ۳۵ دقیقه)
+    download_quiet_seconds: int = 20   # آستانهٔ سکوت پایه برای دانلود هر رسانه (ثانیه)
 
 def load_config(path: str = "config.yaml") -> Config:
     """بارگذاری تنظیمات از فایل YAML"""
@@ -42,7 +40,8 @@ def load_config(path: str = "config.yaml") -> Config:
         raise ValueError("❌ پوشهٔ پروفایل (profile_dir) مشخص نشده است.")
 
     # خواندن فیلدهای اختیاری با پیش‌فرض
-    timeout_seconds = data.get('timeout_seconds', 0)
+    timeout_seconds = data.get('timeout_seconds', 2100)
+    download_quiet_seconds = data.get('download_quiet_seconds', 20)
 
     return Config(
         channel=data['channel'].lstrip('@'),
@@ -55,7 +54,5 @@ def load_config(path: str = "config.yaml") -> Config:
         resume=data.get('resume', True),
         start_link=data.get('start_link', ''),
         timeout_seconds=timeout_seconds,
-        auto_extend_timeout=data.get('auto_extend_timeout', True),
-        save_screenshots=data.get('save_screenshots', True),
-        scroll_direction=data.get('scroll_direction', 'up')
+        download_quiet_seconds=download_quiet_seconds
     )
