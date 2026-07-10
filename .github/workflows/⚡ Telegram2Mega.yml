@@ -36,6 +36,11 @@ on:
         type: boolean
         required: false
         default: false
+      save_screenshots:
+        description: 'ذخیره اسکرین‌شات‌ها (غیرفعال کردن آن سرعت را تا ۳۰٪ افزایش می‌دهد و حجم خروجی را بسیار کاهش می‌دهد)'
+        type: boolean
+        required: false
+        default: false
       mega_folder:
         description: '📂 پوشه مقصد در Mega.nz'
         required: true
@@ -132,6 +137,7 @@ jobs:
           c['max_media_mb'] = ${{ github.event.inputs.max_media_mb }}
           c['timeout_seconds'] = int(${{ github.event.inputs.timeout_minutes }}) * 60
           c['download_quiet_seconds'] = int(${{ github.event.inputs.download_quiet_timeout }})
+          c['save_screenshots'] = '${{ github.event.inputs.save_screenshots }}'.lower() == 'true'
           # اگر start_link خالی باشد، کلید را حذف می‌کنیم تا از شرط‌های خالی جلوگیری شود
           if not c.get('start_link'):
               c.pop('start_link', None)
