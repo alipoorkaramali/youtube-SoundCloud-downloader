@@ -8,18 +8,19 @@ from dataclasses import dataclass
 @dataclass
 class Config:
     """تنظیمات پروژه — نسخهٔ مستقل از Apify"""
-    channel: str                  # نام کانال بدون @
-    limit: int                    # تعداد پست‌های مورد نظر
-    max_media_mb: int             # حداکثر حجم هر فایل رسانه (مگابایت)
-    output_dir: str               # پوشهٔ اصلی خروجی
-    profile_dir: str              # پوشهٔ پروفایل مرورگر
-    delay_between_posts: float    # فاصلهٔ زمانی (ثانیه) بین بارگذاری پست‌ها
-    channel_name: str = ''        # نام نمایشی کانال (اختیاری)
-    resume: bool = True           # ادامه خودکار از آخرین نقطه
-    start_link: str = ''          # لینک پست برای شروع دستی
-    timeout_seconds: int = 2100   # زمان کلی اجرا به ثانیه (پیش‌فرض ۳۵ دقیقه)
-    download_quiet_seconds: int = 20   # آستانهٔ سکوت پایه برای دانلود هر رسانه (ثانیه)
-
+    channel: str
+    limit: int
+    max_media_mb: int
+    output_dir: str
+    profile_dir: str
+    delay_between_posts: float
+    channel_name: str = ''
+    resume: bool = True
+    start_link: str = ''
+    timeout_seconds: int = 2100
+    download_quiet_seconds: int = 20
+    scroll_direction: str = 'up'   # ← این خط جدید
+    
 def load_config(path: str = "config.yaml") -> Config:
     """بارگذاری تنظیمات از فایل YAML"""
     config_path = Path(path)
@@ -42,7 +43,10 @@ def load_config(path: str = "config.yaml") -> Config:
     # خواندن فیلدهای اختیاری با پیش‌فرض
     timeout_seconds = data.get('timeout_seconds', 2100)
     download_quiet_seconds = data.get('download_quiet_seconds', 20)
-
+    scroll_direction = data.get('scroll_direction', 'up')
+    if scroll_direction not in ['up', 'down']:
+        scroll_direction = 'up'
+        
     return Config(
         channel=data['channel'].lstrip('@'),
         limit=data['limit'],
@@ -54,5 +58,6 @@ def load_config(path: str = "config.yaml") -> Config:
         resume=data.get('resume', True),
         start_link=data.get('start_link', ''),
         timeout_seconds=timeout_seconds,
-        download_quiet_seconds=download_quiet_seconds
+        download_quiet_seconds=download_quiet_seconds,
+        scroll_direction=scroll_direction
     )
