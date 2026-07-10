@@ -36,6 +36,16 @@ on:
         type: boolean
         required: false
         default: false
+      save_screenshots:
+        description: 'ذخیره اسکرین‌شات‌های پست‌ها (در صورت غیرفعال، سرعت بالاتر و مصرف دیسک کمتر)'
+        type: boolean
+        required: false
+        default: true
+      auto_extend_timeout:
+        description: 'تمدید خودکار زمان اجرا در صورت ادامه‌ی موفق اسکرپینگ (جلوگیری از قطع ناگهانی)'
+        type: boolean
+        required: false
+        default: true
       mega_folder:
         description: '📂 پوشه مقصد در Mega.nz'
         required: true
@@ -44,10 +54,6 @@ on:
         description: '⏱️ حداکثر زمان اجرای اسکرپر (دقیقه) - برای فایل‌های حجیم افزایش دهید'
         required: false
         default: '35'
-      download_quiet_timeout:
-        description: '⏳ آستانه سکوت برای اتمام دانلود (ثانیه)'
-        required: false
-        default: '20'
 
 permissions:
   contents: write
@@ -131,10 +137,13 @@ jobs:
           c['limit'] = ${{ github.event.inputs.limit }}
           c['max_media_mb'] = ${{ github.event.inputs.max_media_mb }}
           c['timeout_seconds'] = int(${{ github.event.inputs.timeout_minutes }}) * 60
-          c['download_quiet_seconds'] = int(${{ github.event.inputs.download_quiet_timeout }})
-          # اگر start_link خالی باشد، کلید را حذف می‌کنیم تا از شرط‌های خالی جلوگیری شود
+          c['save_screenshots'] = ${{ github.event.inputs.save_screenshots == 'true' }}
+          c['auto_extend_timeout'] = ${{ github.event.inputs.auto_extend_timeout == 'true' }}
+          # اگر start_link خالی باشد، کلید را حذف می‌کنیم
           if not c.get('start_link'):
               c.pop('start_link', None)
+          # حذف فیلد قدیمی download_quiet_seconds اگر وجود داشته باشد
+          c.pop('download_quiet_seconds', None)
           with open('config/config.yaml', 'w') as f:
               yaml.dump(c, f, default_flow_style=False, allow_unicode=True)
           "
