@@ -45,13 +45,14 @@ class PlaywrightDownloader:
         self.max_retries = max_retries
         self.media_dir.mkdir(parents=True, exist_ok=True)
 
+        # ✅ استفاده از مسیر پاس‌داده‌شده یا ساخت مسیر پیش‌فرض
         if debug_screenshots_dir:
             self.debug_dir = debug_screenshots_dir
         else:
             self.debug_dir = self.media_dir.parent / "debug_rightclick"
         self.debug_dir.mkdir(parents=True, exist_ok=True)
 
-        self.quiet_base = quiet_base   # آستانهٔ سکوت پایه برای دانلود هر رسانه
+        self.quiet_base = quiet_base   # ← آستانهٔ سکوت پایه برای دانلود هر رسانه
 
     async def download_all(self, page: Page, context, post_ids: List[str],
                            media_map: Optional[Dict[str, List[str]]] = None) -> None:
@@ -82,8 +83,6 @@ class PlaywrightDownloader:
     async def _process_post(self, page: Page, post_id: str,
                             media_map: Dict[str, List[str]]) -> None:
         logger.info(f"📍 شروع دانلود پست {post_id}")
-        # ─── لیست برای نگهداری اسکرین‌شات‌های ضربدر موقت ───
-        self._debug_cross_files = []
 
         # ──────────────── نمایش پست (اسکرول هوشمند بدون خروج از کانال) ────────────────
         message_locator = page.locator(f'[data-message-id="{post_id}"]').first
@@ -371,29 +370,9 @@ class PlaywrightDownloader:
             else:
                 logger.warning(f"   ⚠️ هیچ لینکی برای دانلود مستقیم یافت نشد.")
 
-        # ─── پاک‌سازی اسکرین‌شات‌های ضربدر در صورت موفقیت ───
-        if menu_success or downloaded_files:
-            # دانلود موفق بوده → اسکرین‌شات‌های ضربدر را حذف کن
-            if hasattr(self, '_debug_cross_files'):
-                for path in self._debug_cross_files:
-                    try:
-                        if path.exists():
-                            path.unlink()
-                            logger.debug(f"   🗑️ اسکرین‌شات ضربدر حذف شد: {path.name}")
-                    except Exception as e:
-                        logger.debug(f"   ⚠️ خطا در حذف اسکرین‌شات ضربدر: {e}")
-                self._debug_cross_files = []
-                logger.info(f"   🧹 اسکرین‌شات‌های ضربدر پاک شدند (دانلود موفق)")
-        else:
-            # دانلود ناموفق بوده → اسکرین‌شات‌های ضربدر نگه داشته می‌شوند
-            if hasattr(self, '_debug_cross_files') and self._debug_cross_files:
-                logger.warning(f"   ⚠️ اسکرین‌شات‌های ضربدر برای بررسی خطا نگه داشته شدند ({len(self._debug_cross_files)} فایل)")
-
         if downloaded_files:
             media_map[post_id] = downloaded_files
             logger.info(f"📦 پست {post_id}: {len(downloaded_files)} رسانه دانلود شد.")
-        else:
-            logger.warning(f"⚠️ پست {post_id}: هیچ رسانه‌ای دانلود نشد.")
 
     async def _download_link(self, page: Page, link: str, post_id: str, idx: int,
                              media_map: Dict[str, List[str]]):
@@ -437,7 +416,7 @@ class PlaywrightDownloader:
         return "bin"
 
     async def _draw_debug_cross(self, page: Page, x: float, y: float, name: str):
-        """رسم ضربدر قرمز و ذخیره اسکرین‌شات (فایل به لیست self._debug_cross_files اضافه می‌شود)"""
+        """رسم ضربدر قرمز و ذخیره اسکرین‌شات"""
         await page.evaluate(f"""
             () => {{
                 const container = document.createElement('div');
@@ -456,22 +435,4 @@ class PlaywrightDownloader:
                 cross.style.width = '24px';
                 cross.style.height = '24px';
                 cross.style.transform = 'translate(-50%, -50%)';
-                cross.innerHTML = `
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <line x1="2" y1="2" x2="22" y2="22" stroke="red" stroke-width="3"/>
-                        <line x1="22" y1="2" x2="2" y2="22" stroke="red" stroke-width="3"/>
-                    </svg>`;
-                container.appendChild(cross);
-            }}
-        """)
-        path = self.debug_dir / f"debug_click_{name}.png"
-        await page.screenshot(path=path)
-        logger.debug(f"   📸 اسکرین‌شات با ضربدر موقت: {path.name}")
-        if hasattr(self, '_debug_cross_files'):
-            self._debug_cross_files.append(path)
-        await page.evaluate("""
-            () => {
-                const container = document.getElementById('debug-cross-container');
-                if (container) container.remove();
-            }
-        """)
+            
