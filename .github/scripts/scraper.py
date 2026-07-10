@@ -265,8 +265,17 @@ class TelegramChannelScraper:
             for item in new_items:
                 if item['id'] not in {i['id'] for i in items}:
                     items.append(item)
-            retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
 
+            # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
+            if new_items:
+                last_item = new_items[-1]
+                last_id = last_item['id']
+                new_start_link = f"https://t.me/{self.channel}/{last_id}"
+                self.start_link = new_start_link
+                self.target_msg_id = str(last_id)
+                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link}")
+
+            retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
             if context:
