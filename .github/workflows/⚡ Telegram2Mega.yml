@@ -41,6 +41,11 @@ on:
         type: boolean
         required: false
         default: false
+      resume:
+        description: 'ادامه از آخرین پست (اگر فعال باشد، start_link نادیده گرفته می‌شود)'
+        type: boolean
+        required: false
+        default: false
       mega_folder:
         description: '📂 پوشه مقصد در Mega.nz'
         required: true
@@ -138,6 +143,7 @@ jobs:
           c['timeout_seconds'] = int(${{ github.event.inputs.timeout_minutes }}) * 60
           c['download_quiet_seconds'] = int(${{ github.event.inputs.download_quiet_timeout }})
           c['save_screenshots'] = '${{ github.event.inputs.save_screenshots }}'.lower() == 'true'
+          c['resume'] = '${{ github.event.inputs.resume }}'.lower() == 'true'
           # اگر start_link خالی باشد، کلید را حذف می‌کنیم تا از شرط‌های خالی جلوگیری شود
           if not c.get('start_link'):
               c.pop('start_link', None)
@@ -145,8 +151,16 @@ jobs:
               yaml.dump(c, f, default_flow_style=False, allow_unicode=True)
           "
 
-      - name: 🧹 Clean old output for this channel
-        run: rm -rf "Download/telegram_downloads/${{ github.event.inputs.channel }}"
+      - name: 🧹 Clean old output (keep resume_state.json)
+        run: |
+          OUTPUT_DIR="Download/telegram_downloads/${{ github.event.inputs.channel }}"
+          if [ -d "$OUTPUT_DIR" ]; then
+            # حذف همه‌چیز به جز resume_state.json
+            find "$OUTPUT_DIR" -mindepth 1 -not -name "resume_state.json" -exec rm -rf {} +
+            echo "✅ پوشه پاکسازی شد (resume_state.json حفظ شد)"
+          else
+            echo "ℹ️ پوشه خروجی وجود ندارد، نیازی به پاکسازی نیست"
+          fi
 
       - name: 🚀 Run Telegram Scraper
         if: ${{ !inputs.debug_mode }}
