@@ -242,12 +242,15 @@ class TelegramChannelScraper:
                     self.start_link = f"https://t.me/{self.channel}/{guess_id}"
                     self.target_msg_id = str(guess_id)
 
+            # ─── اطمینان از باز بودن مرورگر ──────────────────────
+            context, page = await self._ensure_browser(context, page)
+
             # اجرای یک دور اسکرپ
             new_items, context, page = await self._fetch_posts_from_telegram(
                 existing_seen_ids={item['id'] for item in items} if items else None,
                 keep_browser_open=True,
-                existing_context=context,  # ← همیشه context فعلی را پاس بده (در اولین بار None است)
-                existing_page=page,        # ← همیشه page فعلی را پاس بده
+                existing_context=context,
+                existing_page=page,
                 limit=self.limit - len(items)
             )
 
@@ -287,21 +290,45 @@ class TelegramChannelScraper:
         if context:
             await context.close()
 
-        self.logger.info("✅ پایان موفقیت‌آمیز.")
-
+    async def _ensure_browser(self, context, page):
+        """اطمینان از باز بودن مرورگر."""
+        if context is None:
+            from playwright.async_api import async_playwright
+            p = await async_playwright().start()
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir=str(self.profile_dir),
+                headless=False,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                viewport={"width": 1366, "height": 900},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
+            self.logger.info("🔄 مرورگر جدید راه‌اندازی شد (زیرا context وجود نداشت).")
+        elif page is None:
+            page = await context.new_page()
+            self.logger.info("🔄 صفحه‌ی جدید در context موجود ساخته شد.")
+        return context, page
     # ═══════════════════ استخراج پست‌ها با پشتیبانی از جهت اسکرول ═══════════════════
     async def _fetch_posts_from_telegram(self, existing_seen_ids: set = None, keep_browser_open: bool = False, existing_context: Any = None, existing_page: Any = None, limit: int = None) -> Tuple[List[Dict], Any, Any]:
         from playwright.async_api import async_playwright
 
-        p = await async_playwright().start()
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=str(self.profile_dir),
-            headless=False,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-            viewport={"width": 1366, "height": 900},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
+        # ─── اگر context و page از قبل وجود دارند، از آن‌ها استفاده کن ──
+        if existing_context is not None and existing_page is not None:
+            context = existing_context
+            page = existing_page
+            p = None  # برای اینکه در انتها بسته نشود
+            self.logger.info("♻️ استفاده مجدد از context و page موجود")
+        else:
+            # ─── راه‌اندازی مرورگر ──────────────────────────────────
+            p = await async_playwright().start()
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir=str(self.profile_dir),
+                headless=False,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                viewport={"width": 1366, "height": 900},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
 
         try:
             await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
