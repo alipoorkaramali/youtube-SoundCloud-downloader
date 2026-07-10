@@ -49,6 +49,8 @@ class DebugTelegramChannelScraper(TelegramChannelScraper):
         return media_map, 0
 
     async def _save_debug_screenshot(self, page, name: str):
+        if not self.save_screenshots:   # ← این خط جدید
+            return
         if not self.debug_screenshots:
             return
         try:
