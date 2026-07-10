@@ -246,8 +246,8 @@ class TelegramChannelScraper:
             new_items, context, page = await self._fetch_posts_from_telegram(
                 existing_seen_ids={item['id'] for item in items} if items else None,
                 keep_browser_open=True,
-                existing_context=context if retry_count > 0 else None,
-                existing_page=page if retry_count > 0 else None,
+                existing_context=context,  # ← همیشه context فعلی را پاس بده (در اولین بار None است)
+                existing_page=page,        # ← همیشه page فعلی را پاس بده
                 limit=self.limit - len(items)
             )
 
