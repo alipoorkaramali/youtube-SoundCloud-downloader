@@ -45,13 +45,14 @@ class TelegramChannelScraper:
 
         self.debug_screenshots_dir = self.base_dir / "debug_screenshots"
         self.debug_mode = getattr(config, 'debug_mode', False)
+        self.save_screenshots = getattr(config, 'save_screenshots', True)
 
         # ─── پارامتر جدید: جهت اسکرول ───
         self.scroll_direction = getattr(config, 'scroll_direction', 'up').lower()
         if self.scroll_direction not in ['up', 'down']:
             self.logger.warning(f"⚠️ مقدار نامعتبر برای scroll_direction: {self.scroll_direction}. استفاده از 'up'.")
             self.scroll_direction = 'up'
-
+        self.logger.info(f"📸 ذخیره اسکرین‌شات: {'فعال' if self.save_screenshots else 'غیرفعال'}")
         self.logger = logging.getLogger("TelegramScraper")
         self.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
@@ -95,9 +96,13 @@ class TelegramChannelScraper:
             self.logger.warning(f"⚠️ خطا در ذخیره اسکرین‌شات {name}: {e}")
 
     async def _save_screenshot(self, page, name: str):
+        if not self.save_screenshots:
+            return
         await self._screenshot(page, name, full_page=True)
 
     async def _take_screenshot(self, page, name: str):
+        if not self.save_screenshots:
+            return
         self.debug_screenshots_dir.mkdir(parents=True, exist_ok=True)
         await self._screenshot(page, name, full_page=True)
 
@@ -727,6 +732,9 @@ class TelegramChannelScraper:
 
     # ═══════════════════ اسکرین‌شات از تکتک پست‌ها ═══════════════════
     async def _capture_post_screenshots(self, page, items: List[Dict]):
+        if not self.save_screenshots:
+            self.logger.info("⏭️ ذخیره اسکرین‌شات پست‌ها غیرفعال است.")
+            return
         self.logger.info(f"📸 گرفتن اسکرین‌شات از {len(items)} پست...")
         for idx, item in enumerate(items):
             msg_id = item['id']
