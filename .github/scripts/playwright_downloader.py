@@ -83,6 +83,7 @@ class PlaywrightDownloader:
     async def _process_post(self, page: Page, post_id: str,
                             media_map: Dict[str, List[str]]) -> None:
         logger.info(f"📍 شروع دانلود پست {post_id}")
+        self._debug_cross_files = []
 
         # ──────────────── نمایش پست (اسکرول هوشمند بدون خروج از کانال) ────────────────
         message_locator = page.locator(f'[data-message-id="{post_id}"]').first
@@ -148,7 +149,6 @@ class PlaywrightDownloader:
                 pass
 
             return
-
         logger.info(f"   📍 پست {post_id} آماده شد.")
         await human_sleep(1.5, 0.4)
 
@@ -374,11 +374,69 @@ class PlaywrightDownloader:
                     await self._download_link(page, link, post_id, idx, media_map)
             else:
                 logger.warning(f"   ⚠️ هیچ لینکی برای دانلود مستقیم یافت نشد.")
+        # ─── پاک‌سازی اسکرین‌شات‌های ضربدر در صورت موفقیت ───
+        if menu_success or downloaded_files:
+            # دانلود موفق بوده → اسکرین‌شات‌های ضربدر را حذف کن
+            if hasattr(self, '_debug_cross_files'):
+                for path in self._debug_cross_files:
+                    try:
+                        if path.exists():
+                            path.unlink()
+                            logger.debug(f"   🗑️ اسکرین‌شات ضربدر حذف شد: {path.name}")
+                    except Exception as e:
+                        logger.debug(f"   ⚠️ خطا در حذف اسکرین‌شات ضربدر: {e}")
+                self._debug_cross_files = []
+                logger.info(f"   🧹 اسکرین‌شات‌های ضربدر پاک شدند (دانلود موفق)")
+        else:
+            # دانلود ناموفق بوده → اسکرین‌شات‌های ضربدر نگه داشته می‌شوند
+            if hasattr(self, '_debug_cross_files') and self._debug_cross_files:
+                logger.warning(f"   ⚠️ اسکرین‌شات‌های ضربدر برای بررسی خطا نگه داشته شدند ({len(self._debug_cross_files)} فایل)")
 
         if downloaded_files:
             media_map[post_id] = downloaded_files
             logger.info(f"📦 پست {post_id}: {len(downloaded_files)} رسانه دانلود شد.")
+            
+    async def _draw_debug_cross(self, page: Page, x: float, y: float, name: str):
+        """رسم ضربدر قرمز و ذخیره اسکرین‌شات (فایل به self._debug_cross_files اضافه می‌شود)"""
+        await page.evaluate(f"""
+            () => {{
+                const container = document.createElement('div');
+                container.id = 'debug-cross-container';
+                container.style.position = 'fixed';
+                container.style.left = '0px';
+                container.style.top = '0px';
+                container.style.zIndex = '99999';
+                container.style.pointerEvents = 'none';
+                document.body.appendChild(container);
 
+                const cross = document.createElement('div');
+                cross.style.position = 'absolute';
+                cross.style.left = '{x}px';
+                cross.style.top = '{y}px';
+                cross.style.width = '24px';
+                cross.style.height = '24px';
+                cross.style.transform = 'translate(-50%, -50%)';
+                cross.innerHTML = `
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <line x1="2" y1="2" x2="22" y2="22" stroke="red" stroke-width="3"/>
+                        <line x1="22" y1="2" x2="2" y2="22" stroke="red" stroke-width="3"/>
+                    </svg>`;
+                container.appendChild(cross);
+            }}
+        """)
+        path = self.debug_dir / f"debug_click_{name}.png"
+        # اطمینان از وجود لیست و اضافه کردن مسیر
+        if not hasattr(self, '_debug_cross_files'):
+            self._debug_cross_files = []
+        self._debug_cross_files.append(path)
+        await page.screenshot(path=path)
+        logger.info(f"   📸 اسکرین‌شات با ضربدر ذخیره شد: {path.name}")
+        await page.evaluate("""
+            () => {
+                const container = document.getElementById('debug-cross-container');
+                if (container) container.remove();
+            }
+        """)        
     async def _download_link(self, page: Page, link: str, post_id: str, idx: int,
                              media_map: Dict[str, List[str]]):
         """کمکی برای دانلود یک لینک مستقیم و اضافه کردن به media_map"""
@@ -419,41 +477,3 @@ class PlaywrightDownloader:
             if ext.isalnum():
                 return ext
         return "bin"
-
-    async def _draw_debug_cross(self, page: Page, x: float, y: float, name: str):
-        """رسم ضربدر قرمز و ذخیره اسکرین‌شات"""
-        await page.evaluate(f"""
-            () => {{
-                const container = document.createElement('div');
-                container.id = 'debug-cross-container';
-                container.style.position = 'fixed';
-                container.style.left = '0px';
-                container.style.top = '0px';
-                container.style.zIndex = '99999';
-                container.style.pointerEvents = 'none';
-                document.body.appendChild(container);
-
-                const cross = document.createElement('div');
-                cross.style.position = 'absolute';
-                cross.style.left = '{x}px';
-                cross.style.top = '{y}px';
-                cross.style.width = '24px';
-                cross.style.height = '24px';
-                cross.style.transform = 'translate(-50%, -50%)';
-                cross.innerHTML = `
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <line x1="2" y1="2" x2="22" y2="22" stroke="red" stroke-width="3"/>
-                        <line x1="22" y1="2" x2="2" y2="22" stroke="red" stroke-width="3"/>
-                    </svg>`;
-                container.appendChild(cross);
-            }}
-        """)
-        path = self.debug_dir / f"debug_click_{name}.png"
-        await page.screenshot(path=path)
-        logger.info(f"   📸 اسکرین‌شات با ضربدر ذخیره شد: {path.name}")
-        await page.evaluate("""
-            () => {
-                const container = document.getElementById('debug-cross-container');
-                if (container) container.remove();
-            }
-        """)
