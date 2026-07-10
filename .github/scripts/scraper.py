@@ -456,6 +456,12 @@ class TelegramChannelScraper:
             new_height = await page.evaluate("document.documentElement.scrollHeight")
 
             if new_height == old_height:
+                # بررسی آیا به انتهای صفحه رسیده‌ایم
+                at_top = await page.evaluate("window.scrollY <= 100")
+                at_bottom = await page.evaluate("window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 100")
+                if (self.scroll_direction == 'up' and at_top) or (self.scroll_direction == 'down' and at_bottom):
+                    self.logger.info("📌 به انتهای صفحه رسیدیم. اسکرول متوقف می‌شود.")
+                    break
                 scroll_attempts += 1
             else:
                 scroll_attempts = 0
