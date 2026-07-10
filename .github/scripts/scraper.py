@@ -25,8 +25,10 @@ async def human_sleep(base: float, jitter: float = 0.4):
 
 
 class TelegramChannelScraper:
-
     def __init__(self, config: Config):
+        # ═══════════════════════════════════════════════════════════════
+        # مرحله ۱: ذخیره تنظیمات اولیه (نیازی به logger ندارند)
+        # ═══════════════════════════════════════════════════════════════
         self.config = config
         self.channel = config.channel.lstrip('@')
         self.channel_name = getattr(config, 'channel_name', '') or ''
@@ -34,22 +36,32 @@ class TelegramChannelScraper:
         self.target_msg_id = None
         self.limit = config.limit
         self.max_media_bytes = config.max_media_mb * 1024 * 1024
+        
+        # ─── مسیرهای خروجی ────────────────────────────────────────────
         self.base_dir = Path(config.output_dir) / "telegram_downloads" / self.channel
         self.media_dir = self.base_dir / "media"
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.profile_dir = Path(config.profile_dir)
         self.delay_between_posts = config.delay_between_posts
 
+        # ─── پوشه‌های اسکرین‌شات ──────────────────────────────────────
         self.screenshots_dir = self.base_dir / "post_screenshots"
         self.screenshots_dir.mkdir(parents=True, exist_ok=True)
-
         self.debug_screenshots_dir = self.base_dir / "debug_screenshots"
+        
+        # ─── تنظیمات مربوط به حالت دیباگ و اسکرین‌شات ────────────────
         self.debug_mode = getattr(config, 'debug_mode', False)
         self.save_screenshots = getattr(config, 'save_screenshots', True)
 
-        # ─── پارامتر جدید: جهت اسکرول ───
+        # ─── تنظیمات مربوط به اسکرول (قبل از logger) ────────────────
+        self.scroll_direction = getattr(config, 'scroll_direction', 'up').lower()
+
+        # ═══════════════════════════════════════════════════════════════
+        # مرحله ۲: راه‌اندازی logger (بعد از متغیرهای اولیه)
+        # ═══════════════════════════════════════════════════════════════
         self.logger = logging.getLogger("TelegramScraper")
         self.logger.setLevel(logging.INFO)
+        
         formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
         fh = logging.FileHandler(self.base_dir / "scraper.log", encoding='utf-8')
         fh.setFormatter(formatter)
@@ -59,11 +71,19 @@ class TelegramChannelScraper:
             self.logger.addHandler(fh)
             self.logger.addHandler(ch)
 
+        # ═══════════════════════════════════════════════════════════════
+        # مرحله ۳: اعتبارسنجی و لاگ‌گیری (بعد از تعریف logger)
+        # ═══════════════════════════════════════════════════════════════
+        
+        # ─── لاگ‌های نهایی (اطلاعات اولیه) ───────────────────────────
         self.logger.info(f"📁 دایرکتوری خروجی: {self.base_dir}")
         self.logger.info(f"🐞 حالت دیباگ: {'فعال' if self.debug_mode else 'غیرفعال'}")
-        self.logger.info(f"🧭 جهت اسکرول: {'بالا (قدیمی‌تر)' if self.scroll_direction == 'up' else 'پایین (جدیدتر)'}")
-        self.logger.info(f"📸 ذخیره اسکرین‌شات: {'فعال' if self.save_screenshots else 'غیرفعال'}")
-
+        self.logger.info(
+            f"🧭 جهت اسکرول: {'بالا (قدیمی‌تر)' if self.scroll_direction == 'up' else 'پایین (جدیدتر)'}"
+        )
+        self.logger.info(
+            f"📸 ذخیره اسکرین‌شات: {'فعال' if self.save_screenshots else 'غیرفعال'}"
+        )
         # ─── اعتبارسنجی جهت اسکرول (بعد از تعریف logger) ───
         if self.scroll_direction not in ['up', 'down']:
             self.logger.warning(f"⚠️ مقدار نامعتبر برای scroll_direction: {self.scroll_direction}. استفاده از 'up'.")
