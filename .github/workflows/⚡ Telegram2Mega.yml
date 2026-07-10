@@ -137,12 +137,14 @@ jobs:
           c['limit'] = ${{ github.event.inputs.limit }}
           c['max_media_mb'] = ${{ github.event.inputs.max_media_mb }}
           c['timeout_seconds'] = int(${{ github.event.inputs.timeout_minutes }}) * 60
-          c['save_screenshots'] = ${{ github.event.inputs.save_screenshots == 'true' }}
-          c['auto_extend_timeout'] = ${{ github.event.inputs.auto_extend_timeout == 'true' }}
-          # اگر start_link خالی باشد، کلید را حذف می‌کنیم
+          # تبدیل صحیح booleanها
+          save_screenshots_str = '${{ github.event.inputs.save_screenshots }}'.lower()
+          c['save_screenshots'] = save_screenshots_str == 'true'
+          auto_extend_timeout_str = '${{ github.event.inputs.auto_extend_timeout }}'.lower()
+          c['auto_extend_timeout'] = auto_extend_timeout_str == 'true'
+          # حذف کلیدهای خالی
           if not c.get('start_link'):
               c.pop('start_link', None)
-          # حذف فیلد قدیمی download_quiet_seconds اگر وجود داشته باشد
           c.pop('download_quiet_seconds', None)
           with open('config/config.yaml', 'w') as f:
               yaml.dump(c, f, default_flow_style=False, allow_unicode=True)
