@@ -6,7 +6,7 @@ import logging
 import random
 import re
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Any, Tuple
 
 from config_loader import Config
 from playwright_downloader import PlaywrightDownloader
@@ -222,7 +222,48 @@ class TelegramChannelScraper:
         else:
             self.logger.info(f"🚀 شروع اسکریپر مستقل برای @{self.channel} (limit={self.limit})")
 
-        items, context, page = await self._fetch_posts_from_telegram()
+        # ─── حلقه اصلی با قابلیت Retry ──────────────────────────
+        max_retries = 3
+        retry_count = 0
+        items = []
+        context = None
+        page = None
+
+        while len(items) < self.limit and retry_count <= max_retries:
+            if retry_count > 0:
+                # اگر در retry هستیم، از آخرین شناسه برای حدس استفاده کن
+                if items:
+                    last_id = int(items[-1]['id'])
+                    step = -1 if self.scroll_direction == 'up' else 1
+                    guess_id = last_id + step
+                    if guess_id <= 0:
+                        break
+                    self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
+                    self.start_link = f"https://t.me/{self.channel}/{guess_id}"
+                    self.target_msg_id = str(guess_id)
+
+            # اجرای یک دور اسکرپ
+            new_items, context, page = await self._fetch_posts_from_telegram(
+                existing_seen_ids={item['id'] for item in items} if items else None,
+                keep_browser_open=True,
+                existing_context=context if retry_count > 0 else None,
+                existing_page=page if retry_count > 0 else None,
+                limit=self.limit - len(items)
+            )
+
+            if not new_items:
+                retry_count += 1
+                if retry_count > max_retries:
+                    self.logger.warning("⚠️ پس از چندین تلاش، پست جدیدی پیدا نشد.")
+                    break
+                continue
+
+            # اضافه کردن پست‌های جدید
+            for item in new_items:
+                if item['id'] not in {i['id'] for i in items}:
+                    items.append(item)
+            retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
+
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
             if context:
@@ -249,7 +290,7 @@ class TelegramChannelScraper:
         self.logger.info("✅ پایان موفقیت‌آمیز.")
 
     # ═══════════════════ استخراج پست‌ها با پشتیبانی از جهت اسکرول ═══════════════════
-    async def _fetch_posts_from_telegram(self) -> tuple[List[Dict], any, any]:
+    async def _fetch_posts_from_telegram(self, existing_seen_ids: set = None, keep_browser_open: bool = False, existing_context: Any = None, existing_page: Any = None, limit: int = None) -> Tuple[List[Dict], Any, Any]:
         from playwright.async_api import async_playwright
 
         p = await async_playwright().start()
