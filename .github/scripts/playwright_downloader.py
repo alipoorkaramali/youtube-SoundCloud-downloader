@@ -179,6 +179,7 @@ class PlaywrightDownloader:
         logger.info(f"   🖼️ تعداد تقریبی مدیا: {visible_count} | شروع دانلود...")
 
         downloaded_files = []
+        self._save_debug_on_failure = False   # ← این خط جدید
         file_index = 0
         seen_suggested = set()
 
@@ -236,8 +237,9 @@ class PlaywrightDownloader:
                     if box:
                         x = box['x'] + box['width'] / 2
                         y = box['y'] + box['height'] / 2
-                        await self._draw_debug_cross(page, x, y, f"target_{post_id}_{scroll_attempt}_{right_attempt}")
-                        logger.info(f"   📸 ضربدر روی هدف کلیک (تلاش {scroll_attempt+1}-{right_attempt+1})")
+                        if self._save_debug_on_failure:   # ← این شرط جدید
+                            await self._draw_debug_cross(page, x, y, f"target_{post_id}_{scroll_attempt}_{right_attempt}")
+                            logger.info(f"   📸 ضربدر روی هدف کلیک (تلاش {scroll_attempt+1}-{right_attempt+1})")
                         await page.mouse.click(x, y, button='right')
                         logger.info(f"   🖱️ راست‌کلیک روی هدف در ({x:.0f}, {y:.0f})")
                     else:
@@ -256,6 +258,7 @@ class PlaywrightDownloader:
                             logger.debug("   🔄 منو نیامد – صبر کوتاه و تلاش دوباره...")
                             await human_sleep(3.0, 0.5)
                         else:
+                            self._save_debug_on_failure = True
                             path = self.debug_dir / f"menu_failed_{post_id}_{scroll_attempt}.png"
                             await page.screenshot(path=path)
                             logger.warning(f"   ⚠️ منوی context در تلاش {scroll_attempt+1} ظاهر نشد. اسکرین‌شات: {path.name}")
@@ -287,9 +290,10 @@ class PlaywrightDownloader:
                 }''')
 
                 if download_coords:
-                    await self._draw_debug_cross(page, download_coords['x'], download_coords['y'],
-                                                 f"download_option_{post_id}_{scroll_attempt}")
-                    logger.info(f"   📸 اسکرین‌شات با ضربدر ذخیره شد")
+                    if self._save_debug_on_failure:   # ← این شرط جدید
+                        await self._draw_debug_cross(page, download_coords['x'], download_coords['y'],
+                                                     f"download_option_{post_id}_{scroll_attempt}")
+                        logger.info(f"   📸 اسکرین‌شات با ضربدر ذخیره شد")
                     await page.mouse.click(download_coords['x'], download_coords['y'])
                     logger.info(f"   ✅ کلیک روی گزینهٔ دانلود انجام شد (مختصات)")
                     menu_success = True
@@ -334,6 +338,7 @@ class PlaywrightDownloader:
                         logger.warning(f"   ⚠️ زمان کلی {absolute_timeout}s به پایان رسید – {len(downloaded_files)} فایل دریافت شد.")
 
             except Exception as e:
+                self._save_debug_on_failure = True
                 logger.warning(f"   ❌ خطا در فرایند راست‌کلیک/دانلود (تلاش {scroll_attempt+1}): {e}")
                 try:
                     path = self.debug_dir / f"error_{post_id}_{scroll_attempt}.png"
