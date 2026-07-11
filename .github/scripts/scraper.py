@@ -863,15 +863,14 @@ class TelegramChannelScraper:
                 await self._take_screenshot(page, "click_result_failed")
                 return False
 
-            # ─── مرحله ۱: منتظر بارگذاری صفحه ──────────────────────
+            # ─── مرحله ۱: منتظر بارگذاری پیام‌ها ──────────────────
             try:
-                await page.wait_for_selector('body', timeout=15000)
-                self.logger.info("✅ صفحه بارگذاری شد.")
-                await self._take_screenshot(page, "page_loaded")
-            except Exception as e:
-                self.logger.error(f"❌ صفحه بارگذاری نشد: {e}")
-                await self._take_screenshot(page, "page_load_failed")
-                return False
+                await page.wait_for_selector('div[data-message-id]', timeout=20000)
+                self.logger.info("✅ پیام‌ها در صفحه بارگذاری شدند.")
+                await self._take_screenshot(page, "messages_loaded")
+            except Exception:
+                self.logger.warning("⚠️ پیام‌ها با timeout بارگذاری نشدند. تلاش با روش‌های جایگزین...")
+                # ادامه می‌دهیم تا مراحل بعدی (جستجوی جایگزین و اسکرول نرم) اجرا شوند
 
             # ─── مرحله ۲: جستجوی دقیق با data-message-id ──────────
             target_exists = await page.locator(f'[data-message-id="{self.target_msg_id}"]').count() > 0
