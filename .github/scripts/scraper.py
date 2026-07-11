@@ -334,11 +334,21 @@ class TelegramChannelScraper:
             # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
             if new_items:
                 last_item = new_items[-1]
-                last_id = last_item['id']
+                last_id_str = str(last_item['id']).strip()
+                
+                # 🔥 پاک‌سازی شناسه (حذف اعشار)
+                try:
+                    if '.' in last_id_str:
+                        last_id = int(float(last_id_str))
+                    else:
+                        last_id = int(last_id_str)
+                except:
+                    last_id = last_id_str  # fallback
+                
                 new_start_link = f"https://t.me/{self.channel}/{last_id}"
                 self.start_link = new_start_link
                 self.target_msg_id = str(last_id)
-                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link}")
+                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id پاک‌سازی شده: {last_id})")
 
             retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
         if not items:
@@ -499,6 +509,12 @@ class TelegramChannelScraper:
                 for msg in msg_iter:
                     try:
                         msg_id = await msg.get_attribute('data-message-id')
+                        if msg_id:
+                            try:
+                                # پاک‌سازی قوی شناسه
+                                msg_id = str(int(float(msg_id)))
+                            except:
+                                pass
                         if not msg_id or msg_id in seen_ids:
                             continue
 
@@ -773,7 +789,7 @@ class TelegramChannelScraper:
         try:
             parts = self.start_link.rstrip('/').split('/')
             if parts:
-                self.target_msg_id = parts[-1]  # ← هر چیزی که هست، بگیر
+                self.target_msg_id = parts[-1] # ← هر چیزی که هست، بگیر
                 self.logger.info(f"🎯 شناسه پیام هدف: {self.target_msg_id}")
             else:
                 self.logger.warning("⚠️ نمی‌توان شناسه پیام را از لینک استخراج کرد.")
@@ -781,6 +797,17 @@ class TelegramChannelScraper:
         except Exception as e:
             self.logger.warning(f"⚠️ خطا در استخراج شناسه پیام: {e}")
             self.target_msg_id = None
+
+        # === پاک‌سازی target_msg_id (جلوگیری از اعشار) ===
+        if self.target_msg_id:
+            try:
+                cleaned_id = str(int(float(self.target_msg_id)))
+                if cleaned_id != self.target_msg_id:
+                    self.logger.warning(f"⚠️ target_msg_id تصحیح شد: {self.target_msg_id} → {cleaned_id}")
+                    self.target_msg_id = cleaned_id
+                    self.start_link = f"https://t.me/{self.channel}/{cleaned_id}"
+            except Exception as e:
+                self.logger.error(f"خطا در پاک‌سازی target_msg_id: {e}")
 
         async def perform_search_and_click():
             search_input = None
