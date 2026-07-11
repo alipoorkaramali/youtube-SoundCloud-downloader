@@ -436,8 +436,39 @@ class TelegramChannelScraper:
                         if not msg_id or msg_id in seen_ids:
                             continue
                         # بررسی وجود تاریخ (اولویت) و در صورت نبود، وجود کپشن کافی
-                        date_el = msg.locator('time, .date, [class*="date"], [datetime], .message-time, [class*="time"]').first
-                        has_date = await date_el.count() > 0
+                        # ─── استخراج تاریخ با JavaScript ──────────────────────────
+                        has_date = False
+                        date_text = ""
+                        try:
+                            date_info = await msg.evaluate("""
+                                (el) => {
+                                    // روش‌های مختلف برای پیدا کردن تاریخ
+                                    const selectors = [
+                                        'time', '.date', '[class*="date"]', '[datetime]',
+                                        '.message-time', '[class*="time"]', '.time',
+                                        '[data-date]', '[data-timestamp]'
+                                    ];
+                                    for (const sel of selectors) {
+                                        const found = el.querySelector(sel);
+                                        if (found) {
+                                            const text = found.textContent?.trim() || found.getAttribute('datetime') || '';
+                                            if (text) return { has: true, text: text };
+                                        }
+                                    }
+                                    // اگر هیچ سلکتوری کار نکرد، کل متن پیام را جستجو کن
+                                    const fullText = el.textContent || '';
+                                    // الگوی تاریخ: مثل "12:34", "10 Jul", "2024-07-11"
+                                    const datePattern = /\\d{1,2}:\\d{2}|\\d{1,2}\\s+[A-Za-z]{3}|\\d{4}-\\d{2}-\\d{2}/;
+                                    const match = fullText.match(datePattern);
+                                    if (match) return { has: true, text: match[0] };
+                                    return { has: false, text: '' };
+                                }
+                            """)
+                            has_date = date_info.get('has', False)
+                            date_text = date_info.get('text', '')
+                        except Exception:
+                            has_date = False
+                            date_text = ""
                         has_caption = False
                         if not has_date:
                             try:
@@ -861,14 +892,25 @@ class TelegramChannelScraper:
                 await self._take_screenshot(page, "click_result_failed")
                 return False
 
+            # بررسی اینکه صفحه بارگذاری شده است (حتی اگر data-message-id نباشد)
+            page_loaded = False
             for attempt in range(3):
                 try:
-                    await page.wait_for_selector('div[data-message-id]', timeout=15000)
-                    self.logger.info("✅ صفحه پیام‌ها با موفقیت بارگذاری شد.")
-                    await self._take_screenshot(page, "messages_page_loaded")
-                    return True
+                    # منتظر هر المانی در صفحه (به‌جای data-message-id خاص)
+                    await page.wait_for_selector('body', timeout=15000)
+                    # بررسی اینکه آیا حداقل یک المان با data-message-id یا هر محتوای دیگری وجود دارد
+                    content_count = await page.locator('div[data-message-id], div.message, div[class*="message"]').count()
+                    if content_count > 0:
+                        page_loaded = True
+                        self.logger.info(f"✅ صفحه بارگذاری شد و {content_count} المان پیدا شد.")
+                        await self._take_screenshot(page, "messages_page_loaded")
+                        return True
+                    else:
+                        self.logger.warning(f"⚠️ صفحه بارگذاری شد ولی هیچ المان پیامی پیدا نشد (تلاش {attempt+1})")
+                        if attempt < 2:
+                            await human_sleep(3, 0.5)
                 except Exception as e:
-                    self.logger.warning(f"⚠️ تلاش {attempt+1} برای بارگذاری پیام‌ها ناموفق: {e}")
+                    self.logger.warning(f"⚠️ تلاش {attempt+1} برای بارگذاری صفحه ناموفق: {e}")
                     if attempt < 2:
                         await human_sleep(3, 0.5)
             self.logger.error("❌ پس از کلیک، پیام‌ها پیدا نشدند.")
