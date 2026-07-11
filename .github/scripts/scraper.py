@@ -427,14 +427,17 @@ class TelegramChannelScraper:
 
         if self.start_link:
             entered = await self._navigate_to_start_link(page)
-            # اگر لینک مستقیم موفق نشد، دیگر Fallback به جستجوی عادی نمی‌دهیم
-            # زیرا اسکرول آرام داخل _navigate_to_start_link انجام شده است
+            if not entered:
+                self.logger.warning("⚠️ لینک مستقیم نتیجه نداد. تلاش با جستجوی عادی کانال...")
+                self.start_link = None
+                entered = await self._search_and_enter_channel(page)
         else:
             entered = await self._search_and_enter_channel(page)
 
         if not entered:
             await context.close()
             return [], None, None
+            
         await self._save_screenshot(page, "initial")
 
         # ═══════════════ پرش به ابتدا یا انتهای صفحه بر اساس جهت اسکرول ═══════════════
