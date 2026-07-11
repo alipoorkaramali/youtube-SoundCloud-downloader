@@ -187,6 +187,66 @@ class TelegramChannelScraper:
         self.logger.info(f"⚠️ ارتفاع صفحه پس از {max_attempts} اسکرول تغییر نکرد.")
         return False
 
+    # ═══════════════════ اسکرول آرام برای پیدا کردن پست در صفحه فعلی ═══════════════════
+    async def _find_post_with_slow_scroll(self, page, seen_ids: set = None) -> Tuple[bool, str]:
+        """
+        اسکرول آرام در صفحه فعلی برای پیدا کردن اولین پست دارای تاریخ یا کپشن.
+        برمی‌گرداند: (پیدا شد یا نه, شناسه پست)
+        """
+        direction_text = 'بالا' if self.scroll_direction == 'up' else 'پایین'
+        scroll_amount = -600 if self.scroll_direction == 'up' else 600
+        found_id = None
+        max_slow_steps = 20
+
+        for step in range(max_slow_steps):
+            await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+            await asyncio.sleep(0.4)
+            messages = await page.locator('div[data-message-id]').all()
+            for msg in messages:
+                msg_id = await msg.get_attribute('data-message-id')
+                if not msg_id:
+                    continue
+                if seen_ids and msg_id in seen_ids:
+                    continue
+
+                # بررسی تاریخ با JavaScript
+                has_date = False
+                try:
+                    date_info = await msg.evaluate("""
+                        (el) => {
+                            const selectors = ['time', '.date', '[class*="date"]', '[datetime]', '.message-time', '[class*="time"]', '.time', '[data-date]', '[data-timestamp]'];
+                            for (const sel of selectors) {
+                                const found = el.querySelector(sel);
+                                if (found) {
+                                    const text = found.textContent?.trim() || found.getAttribute('datetime') || '';
+                                    if (text) return { has: true, text: text };
+                                }
+                            }
+                            const fullText = el.textContent || '';
+                            const datePattern = /\\d{1,2}:\\d{2}|\\d{1,2}\\s+[A-Za-z]{3}|\\d{4}-\\d{2}-\\d{2}/;
+                            const match = fullText.match(datePattern);
+                            if (match) return { has: true, text: match[0] };
+                            return { has: false, text: '' };
+                        }
+                    """)
+                    has_date = date_info.get('has', False)
+                except Exception:
+                    has_date = False
+
+                has_caption = False
+                if not has_date:
+                    try:
+                        text_content = (await msg.inner_text()).strip()
+                        has_caption = len(text_content) > 10
+                    except:
+                        pass
+
+                if has_date or has_caption:
+                    found_id = msg_id
+                    self.logger.info(f"🔍 پست معتبر با اسکرول آرام پیدا شد: {msg_id} (تاریخ: {has_date}, کپشن: {has_caption})")
+                    return True, found_id
+
+        return False, None
     # ═══════════════════ استخراج پست‌ها با JavaScript ═══════════════════
     async def _extract_posts_from_page(self, page) -> List[Dict]:
         """استخراج پست‌ها از صفحه با JavaScript (همراه با متن کامل)."""
@@ -353,11 +413,8 @@ class TelegramChannelScraper:
 
         if self.start_link:
             entered = await self._navigate_to_start_link(page)
-            # اگر لینک مستقیم موفق نشد، به حالت عادی برگرد
-            if not entered:
-                self.logger.warning("⚠️ لینک مستقیم نتیجه نداد. تلاش با جستجوی عادی کانال...")
-                self.start_link = None  # لغو start_link برای استفاده از حالت عادی
-                entered = await self._search_and_enter_channel(page)
+            # اگر لینک مستقیم موفق نشد، دیگر Fallback به جستجوی عادی نمی‌دهیم
+            # زیرا اسکرول آرام داخل _navigate_to_start_link انجام شده است
         else:
             entered = await self._search_and_enter_channel(page)
 
@@ -904,33 +961,43 @@ class TelegramChannelScraper:
                 self.logger.info("✅ صفحه بارگذاری شد.")
                 await self._take_screenshot(page, "messages_page_loaded")
                 
-                # حالا بررسی کنیم که آیا پست مورد نظر در صفحه وجود دارد یا نه
+                # مرحله ۱: تطابق دقیق با data-message-id
                 target_exists = await page.locator(f'[data-message-id="{self.target_msg_id}"]').count() > 0
                 if target_exists:
-                    self.logger.info(f"✅ پست هدف {self.target_msg_id} در صفحه پیدا شد.")
+                    self.logger.info(f"✅ پست هدف {self.target_msg_id} در صفحه پیدا شد (با data-message-id دقیق).")
+                    return True
+                
+                # مرحله ۲: جستجوی جایگزین در همان صفحه (با متن یا لینک)
+                self.logger.warning(f"⚠️ پست با data-message-id دقیق پیدا نشد. جستجوی جایگزین در صفحه...")
+                all_messages = await page.locator('div[data-message-id]').all()
+                found = False
+                for msg in all_messages:
+                    msg_id = await msg.get_attribute('data-message-id')
+                    msg_text = await msg.inner_text()
+                    if self.target_msg_id in msg_text or f"/{self.target_msg_id}" in msg_text:
+                        self.logger.info(f"🔍 پست هدف با شناسه جایگزین پیدا شد: {msg_id} (متن: {msg_text[:50]}...)")
+                        self.target_msg_id = msg_id
+                        found = True
+                        break
+                
+                if found:
+                    return True
+                
+                # مرحله ۳: اسکرول آرام در همان صفحه (بدون رفتن به صفحه اصلی)
+                self.logger.warning(f"⚠️ پست هدف در صفحه پیدا نشد. شروع اسکرول آرام در همان صفحه...")
+                found, found_id = await self._find_post_with_slow_scroll(page, seen_ids=None)
+                if found:
+                    self.target_msg_id = found_id
+                    self.logger.info(f"✅ پست هدف با اسکرول آرام پیدا شد: {self.target_msg_id}")
                     return True
                 else:
-                    self.logger.warning(f"⚠️ پست هدف {self.target_msg_id} در صفحه پیدا نشد. Fallback به اسکرول آرام...")
-                    # Fallback: صفحه را به حالت عادی برگردانیم تا اسکرول آرام کار کند
-                    await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
+                    self.logger.error("❌ حتی با اسکرول آرام هم پستی پیدا نشد.")
                     return False
+                
             except Exception as e:
-                self.logger.error(f"❌ صفحه بارگذاری نشد: {e}")
+                self.logger.error(f"❌ خطا در بارگذاری یا جستجوی صفحه: {e}")
                 await self._take_screenshot(page, "page_load_failed")
                 return False
-                
-        for retry in range(2):
-            if retry > 0:
-                self.logger.info(f"🔄 تلاش مجدد ({retry+1})... بازگشت به صفحه قبل و دوباره جستجو")
-                await page.go_back()
-                await human_sleep(2, 0.3)
-            success = await perform_search_and_click()
-            if success:
-                return True
-            else:
-                self.logger.warning(f"❌ تلاش {retry+1} ناموفق بود.")
-        return False
-
     # ═══════════════════ متد کمکی: بررسی وجود عبارت ═══════════════════
     async def _check_text_on_page(self, page, term: str) -> bool:
         try:
