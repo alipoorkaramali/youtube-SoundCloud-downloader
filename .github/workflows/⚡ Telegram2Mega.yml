@@ -173,6 +173,18 @@ jobs:
         timeout-minutes: ${{ fromJSON(github.event.inputs.timeout_minutes) }}
 
       # ════════════════════════════════════════════
+      # موقتی فقط برای دیباگ
+      # ════════════════════════════════════════════
+
+      - name: 📸 Commit debug screenshot (TEMPORARY)
+        if: ${{ always() }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "Download/telegram_downloads/${{ github.event.inputs.channel }}/debug_screenshots/*.png" || true
+          git commit -m "📸 Temporary debug screenshot for empty page [REMOVE LATER]" || true
+          git push || true
+      # ════════════════════════════════════════════
       # بررسی خروجی
       # ════════════════════════════════════════════
       - name: 📊 Verify output
