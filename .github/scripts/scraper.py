@@ -812,7 +812,19 @@ class TelegramChannelScraper:
             self.logger.info("⏳ منتظر نتایج جستجو...")
             await human_sleep(5, 0.5)
             await self._take_screenshot(page, "search_results_loaded")
-
+            # ─── انتخاب تب مناسب (message یا global search) ──────
+            try:
+                tabs = await page.locator('[role="tab"], button[role="tab"], div[role="tab"]').all()
+                for tab in tabs:
+                    tab_text = await tab.inner_text()
+                    if "message" in tab_text.lower() or "global" in tab_text.lower():
+                        await tab.click()
+                        self.logger.info(f"✅ روی تب '{tab_text}' کلیک شد.")
+                        await human_sleep(2, 0.3)
+                        break
+            except Exception as e:
+                self.logger.debug(f"خطا در انتخاب تب: {e}")
+                
             clicked = False
             result_selectors = [
                 'div[class*="search-result"]',
@@ -842,7 +854,20 @@ class TelegramChannelScraper:
                 except Exception as e:
                     self.logger.debug(f"سلکتور {sel} ناموفق: {e}")
                     continue
-
+            # ─── جستجو با عنوان نمایشی کانال (اگر کاربر وارد کرده باشد) ──
+            if not clicked and self.channel_name:
+                self.logger.info(f"🔄 تلاش برای پیدا کردن نتیجه با عنوان نمایشی: '{self.channel_name}'")
+                try:
+                    await page.wait_for_selector(f'div:has-text("{self.channel_name}")', timeout=10000)
+                    channel_result = page.locator(f'div:has-text("{self.channel_name}")').first
+                    if await channel_result.count() > 0:
+                        await channel_result.scroll_into_view_if_needed()
+                        await channel_result.click(timeout=5000, force=True)
+                        self.logger.info(f"✅ روی نتیجه با عنوان نمایشی '{self.channel_name}' کلیک شد.")
+                        clicked = True
+                except Exception as e:
+                    self.logger.debug(f"جستجو با عنوان نمایشی ناموفق: {e}")
+                    
             # ─── اگر هیچ سلکتوری کار نکرد، با متن جستجو پیدا کن ──
             if not clicked:
                 self.logger.info("🔄 تلاش برای پیدا کردن نتیجه با متن جستجو...")
