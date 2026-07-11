@@ -286,6 +286,8 @@ class TelegramChannelScraper:
         max_retries = 3
         retry_count = 0
         items = []
+        all_media_map = {}      # ← اضافه شود
+        downloaded_total = 0    # ← اضافه شود
         context = None
         page = None
 
@@ -326,7 +328,22 @@ class TelegramChannelScraper:
                     break
                 continue
 
-            # اضافه کردن پست‌های جدید
+            # ─── دانلود پست‌های همین دسته (قبل از رفتن به دور بعدی) ──
+            if new_items:
+                self.logger.info(f"📥 دانلود {len(new_items)} پست از دستهٔ فعلی...")
+                media_map_batch, downloaded_batch = await self._download_media(
+                    new_items, page, context
+                )
+                # اضافه کردن به نقشه‌ی کلی
+                for post_id, files in media_map_batch.items():
+                    if post_id in all_media_map:
+                        all_media_map[post_id].extend(files)
+                    else:
+                        all_media_map[post_id] = files
+                downloaded_total += downloaded_batch
+                self.logger.info(f"✅ {downloaded_batch} فایل از این دسته دانلود شد")
+
+            # اضافه کردن پست‌های جدید به لیست کلی
             for item in new_items:
                 if item['id'] not in {i['id'] for i in items}:
                     items.append(item)
@@ -334,36 +351,33 @@ class TelegramChannelScraper:
             # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
             if new_items:
                 last_item = new_items[-1]
-                last_id = last_item['id']          # ← همان رشته اصلی
+                last_id = last_item['id']
                 new_start_link = f"https://t.me/{self.channel}/{last_id}"
                 self.start_link = new_start_link
-                self.target_msg_id = last_id       # ← همان رشته اصلی، بدون str()
+                self.target_msg_id = last_id
                 self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link}")
 
-            retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
+            retry_count = 0
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
             if context:
                 await context.close()
             return
         self.logger.info(f"📥 {len(items)} پست استخراج شد.")
-
-        media_map, downloaded = await self._download_media(items, page, context)
-        self.logger.info(f"🖼️ {downloaded} فایل رسانه دانلود شد.")
-        self.logger.info(f"📊 media_map برای {len(media_map)} پست پر شد.")
+        self.logger.info(f"🖼️ مجموع {downloaded_total} فایل رسانه در طول اجرا دانلود شد.")
+        self.logger.info(f"📊 media_map برای {len(all_media_map)} پست پر شد.")
 
         gen = OutputGenerator(
             self.base_dir,
             self.channel,
             items,
-            media_map,
+            all_media_map,  # ← به جای media_map
             debug_mode=self.debug_mode
         )
         gen.run_all()
 
         if context:
             await context.close()
-
     async def _ensure_browser(self, context, page):
         """اطمینان از باز بودن مرورگر."""
         if context is None:
