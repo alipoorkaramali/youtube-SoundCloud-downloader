@@ -292,14 +292,20 @@ class TelegramChannelScraper:
             if retry_count > 0:
                 # اگر در retry هستیم، از آخرین شناسه برای حدس استفاده کن
                 if items:
-                    last_id = int(items[-1]['id'])
-                    step = -1 if self.scroll_direction == 'up' else 1
-                    guess_id = last_id + step
-                    if guess_id <= 0:
+                    last_id_str = items[-1]['id']
+                    # فقط اگر عدد صحیح بود، حدس بزن
+                    if last_id_str.isdigit():
+                        last_id = int(last_id_str)
+                        step = -1 if self.scroll_direction == 'up' else 1
+                        guess_id = last_id + step
+                        if guess_id <= 0:
+                            break
+                        self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
+                        self.start_link = f"https://t.me/{self.channel}/{guess_id}"
+                        self.target_msg_id = str(guess_id)
+                    else:
+                        self.logger.warning(f"⚠️ شناسه غیرعددی ({last_id_str})، از retry صرف‌نظر می‌شود.")
                         break
-                    self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
-                    self.start_link = f"https://t.me/{self.channel}/{guess_id}"
-                    self.target_msg_id = str(guess_id)
 
             # ─── اطمینان از باز بودن مرورگر ──────────────────────
             context, page = await self._ensure_browser(context, page)
@@ -876,15 +882,31 @@ class TelegramChannelScraper:
             # ─── مرحله ۳: جستجوی جایگزین در همان صفحه ─────────────
             self.logger.warning(f"⚠️ پست با data-message-id دقیق پیدا نشد. جستجوی جایگزین در صفحه...")
             all_messages = await page.locator('div[data-message-id]').all()
+            
+            # ─── دیباگ: نمایش تمام شناسه‌های موجود ──────────────────
+            found_ids = []
             for msg in all_messages:
                 msg_id = await msg.get_attribute('data-message-id')
-                # بررسی متن و لینک‌های داخل پیام
+                if msg_id:
+                    found_ids.append(msg_id)
+            self.logger.info(f"🐞 شناسه‌های موجود در صفحه: {found_ids}")
+            self.logger.info(f"🐞 شناسه مورد جستجو: {self.target_msg_id}")
+            
+            for idx, msg in enumerate(all_messages):
+                msg_id = await msg.get_attribute('data-message-id')
+                msg_text = await msg.inner_text()
                 msg_html = await msg.inner_html()
+                
+                # دیباگ: نمایش ۳ پیام اول به‌طور کامل‌تر
+                if idx < 3:
+                    self.logger.info(f"🐞 پیام {idx+1}: id={msg_id}, متن={msg_text[:100]}...")
+                
                 if self.target_msg_id in msg_html or f'/{self.target_msg_id}' in msg_html:
                     self.logger.info(f"🔍 پست هدف با جستجوی جایگزین پیدا شد: {msg_id}")
                     self.target_msg_id = msg_id
                     return True
-
+                else:
+                    self.logger.debug(f"   پیام {msg_id}: شامل '{self.target_msg_id}' نیست.")
             # ─── مرحله ۴: اسکرول نرم در همان صفحه ───────────────────
             self.logger.warning(f"⚠️ پست هدف در صفحه پیدا نشد. شروع اسکرول نرم در همان صفحه...")
             found, found_id = await self._find_post_with_slow_scroll(page, seen_ids=None)
