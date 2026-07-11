@@ -231,21 +231,16 @@ class TelegramChannelScraper:
 
         while len(items) < self.limit and retry_count <= max_retries:
             if retry_count > 0:
+                # اگر در retry هستیم، از آخرین شناسه برای حدس استفاده کن
                 if items:
-                    last_id_str = items[-1]['id']
-                    # فقط اگر عدد صحیح بود، حدس بزن
-                    if last_id_str.isdigit():
-                        last_id = int(last_id_str)
-                        step = -1 if self.scroll_direction == 'up' else 1
-                        guess_id = last_id + step
-                        if guess_id <= 0:
-                            break
-                        self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
-                        self.start_link = f"https://t.me/{self.channel}/{guess_id}"
-                        self.target_msg_id = str(guess_id)
-                    else:
-                        self.logger.warning(f"⚠️ شناسه غیرعددی ({last_id_str})، از retry صرف‌نظر می‌شود.")
+                    last_id = int(items[-1]['id'])
+                    step = -1 if self.scroll_direction == 'up' else 1
+                    guess_id = last_id + step
+                    if guess_id <= 0:
                         break
+                    self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
+                    self.start_link = f"https://t.me/{self.channel}/{guess_id}"
+                    self.target_msg_id = str(guess_id)
 
             # ─── اطمینان از باز بودن مرورگر ──────────────────────
             context, page = await self._ensure_browser(context, page)
@@ -274,10 +269,10 @@ class TelegramChannelScraper:
             # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
             if new_items:
                 last_item = new_items[-1]
-                last_id = last_item['id']          # ← همان رشته اصلی
+                last_id = last_item['id']
                 new_start_link = f"https://t.me/{self.channel}/{last_id}"
                 self.start_link = new_start_link
-                self.target_msg_id = last_id       # ← همان رشته اصلی، بدون str()
+                self.target_msg_id = str(last_id)
                 self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link}")
 
             retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
@@ -403,7 +398,6 @@ class TelegramChannelScraper:
         scroll_attempts = 0
 
         start_collecting = False
-        target_found = False
         if self.start_link and self.target_msg_id:
             self.logger.info(f"🎯 پیدا کردن پیام هدف {self.target_msg_id}...")
             try:
@@ -418,63 +412,6 @@ class TelegramChannelScraper:
                     self.logger.warning(f"⚠️ پیام هدف {self.target_msg_id} پیدا نشد.")
             except Exception as e:
                 self.logger.warning(f"⚠️ خطا در انتقال پیام هدف: {e}")
-
-            # ─── اگر target پیدا نشد، پیمایش هوشمند با گام‌های کوچک و تشخیص تاریخ ───
-            if not target_found:
-                direction_text = 'بالا' if self.scroll_direction == 'up' else 'پایین'
-                self.logger.warning(f"⚠️ پیام هدف پیدا نشد. پیمایش آرام به {direction_text} برای یافتن اولین پست دارای تاریخ...")
-                found_any_post = False
-                max_slow_steps = 20
-                scroll_amount = -600 if self.scroll_direction == 'up' else 600
-
-                for step in range(max_slow_steps):
-                    await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                    await asyncio.sleep(0.4)
-                    messages = await page.locator('div[data-message-id]').all()
-                    for msg in messages:
-                        msg_id = await msg.get_attribute('data-message-id')
-                        if not msg_id or msg_id in seen_ids:
-                            continue
-                        # بررسی وجود تاریخ (اولویت) و در صورت نبود، وجود کپشن کافی
-                        date_el = msg.locator('time, .date, [class*="date"], [datetime], .message-time, [class*="time"]').first
-                        has_date = await date_el.count() > 0
-                        has_caption = False
-                        if not has_date:
-                            try:
-                                text_content = (await msg.inner_text()).strip()
-                                has_caption = len(text_content) > 10
-                            except:
-                                pass
-                        if has_date or has_caption:
-                            self.logger.info(f"🔍 اولین پست معتبر پیدا شد: {msg_id} (تاریخ: {has_date}, کپشن: {has_caption}) — شروع جمع‌آوری")
-                            self.target_msg_id = msg_id
-                            target_found = True
-                            start_collecting = True
-                            seen_ids.add(msg_id)
-                            await msg.scroll_into_view_if_needed()
-                            offset = -150 if self.scroll_direction == 'up' else 150
-                            await page.evaluate(f"window.scrollBy(0, {offset})")
-                            await human_sleep(1, 0.3)
-                            self.logger.info(f"⬆️ بارگذاری پست‌ها با اسکرول به {direction_text}...")
-                            for scroll_step in range(3):
-                                await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                                await human_sleep(1.5, 0.3)
-                            found_any_post = True
-                            break
-                    if found_any_post:
-                        break
-
-                if not target_found:
-                    self.logger.warning("⚠️ هیچ پست دارای تاریخی پیدا نشد. بازگشت نتیجهٔ خالی برای retry.")
-                    # اسکرین‌شات اضطراری
-                    try:
-                        safe_name = self._sanitize_filename(f"target_{self.target_msg_id}_not_found")
-                        path = self.debug_screenshots_dir / f"{safe_name}.png"
-                        await page.screenshot(path=path, full_page=True)
-                        self.logger.info(f"📸 اسکرین‌شات صفحه ذخیره شد: {path.name}")
-                    except Exception as e:
-                        self.logger.warning(f"⚠️ خطا در ذخیره اسکرین‌شات: {e}")
-                    return [], context, page
 
         while len(items) < self.limit and scroll_attempts < MAX_SCROLL_ATTEMPTS:
             try:
@@ -770,8 +707,8 @@ class TelegramChannelScraper:
 
         try:
             parts = self.start_link.rstrip('/').split('/')
-            if parts:
-                self.target_msg_id = parts[-1]   # ← هر چیزی که هست، بگیر
+            if parts and parts[-1].isdigit():
+                self.target_msg_id = parts[-1]
                 self.logger.info(f"🎯 شناسه پیام هدف: {self.target_msg_id}")
             else:
                 self.logger.warning("⚠️ نمی‌توان شناسه پیام را از لینک استخراج کرد.")
