@@ -620,7 +620,7 @@ class TelegramChannelScraper:
                         })
                         seen_ids.add(msg_id)
 
-                        if len(items) >= self.limit:
+                        if len(items) >= effective_limit:
                             break
                     except Exception as e:
                         self.logger.debug(f"خطا در پردازش پیام: {e}")
@@ -628,7 +628,7 @@ class TelegramChannelScraper:
             except Exception as e:
                 self.logger.error(f"❌ خطا در استخراج پست‌ها: {e}")
 
-            if len(items) >= self.limit:
+            if len(items) >= effective_limit:
                 break
 
             # ─── اسکرول هوشمند با جهت ──────────────────────────────────
