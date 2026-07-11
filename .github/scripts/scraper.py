@@ -776,7 +776,7 @@ class TelegramChannelScraper:
         self.logger.error("❌ تمام روش‌های کلیک شکست خورد.")
         await self._take_screenshot(page, "click_failed")
         return False
-
+        
     # ═══════════════════ متد جستجو با لینک (start_link) ═══════════════════
     async def _navigate_to_start_link(self, page) -> bool:
         self.logger.info(f"🔗 تلاش برای رفتن به لینک: {self.start_link}")
@@ -784,7 +784,7 @@ class TelegramChannelScraper:
         try:
             parts = self.start_link.rstrip('/').split('/')
             if parts:
-                self.target_msg_id = parts[-1]  # ← هر چیزی که هست، بگیر
+                self.target_msg_id = parts[-1]
                 self.logger.info(f"🎯 شناسه پیام هدف: {self.target_msg_id}")
             else:
                 self.logger.warning("⚠️ نمی‌توان شناسه پیام را از لینک استخراج کرد.")
@@ -794,6 +794,7 @@ class TelegramChannelScraper:
             self.target_msg_id = None
 
         async def perform_search_and_click():
+            # جستجو
             search_input = None
             for sel in [
                 'input[placeholder*="Search"]',
@@ -803,10 +804,10 @@ class TelegramChannelScraper:
                 try:
                     search_input = await page.wait_for_selector(sel, timeout=10000)
                     if search_input:
-                        self.logger.info("🔍 نوار جستجو پیدا شد.")
                         break
                 except Exception:
                     continue
+
             if not search_input:
                 self.logger.error("❌ نوار جستجو پیدا نشد.")
                 return False
@@ -824,6 +825,7 @@ class TelegramChannelScraper:
             await human_sleep(5, 0.5)
             await self._take_screenshot(page, "search_results_loaded")
 
+            # === کلیک روی نتیجه ===
             clicked = False
             result_selectors = [
                 'div[data-message-id]',
@@ -832,18 +834,18 @@ class TelegramChannelScraper:
                 'div[role="button"][class*="item"]',
                 'div.chatlist-item',
                 'a[data-peer-id]',
+                'div.chatlist-item div.name',
             ]
+
             for sel in result_selectors:
                 try:
-                    await page.wait_for_selector(sel, timeout=5000)
+                    await page.wait_for_selector(sel, timeout=8000)
                     first_result = page.locator(sel).first
                     if await first_result.count() > 0:
                         await first_result.scroll_into_view_if_needed()
-                        handle = await first_result.element_handle()
-                        if handle:
-                            await self._draw_debug_cross(page, handle)
-                        await first_result.click(timeout=5000, force=True)
-                        self.logger.info(f"✅ روی اولین نتیجه با سلکتور '{sel}' کلیک شد.")
+                        await human_sleep(0.8, 0.3)
+                        await first_result.click(timeout=10000, force=True)
+                        self.logger.info(f"✅ روی نتیجه با سلکتور '{sel}' کلیک شد.")
                         clicked = True
                         break
                 except Exception as e:
@@ -851,116 +853,69 @@ class TelegramChannelScraper:
                     continue
 
             if not clicked:
-                self.logger.info("🔄 تلاش کلیک با JavaScript روی اولین پیام...")
+                # تلاش نهایی با JavaScript
                 try:
                     await page.evaluate('''() => {
-                        const firstMsg = document.querySelector('[data-message-id]');
-                        if (firstMsg) {
-                            firstMsg.style.outline = '3px solid red';
-                            firstMsg.style.outlineOffset = '2px';
-                            firstMsg.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            setTimeout(() => { firstMsg.click(); }, 500);
+                        const first = document.querySelector('div.chatlist-item, div[role="button"], div.search-result, [data-message-id]');
+                        if (first) {
+                            first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            setTimeout(() => first.click(), 600);
                         }
                     }''')
-                    await human_sleep(2, 0.3)
-                    await self._take_screenshot(page, "after_js_click")
-                    self.logger.info("✅ کلیک با JavaScript انجام شد.")
+                    await human_sleep(3, 0.4)
                     clicked = True
+                    self.logger.info("✅ کلیک با JavaScript انجام شد.")
                 except Exception as e:
                     self.logger.error(f"❌ کلیک با JavaScript شکست خورد: {e}")
 
             if not clicked:
-                self.logger.error("❌ نتوانستیم روی هیچ نتیجه‌ای کلیک کنیم.")
+                self.logger.error("❌ نتوانستیم روی نتیجه کلیک کنیم.")
                 await self._take_screenshot(page, "click_result_failed")
                 return False
 
-            # ─── مرحله ۱: منتظر بارگذاری پیام‌ها ──────────────────
+            # === منتظر لود شدن کامل صفحه ===
+            self.logger.info("⏳ منتظر لود شدن کامل صفحه پیام/کانال...")
             try:
-                await page.wait_for_selector('div[data-message-id]', timeout=20000)
-                self.logger.info("✅ پیام‌ها در صفحه بارگذاری شدند.")
-                await self._take_screenshot(page, "messages_loaded")
+                await page.wait_for_selector('div[data-message-id]', timeout=25000)
+                self.logger.info("✅ پیام‌ها بارگذاری شدند.")
             except Exception:
-                self.logger.warning("⚠️ پیام‌ها با timeout بارگذاری نشدند. تلاش با روش‌های جایگزین...")
-                # ادامه می‌دهیم تا مراحل بعدی (جستجوی جایگزین و اسکرول نرم) اجرا شوند
+                self.logger.warning("⚠️ timeout در انتظار پیام‌ها، ادامه می‌دهیم...")
 
-            # ─── مرحله ۲: جستجوی دقیق با data-message-id ──────────
-            target_exists = await page.locator(f'[data-message-id="{self.target_msg_id}"]').count() > 0
-            if target_exists:
-                self.logger.info(f"✅ پست هدف {self.target_msg_id} با data-message-id دقیق پیدا شد.")
-                return True
+            # اسکرول کوچک برای اطمینان از لود کامل
+            await human_sleep(2.5, 0.5)
+            await page.evaluate("window.scrollBy(0, 300)")
+            await human_sleep(1.2, 0.3)
+            await page.evaluate("window.scrollBy(0, -300)")
+            await human_sleep(2, 0.4)
 
-            # ─── مرحله ۳: جستجوی جایگزین در همان صفحه ─────────────
-            self.logger.warning(f"⚠️ پست با data-message-id دقیق پیدا نشد. جستجوی جایگزین در صفحه...")
-            all_messages = await page.locator('div[data-message-id]').all()
-            
-            # ─── دیباگ: نمایش تمام شناسه‌های موجود ──────────────────
-            found_ids = []
-            for msg in all_messages:
-                msg_id = await msg.get_attribute('data-message-id')
-                if msg_id:
-                    found_ids.append(msg_id)
-            
-            # ─── اگر صفحه خالی است، اسکرین‌شات بگیر ──────────────
-            if not found_ids:
-                try:
-                    safe_name = self._sanitize_filename(f"empty_page_{self.target_msg_id}")
-                    path = self.debug_screenshots_dir / f"{safe_name}.png"
-                    await page.screenshot(path=path, full_page=True)
-                    self.logger.info(f"📸 اسکرین‌شات صفحه خالی ذخیره شد: {path.name}")
-                except Exception as e:
-                    self.logger.warning(f"⚠️ خطا در ذخیره اسکرین‌شات صفحه خالی: {e}")
-            
-            self.logger.info(f"🐞 شناسه‌های موجود در صفحه: {found_ids}")
-            self.logger.info(f"🐞 شناسه مورد جستجو: {self.target_msg_id}")
-            
-            for idx, msg in enumerate(all_messages):
-                msg_id = await msg.get_attribute('data-message-id')
-                msg_text = await msg.inner_text()
-                msg_html = await msg.inner_html()
-                
-                # دیباگ: نمایش ۳ پیام اول به‌طور کامل‌تر
-                if idx < 3:
-                    self.logger.info(f"🐞 پیام {idx+1}: id={msg_id}, متن={msg_text[:100]}...")
-                
-                if self.target_msg_id in msg_html or f'/{self.target_msg_id}' in msg_html:
-                    self.logger.info(f"🔍 پست هدف با جستجوی جایگزین پیدا شد: {msg_id}")
-                    self.target_msg_id = msg_id
-                    return True
+            await self._take_screenshot(page, "after_page_load")
+
+            if self.target_msg_id:
+                target_exists = await page.locator(f'[data-message-id="{self.target_msg_id}"]').count() > 0
+                if target_exists:
+                    self.logger.info(f"✅ پست هدف {self.target_msg_id} پیدا شد.")
                 else:
-                    self.logger.debug(f"   پیام {msg_id}: شامل '{self.target_msg_id}' نیست.")
-            # ─── مرحله ۴: اسکرول نرم در همان صفحه ───────────────────
-            self.logger.warning(f"⚠️ پست هدف در صفحه پیدا نشد. شروع اسکرول نرم در همان صفحه...")
-            found, found_id = await self._find_post_with_slow_scroll(page, seen_ids=None)
-            if found:
-                self.target_msg_id = found_id
-                self.logger.info(f"✅ پست هدف با اسکرول نرم پیدا شد: {self.target_msg_id}")
-                return True
-            else:
-                self.logger.error("❌ حتی با اسکرول نرم هم پستی پیدا نشد.")
-                return False
+                    self.logger.warning(f"⚠️ پست هدف پیدا نشد، اما صفحه لود شده است.")
 
-        for retry in range(2):
+            return True
+
+        # تلاش با retry
+        for retry in range(3):
             if retry > 0:
-                self.logger.info(f"🔄 تلاش مجدد ({retry+1})... بازگشت به صفحه قبل و دوباره جستجو")
+                self.logger.info(f"🔄 تلاش مجدد navigation ({retry+1}/3)...")
                 await page.go_back()
-                await human_sleep(2, 0.3)
+                await human_sleep(3, 0.5)
+                await page.reload(wait_until="domcontentloaded")
+
             success = await perform_search_and_click()
             if success:
                 return True
             else:
                 self.logger.warning(f"❌ تلاش {retry+1} ناموفق بود.")
+
+        self.logger.error("❌ پس از چندین تلاش نتوانستیم صفحه را لود کنیم.")
+        await self._take_screenshot(page, "navigate_final_failed")
         return False
-
-    # ═══════════════════ متد کمکی: بررسی وجود عبارت ═══════════════════
-    async def _check_text_on_page(self, page, term: str) -> bool:
-        try:
-            return await page.evaluate(f'''(t) => {{
-                const bodyText = document.body.innerText || '';
-                return bodyText.toLowerCase().includes(t.toLowerCase());
-            }}''', term)
-        except Exception:
-            return False
-
     # ═══════════════════ اسکرین‌شات از تکتک پست‌ها ═══════════════════
     async def _capture_post_screenshots(self, page, items: List[Dict]):
         if not self.save_screenshots:
