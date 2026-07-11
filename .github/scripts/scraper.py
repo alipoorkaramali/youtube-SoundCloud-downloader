@@ -88,7 +88,10 @@ class TelegramChannelScraper:
         if self.scroll_direction not in ['up', 'down']:
             self.logger.warning(f"⚠️ مقدار نامعتبر برای scroll_direction: {self.scroll_direction}. استفاده از 'up'.")
             self.scroll_direction = 'up'
-
+    # ═══════════════════════════════════════════════════════════════
+    # نکته: دانلود رسانه‌ها حالا به صورت incremental (در هر batch) انجام می‌شود
+    # این کار باعث می‌شود در صورت قطع شدن اسکریپت، رسانه‌های قبلی حفظ شوند.
+    # ═══════════════════════════════════════════════════════════════
     # ═══════════════════ متد کمکی: پاک‌سازی نام فایل ═══════════════════
     @staticmethod
     def _sanitize_filename(name: str) -> str:
@@ -281,19 +284,19 @@ class TelegramChannelScraper:
         else:
             self.logger.info(f"🚀 شروع اسکریپر مستقل برای @{self.channel} (limit={self.limit})")
 
-        # ─── حلقه اصلی با قابلیت Retry ──────────────────────────
+        # ─── متغیرهای کلی ─────────────────────────────
         max_retries = 3
         retry_count = 0
-        items = []
+        items = []                    # همه پست‌ها
+        media_map = {}                # نقشه رسانه‌های همه پست‌ها
         context = None
         page = None
 
         while len(items) < self.limit and retry_count <= max_retries:
             if retry_count > 0:
-                # اگر در retry هستیم، از آخرین شناسه برای حدس استفاده کن
+                # تلاش مجدد با حدس شناسه
                 if items:
                     last_id_str = items[-1]['id']
-                    # فقط اگر عدد صحیح بود، حدس بزن
                     if last_id_str.isdigit():
                         last_id = int(last_id_str)
                         step = -1 if self.scroll_direction == 'up' else 1
@@ -307,10 +310,10 @@ class TelegramChannelScraper:
                         self.logger.warning(f"⚠️ شناسه غیرعددی ({last_id_str})، از retry صرف‌نظر می‌شود.")
                         break
 
-            # ─── اطمینان از باز بودن مرورگر ──────────────────────
+            # ─── اطمینان از مرورگر ──────────────────────
             context, page = await self._ensure_browser(context, page)
 
-            # اجرای یک دور اسکرپ
+            # ─── جمع‌آوری پست‌های جدید ─────────────────
             new_items, context, page = await self._fetch_posts_from_telegram(
                 existing_seen_ids={item['id'] for item in items} if items else None,
                 keep_browser_open=True,
@@ -327,41 +330,60 @@ class TelegramChannelScraper:
                 continue
 
             # اضافه کردن پست‌های جدید
+            newly_added = []
             for item in new_items:
                 if item['id'] not in {i['id'] for i in items}:
                     items.append(item)
+                    newly_added.append(item)
+
+            self.logger.info(f"📥 {len(newly_added)} پست جدید جمع‌آوری شد (مجموع: {len(items)}/{self.limit})")
+
+            # 🔥 دانلود فوری رسانه‌های پست‌های جدید
+            if newly_added:
+                self.logger.info(f"⬇️ شروع دانلود رسانه برای {len(newly_added)} پست جدید...")
+                try:
+                    batch_media_map, downloaded_batch = await self._download_media(
+                        newly_added, page, context
+                    )
+                    media_map.update(batch_media_map)
+                    self.logger.info(f"✅ {downloaded_batch} فایل رسانه در این دور دانلود شد.")
+                    
+                    # تأخیر بین batchها برای جلوگیری از فشار روی سرور تلگرام
+                    await human_sleep(3.0, 1.0)  # بین ۲ تا ۴ ثانیه
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ خطا در دانلود این batch: {e}")
 
             # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
             if new_items:
                 last_item = new_items[-1]
                 last_id_str = str(last_item['id']).strip()
                 
-                # 🔥 پاک‌سازی شناسه (حذف اعشار)
                 try:
                     if '.' in last_id_str:
                         last_id = int(float(last_id_str))
                     else:
                         last_id = int(last_id_str)
                 except:
-                    last_id = last_id_str  # fallback
+                    last_id = last_id_str
                 
                 new_start_link = f"https://t.me/{self.channel}/{last_id}"
                 self.start_link = new_start_link
                 self.target_msg_id = str(last_id)
-                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id پاک‌سازی شده: {last_id})")
+                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")
 
-            retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
+            retry_count = 0  # ریست شمارنده
+
+        # ─── بعد از اتمام تمام دورها ─────────────────────────────
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
             if context:
                 await context.close()
             return
-        self.logger.info(f"📥 {len(items)} پست استخراج شد.")
 
-        media_map, downloaded = await self._download_media(items, page, context)
-        self.logger.info(f"🖼️ {downloaded} فایل رسانه دانلود شد.")
-        self.logger.info(f"📊 media_map برای {len(media_map)} پست پر شد.")
+        self.logger.info(f"🎉 جمع‌آوری تمام شد. مجموع {len(items)} پست.")
 
+        # تولید خروجی نهایی
         gen = OutputGenerator(
             self.base_dir,
             self.channel,
@@ -373,7 +395,6 @@ class TelegramChannelScraper:
 
         if context:
             await context.close()
-
     async def _ensure_browser(self, context, page):
         """اطمینان از باز بودن مرورگر."""
         if context is None:
