@@ -888,6 +888,17 @@ class TelegramChannelScraper:
                 msg_id = await msg.get_attribute('data-message-id')
                 if msg_id:
                     found_ids.append(msg_id)
+            
+            # ─── اگر صفحه خالی است، اسکرین‌شات بگیر ──────────────
+            if not found_ids and self.debug_mode:
+                try:
+                    safe_name = self._sanitize_filename(f"empty_page_{self.target_msg_id}")
+                    path = self.debug_screenshots_dir / f"{safe_name}.png"
+                    await page.screenshot(path=path, full_page=True)
+                    self.logger.info(f"📸 اسکرین‌شات صفحه خالی ذخیره شد: {path.name}")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ خطا در ذخیره اسکرین‌شات صفحه خالی: {e}")
+            
             self.logger.info(f"🐞 شناسه‌های موجود در صفحه: {found_ids}")
             self.logger.info(f"🐞 شناسه مورد جستجو: {self.target_msg_id}")
             
