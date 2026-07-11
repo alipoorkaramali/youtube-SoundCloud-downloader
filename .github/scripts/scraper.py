@@ -813,35 +813,18 @@ class TelegramChannelScraper:
             await human_sleep(5, 0.5)
             await self._take_screenshot(page, "search_results_loaded")
 
-            # ─── انتخاب تب مناسب (message یا global search) ──────
-            try:
-                tabs = await page.locator('[role="tab"], button[role="tab"], div[role="tab"]').all()
-                for tab in tabs:
-                    tab_text = await tab.inner_text()
-                    if "message" in tab_text.lower() or "global" in tab_text.lower():
-                        await tab.click()
-                        self.logger.info(f"✅ روی تب '{tab_text}' کلیک شد.")
-                        await human_sleep(2, 0.3)
-                        break
-            except Exception as e:
-                self.logger.debug(f"خطا در انتخاب تب: {e}")
-
             clicked = False
             result_selectors = [
-                'div[class*="search-result"]',
-                'div[class*="result"]',
-                'div[class*="chatlist-item"]',
-                'div[role="button"][class*="item"]',
-                'div[data-peer-id]',
-                'a[data-peer-id]',
-                'div[class*="ListItem"]',
-                'div.chatlist-item',
-                'div[class*="message"]',
                 'div[data-message-id]',
+                'div[class*="search-result"] a',
+                'div[class*="message"] a',
+                'div[role="button"][class*="item"]',
+                'div.chatlist-item',
+                'a[data-peer-id]',
             ]
             for sel in result_selectors:
                 try:
-                    await page.wait_for_selector(sel, state='visible', timeout=10000)
+                    await page.wait_for_selector(sel, timeout=5000)
                     first_result = page.locator(sel).first
                     if await first_result.count() > 0:
                         await first_result.scroll_into_view_if_needed()
@@ -856,35 +839,6 @@ class TelegramChannelScraper:
                     self.logger.debug(f"سلکتور {sel} ناموفق: {e}")
                     continue
 
-            # ─── جستجو با عنوان نمایشی کانال (اگر کاربر وارد کرده باشد) ──
-            if not clicked and self.channel_name:
-                self.logger.info(f"🔄 تلاش برای پیدا کردن نتیجه با عنوان نمایشی: '{self.channel_name}'")
-                try:
-                    await page.wait_for_selector(f'div:has-text("{self.channel_name}")', timeout=10000)
-                    channel_result = page.locator(f'div:has-text("{self.channel_name}")').first
-                    if await channel_result.count() > 0:
-                        await channel_result.scroll_into_view_if_needed()
-                        await channel_result.click(timeout=5000, force=True)
-                        self.logger.info(f"✅ روی نتیجه با عنوان نمایشی '{self.channel_name}' کلیک شد.")
-                        clicked = True
-                except Exception as e:
-                    self.logger.debug(f"جستجو با عنوان نمایشی ناموفق: {e}")
-
-            # ─── اگر هیچ سلکتوری کار نکرد، با متن جستجو پیدا کن ──
-            if not clicked:
-                self.logger.info("🔄 تلاش برای پیدا کردن نتیجه با متن جستجو...")
-                try:
-                    await page.wait_for_selector(f'div:has-text("{self.start_link}")', timeout=10000)
-                    text_result = page.locator(f'div:has-text("{self.start_link}")').first
-                    if await text_result.count() > 0:
-                        await text_result.scroll_into_view_if_needed()
-                        await text_result.click(timeout=5000, force=True)
-                        self.logger.info(f"✅ روی نتیجه با متن جستجو کلیک شد.")
-                        clicked = True
-                except Exception as e:
-                    self.logger.debug(f"جستجوی متنی ناموفق: {e}")
-
-            # ─── کلیک با JavaScript (آخرین راه) ──────────────────────
             if not clicked:
                 self.logger.info("🔄 تلاش کلیک با JavaScript روی اولین پیام...")
                 try:
@@ -973,6 +927,7 @@ class TelegramChannelScraper:
             else:
                 self.logger.error("❌ حتی با اسکرول نرم هم پستی پیدا نشد.")
                 return False
+
         for retry in range(2):
             if retry > 0:
                 self.logger.info(f"🔄 تلاش مجدد ({retry+1})... بازگشت به صفحه قبل و دوباره جستجو")
