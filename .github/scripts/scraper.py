@@ -812,6 +812,7 @@ class TelegramChannelScraper:
             self.logger.info("⏳ منتظر نتایج جستجو...")
             await human_sleep(5, 0.5)
             await self._take_screenshot(page, "search_results_loaded")
+
             # ─── انتخاب تب مناسب (message یا global search) ──────
             try:
                 tabs = await page.locator('[role="tab"], button[role="tab"], div[role="tab"]').all()
@@ -824,7 +825,7 @@ class TelegramChannelScraper:
                         break
             except Exception as e:
                 self.logger.debug(f"خطا در انتخاب تب: {e}")
-                
+
             clicked = False
             result_selectors = [
                 'div[class*="search-result"]',
@@ -854,6 +855,7 @@ class TelegramChannelScraper:
                 except Exception as e:
                     self.logger.debug(f"سلکتور {sel} ناموفق: {e}")
                     continue
+
             # ─── جستجو با عنوان نمایشی کانال (اگر کاربر وارد کرده باشد) ──
             if not clicked and self.channel_name:
                 self.logger.info(f"🔄 تلاش برای پیدا کردن نتیجه با عنوان نمایشی: '{self.channel_name}'")
@@ -867,7 +869,7 @@ class TelegramChannelScraper:
                         clicked = True
                 except Exception as e:
                     self.logger.debug(f"جستجو با عنوان نمایشی ناموفق: {e}")
-                    
+
             # ─── اگر هیچ سلکتوری کار نکرد، با متن جستجو پیدا کن ──
             if not clicked:
                 self.logger.info("🔄 تلاش برای پیدا کردن نتیجه با متن جستجو...")
@@ -906,6 +908,7 @@ class TelegramChannelScraper:
                 self.logger.error("❌ نتوانستیم روی هیچ نتیجه‌ای کلیک کنیم.")
                 await self._take_screenshot(page, "click_result_failed")
                 return False
+
             # ─── مرحله ۱: منتظر بارگذاری پیام‌ها ──────────────────
             try:
                 await page.wait_for_selector('div[data-message-id]', timeout=20000)
@@ -970,7 +973,6 @@ class TelegramChannelScraper:
             else:
                 self.logger.error("❌ حتی با اسکرول نرم هم پستی پیدا نشد.")
                 return False
-
         for retry in range(2):
             if retry > 0:
                 self.logger.info(f"🔄 تلاش مجدد ({retry+1})... بازگشت به صفحه قبل و دوباره جستجو")
