@@ -707,8 +707,8 @@ class TelegramChannelScraper:
 
         try:
             parts = self.start_link.rstrip('/').split('/')
-            if parts and parts[-1].isdigit():
-                self.target_msg_id = parts[-1]
+            if parts:
+                self.target_msg_id = parts[-1]  # ← هر چیزی که هست، بگیر
                 self.logger.info(f"🎯 شناسه پیام هدف: {self.target_msg_id}")
             else:
                 self.logger.warning("⚠️ نمی‌توان شناسه پیام را از لینک استخراج کرد.")
