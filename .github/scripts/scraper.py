@@ -287,13 +287,21 @@ class TelegramChannelScraper:
         items = []
         context = None
         page = None
+        media_map = {}
+        downloaded_total = 0
 
         while len(items) < self.limit and retry_count <= max_retries:
             if retry_count > 0:
+                # === دانلود رسانه‌های پست‌های فعلی قبل از باز کردن مرورگر جدید ===
+                if items:
+                    self.logger.info(f"🔄 قبل از retry {retry_count}، دانلود رسانه‌های {len(items)} پست موجود در مرورگر فعلی...")
+                    new_downloaded, media_map = await self._download_media_batch(items, page, context, media_map)
+                    downloaded_total += new_downloaded
+                    self.logger.info(f"📥 تا کنون {downloaded_total} فایل رسانه دانلود شد.")
+
                 # اگر در retry هستیم، از آخرین شناسه برای حدس استفاده کن
                 if items:
                     last_id_str = items[-1]['id']
-                    # فقط اگر عدد صحیح بود، حدس بزن
                     if last_id_str.isdigit():
                         last_id = int(last_id_str)
                         step = -1 if self.scroll_direction == 'up' else 1
@@ -341,16 +349,20 @@ class TelegramChannelScraper:
                 self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link}")
 
             retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
+
+        # === دانلود نهایی (در صورت باقی‌مانده) ===
+        if items:
+            self.logger.info(f"📥 دانلود نهایی رسانه‌ها برای {len(items)} پست...")
+            final_downloaded, media_map = await self._download_media_batch(items, page, context, media_map)
+            downloaded_total += final_downloaded
+
+        self.logger.info(f"📊 در مجموع {downloaded_total} فایل رسانه دانلود شد.")
+
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
             if context:
                 await context.close()
             return
-        self.logger.info(f"📥 {len(items)} پست استخراج شد.")
-
-        media_map, downloaded = await self._download_media(items, page, context)
-        self.logger.info(f"🖼️ {downloaded} فایل رسانه دانلود شد.")
-        self.logger.info(f"📊 media_map برای {len(media_map)} پست پر شد.")
 
         gen = OutputGenerator(
             self.base_dir,
@@ -363,7 +375,6 @@ class TelegramChannelScraper:
 
         if context:
             await context.close()
-
     async def _ensure_browser(self, context, page):
         """اطمینان از باز بودن مرورگر."""
         if context is None:
@@ -981,10 +992,11 @@ class TelegramChannelScraper:
 
         self.logger.info(f"✅ اسکرین‌شات‌ها تمام شد. مجموع: {len(items)}")
 
-    # ═══════════════════ دانلود رسانه‌ها ═══════════════════
-    async def _download_media(self, items: List[Dict], page, context) -> tuple[dict, int]:
+    # ═══════════════════ دانلود رسانه‌ها به صورت batch (جدید) ═══════════════════
+    async def _download_media_batch(self, items: List[Dict], page, context, existing_media_map: dict) -> Tuple[int, dict]:
+        """دانلود رسانه فقط برای پست‌هایی که هنوز دانلود نشده‌اند"""
         post_ids = [str(item['id']) for item in items]
-        media_map = {}
+        media_map = existing_media_map.copy()
 
         downloaded = 0
         if post_ids:
@@ -999,9 +1011,10 @@ class TelegramChannelScraper:
                 )
                 await downloader.download_all(page, context, post_ids, media_map)
             except Exception as e:
-                self.logger.error(f"❌ خطا در فرآیند دانلود: {e}")
-            finally:
-                for files in media_map.values():
-                    downloaded += len(files)
+                self.logger.error(f"❌ خطا در دانلود رسانه: {e}")
 
-        return media_map, downloaded
+            # شمارش تعداد فایل‌های دانلود شده
+            for files in media_map.values():
+                downloaded += len(files)
+
+        return downloaded, media_map
