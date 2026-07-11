@@ -353,6 +353,11 @@ class TelegramChannelScraper:
 
         if self.start_link:
             entered = await self._navigate_to_start_link(page)
+            # اگر لینک مستقیم موفق نشد، به حالت عادی برگرد
+            if not entered:
+                self.logger.warning("⚠️ لینک مستقیم نتیجه نداد. تلاش با جستجوی عادی کانال...")
+                self.start_link = None  # لغو start_link برای استفاده از حالت عادی
+                entered = await self._search_and_enter_channel(page)
         else:
             entered = await self._search_and_enter_channel(page)
 
@@ -893,30 +898,27 @@ class TelegramChannelScraper:
                 return False
 
             # بررسی اینکه صفحه بارگذاری شده است (حتی اگر data-message-id نباشد)
-            page_loaded = False
-            for attempt in range(3):
-                try:
-                    # منتظر هر المانی در صفحه (به‌جای data-message-id خاص)
-                    await page.wait_for_selector('body', timeout=15000)
-                    # بررسی اینکه آیا حداقل یک المان با data-message-id یا هر محتوای دیگری وجود دارد
-                    content_count = await page.locator('div[data-message-id], div.message, div[class*="message"]').count()
-                    if content_count > 0:
-                        page_loaded = True
-                        self.logger.info(f"✅ صفحه بارگذاری شد و {content_count} المان پیدا شد.")
-                        await self._take_screenshot(page, "messages_page_loaded")
-                        return True
-                    else:
-                        self.logger.warning(f"⚠️ صفحه بارگذاری شد ولی هیچ المان پیامی پیدا نشد (تلاش {attempt+1})")
-                        if attempt < 2:
-                            await human_sleep(3, 0.5)
-                except Exception as e:
-                    self.logger.warning(f"⚠️ تلاش {attempt+1} برای بارگذاری صفحه ناموفق: {e}")
-                    if attempt < 2:
-                        await human_sleep(3, 0.5)
-            self.logger.error("❌ پس از کلیک، پیام‌ها پیدا نشدند.")
-            await self._take_screenshot(page, "no_messages_after_click")
-            return False
-
+            # بررسی اینکه صفحه بارگذاری شده است
+            try:
+                await page.wait_for_selector('body', timeout=30000)
+                self.logger.info("✅ صفحه بارگذاری شد.")
+                await self._take_screenshot(page, "messages_page_loaded")
+                
+                # حالا بررسی کنیم که آیا پست مورد نظر در صفحه وجود دارد یا نه
+                target_exists = await page.locator(f'[data-message-id="{self.target_msg_id}"]').count() > 0
+                if target_exists:
+                    self.logger.info(f"✅ پست هدف {self.target_msg_id} در صفحه پیدا شد.")
+                    return True
+                else:
+                    self.logger.warning(f"⚠️ پست هدف {self.target_msg_id} در صفحه پیدا نشد. Fallback به اسکرول آرام...")
+                    # Fallback: صفحه را به حالت عادی برگردانیم تا اسکرول آرام کار کند
+                    await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
+                    return False
+            except Exception as e:
+                self.logger.error(f"❌ صفحه بارگذاری نشد: {e}")
+                await self._take_screenshot(page, "page_load_failed")
+                return False
+                
         for retry in range(2):
             if retry > 0:
                 self.logger.info(f"🔄 تلاش مجدد ({retry+1})... بازگشت به صفحه قبل و دوباره جستجو")
