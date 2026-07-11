@@ -814,17 +814,31 @@ class TelegramChannelScraper:
             await self._take_screenshot(page, "search_results_loaded")
 
             clicked = False
-            # ─── فقط کلیک روی اولین نتیجه ──────────────────────────
-            try:
-                await page.wait_for_selector('div[class*="search-result"], div.chatlist-item, a[data-peer-id]', timeout=10000)
-                first_result = page.locator('div[class*="search-result"], div.chatlist-item, a[data-peer-id]').first
-                if await first_result.count() > 0:
-                    await first_result.scroll_into_view_if_needed()
-                    await first_result.click(timeout=5000, force=True)
-                    self.logger.info("✅ روی اولین نتیجه کلیک شد.")
-                    clicked = True
-            except Exception as e:
-                self.logger.error(f"❌ کلیک روی نتیجه ناموفق: {e}")
+            result_selectors = [
+                'div[data-message-id]',
+                'div[class*="search-result"] a',
+                'div[class*="message"] a',
+                'div[role="button"][class*="item"]',
+                'div.chatlist-item',
+                'a[data-peer-id]',
+            ]
+            for sel in result_selectors:
+                try:
+                    await page.wait_for_selector(sel, timeout=5000)
+                    first_result = page.locator(sel).first
+                    if await first_result.count() > 0:
+                        await first_result.scroll_into_view_if_needed()
+                        handle = await first_result.element_handle()
+                        if handle:
+                            await self._draw_debug_cross(page, handle)
+                        await first_result.click(timeout=5000, force=True)
+                        self.logger.info(f"✅ روی اولین نتیجه با سلکتور '{sel}' کلیک شد.")
+                        clicked = True
+                        break
+                except Exception as e:
+                    self.logger.debug(f"سلکتور {sel} ناموفق: {e}")
+                    continue
+
             if not clicked:
                 self.logger.info("🔄 تلاش کلیک با JavaScript روی اولین پیام...")
                 try:
