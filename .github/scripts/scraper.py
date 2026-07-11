@@ -890,7 +890,7 @@ class TelegramChannelScraper:
                     found_ids.append(msg_id)
             
             # ─── اگر صفحه خالی است، اسکرین‌شات بگیر ──────────────
-            if not found_ids and self.save_screenshots:
+            if not found_ids:
                 try:
                     safe_name = self._sanitize_filename(f"empty_page_{self.target_msg_id}")
                     path = self.debug_screenshots_dir / f"{safe_name}.png"
