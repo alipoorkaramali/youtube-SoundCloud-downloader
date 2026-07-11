@@ -187,66 +187,6 @@ class TelegramChannelScraper:
         self.logger.info(f"⚠️ ارتفاع صفحه پس از {max_attempts} اسکرول تغییر نکرد.")
         return False
 
-    # ═══════════════════ اسکرول آرام برای پیدا کردن پست در صفحه فعلی ═══════════════════
-    async def _find_post_with_slow_scroll(self, page, seen_ids: set = None) -> Tuple[bool, str]:
-        """
-        اسکرول آرام در صفحه فعلی برای پیدا کردن اولین پست دارای تاریخ یا کپشن.
-        برمی‌گرداند: (پیدا شد یا نه, شناسه پست)
-        """
-        direction_text = 'بالا' if self.scroll_direction == 'up' else 'پایین'
-        scroll_amount = -600 if self.scroll_direction == 'up' else 600
-        found_id = None
-        max_slow_steps = 20
-
-        for step in range(max_slow_steps):
-            await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-            await asyncio.sleep(0.4)
-            messages = await page.locator('div[data-message-id]').all()
-            for msg in messages:
-                msg_id = await msg.get_attribute('data-message-id')
-                if not msg_id:
-                    continue
-                if seen_ids and msg_id in seen_ids:
-                    continue
-
-                # بررسی تاریخ با JavaScript
-                has_date = False
-                try:
-                    date_info = await msg.evaluate("""
-                        (el) => {
-                            const selectors = ['time', '.date', '[class*="date"]', '[datetime]', '.message-time', '[class*="time"]', '.time', '[data-date]', '[data-timestamp]'];
-                            for (const sel of selectors) {
-                                const found = el.querySelector(sel);
-                                if (found) {
-                                    const text = found.textContent?.trim() || found.getAttribute('datetime') || '';
-                                    if (text) return { has: true, text: text };
-                                }
-                            }
-                            const fullText = el.textContent || '';
-                            const datePattern = /\\d{1,2}:\\d{2}|\\d{1,2}\\s+[A-Za-z]{3}|\\d{4}-\\d{2}-\\d{2}/;
-                            const match = fullText.match(datePattern);
-                            if (match) return { has: true, text: match[0] };
-                            return { has: false, text: '' };
-                        }
-                    """)
-                    has_date = date_info.get('has', False)
-                except Exception:
-                    has_date = False
-
-                has_caption = False
-                if not has_date:
-                    try:
-                        text_content = (await msg.inner_text()).strip()
-                        has_caption = len(text_content) > 10
-                    except:
-                        pass
-
-                if has_date or has_caption:
-                    found_id = msg_id
-                    self.logger.info(f"🔍 پست معتبر با اسکرول آرام پیدا شد: {msg_id} (تاریخ: {has_date}, کپشن: {has_caption})")
-                    return True, found_id
-
-        return False, None
     # ═══════════════════ استخراج پست‌ها با JavaScript ═══════════════════
     async def _extract_posts_from_page(self, page) -> List[Dict]:
         """استخراج پست‌ها از صفحه با JavaScript (همراه با متن کامل)."""
@@ -286,8 +226,6 @@ class TelegramChannelScraper:
         max_retries = 3
         retry_count = 0
         items = []
-        all_media_map = {}      # ← اضافه شود
-        downloaded_total = 0    # ← اضافه شود
         context = None
         page = None
 
@@ -328,22 +266,7 @@ class TelegramChannelScraper:
                     break
                 continue
 
-            # ─── دانلود پست‌های همین دسته (قبل از رفتن به دور بعدی) ──
-            if new_items:
-                self.logger.info(f"📥 دانلود {len(new_items)} پست از دستهٔ فعلی...")
-                media_map_batch, downloaded_batch = await self._download_media(
-                    new_items, page, context
-                )
-                # اضافه کردن به نقشه‌ی کلی
-                for post_id, files in media_map_batch.items():
-                    if post_id in all_media_map:
-                        all_media_map[post_id].extend(files)
-                    else:
-                        all_media_map[post_id] = files
-                downloaded_total += downloaded_batch
-                self.logger.info(f"✅ {downloaded_batch} فایل از این دسته دانلود شد")
-
-            # اضافه کردن پست‌های جدید به لیست کلی
+            # اضافه کردن پست‌های جدید
             for item in new_items:
                 if item['id'] not in {i['id'] for i in items}:
                     items.append(item)
@@ -351,33 +274,36 @@ class TelegramChannelScraper:
             # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
             if new_items:
                 last_item = new_items[-1]
-                last_id = last_item['id']
+                last_id = last_item['id']          # ← همان رشته اصلی
                 new_start_link = f"https://t.me/{self.channel}/{last_id}"
                 self.start_link = new_start_link
-                self.target_msg_id = last_id
+                self.target_msg_id = last_id       # ← همان رشته اصلی، بدون str()
                 self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link}")
 
-            retry_count = 0
+            retry_count = 0  # اگر موفق بود، شمارنده را صفر کن
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
             if context:
                 await context.close()
             return
         self.logger.info(f"📥 {len(items)} پست استخراج شد.")
-        self.logger.info(f"🖼️ مجموع {downloaded_total} فایل رسانه در طول اجرا دانلود شد.")
-        self.logger.info(f"📊 media_map برای {len(all_media_map)} پست پر شد.")
+
+        media_map, downloaded = await self._download_media(items, page, context)
+        self.logger.info(f"🖼️ {downloaded} فایل رسانه دانلود شد.")
+        self.logger.info(f"📊 media_map برای {len(media_map)} پست پر شد.")
 
         gen = OutputGenerator(
             self.base_dir,
             self.channel,
             items,
-            all_media_map,  # ← به جای media_map
+            media_map,
             debug_mode=self.debug_mode
         )
         gen.run_all()
 
         if context:
             await context.close()
+
     async def _ensure_browser(self, context, page):
         """اطمینان از باز بودن مرورگر."""
         if context is None:
@@ -427,17 +353,12 @@ class TelegramChannelScraper:
 
         if self.start_link:
             entered = await self._navigate_to_start_link(page)
-            if not entered:
-                self.logger.warning("⚠️ لینک مستقیم نتیجه نداد. تلاش با جستجوی عادی کانال...")
-                self.start_link = None
-                entered = await self._search_and_enter_channel(page)
         else:
             entered = await self._search_and_enter_channel(page)
 
         if not entered:
             await context.close()
             return [], None, None
-            
         await self._save_screenshot(page, "initial")
 
         # ═══════════════ پرش به ابتدا یا انتهای صفحه بر اساس جهت اسکرول ═══════════════
@@ -515,39 +436,8 @@ class TelegramChannelScraper:
                         if not msg_id or msg_id in seen_ids:
                             continue
                         # بررسی وجود تاریخ (اولویت) و در صورت نبود، وجود کپشن کافی
-                        # ─── استخراج تاریخ با JavaScript ──────────────────────────
-                        has_date = False
-                        date_text = ""
-                        try:
-                            date_info = await msg.evaluate("""
-                                (el) => {
-                                    // روش‌های مختلف برای پیدا کردن تاریخ
-                                    const selectors = [
-                                        'time', '.date', '[class*="date"]', '[datetime]',
-                                        '.message-time', '[class*="time"]', '.time',
-                                        '[data-date]', '[data-timestamp]'
-                                    ];
-                                    for (const sel of selectors) {
-                                        const found = el.querySelector(sel);
-                                        if (found) {
-                                            const text = found.textContent?.trim() || found.getAttribute('datetime') || '';
-                                            if (text) return { has: true, text: text };
-                                        }
-                                    }
-                                    // اگر هیچ سلکتوری کار نکرد، کل متن پیام را جستجو کن
-                                    const fullText = el.textContent || '';
-                                    // الگوی تاریخ: مثل "12:34", "10 Jul", "2024-07-11"
-                                    const datePattern = /\\d{1,2}:\\d{2}|\\d{1,2}\\s+[A-Za-z]{3}|\\d{4}-\\d{2}-\\d{2}/;
-                                    const match = fullText.match(datePattern);
-                                    if (match) return { has: true, text: match[0] };
-                                    return { has: false, text: '' };
-                                }
-                            """)
-                            has_date = date_info.get('has', False)
-                            date_text = date_info.get('text', '')
-                        except Exception:
-                            has_date = False
-                            date_text = ""
+                        date_el = msg.locator('time, .date, [class*="date"], [datetime], .message-time, [class*="time"]').first
+                        has_date = await date_el.count() > 0
                         has_caption = False
                         if not has_date:
                             try:
@@ -971,50 +861,32 @@ class TelegramChannelScraper:
                 await self._take_screenshot(page, "click_result_failed")
                 return False
 
-            # بررسی اینکه صفحه بارگذاری شده است (حتی اگر data-message-id نباشد)
-            # بررسی اینکه صفحه بارگذاری شده است
-            try:
-                await page.wait_for_selector('body', timeout=30000)
-                self.logger.info("✅ صفحه بارگذاری شد.")
-                await self._take_screenshot(page, "messages_page_loaded")
-                
-                # مرحله ۱: تطابق دقیق با data-message-id
-                target_exists = await page.locator(f'[data-message-id="{self.target_msg_id}"]').count() > 0
-                if target_exists:
-                    self.logger.info(f"✅ پست هدف {self.target_msg_id} در صفحه پیدا شد (با data-message-id دقیق).")
+            for attempt in range(3):
+                try:
+                    await page.wait_for_selector('div[data-message-id]', timeout=15000)
+                    self.logger.info("✅ صفحه پیام‌ها با موفقیت بارگذاری شد.")
+                    await self._take_screenshot(page, "messages_page_loaded")
                     return True
-                
-                # مرحله ۲: جستجوی جایگزین در همان صفحه (با متن یا لینک)
-                self.logger.warning(f"⚠️ پست با data-message-id دقیق پیدا نشد. جستجوی جایگزین در صفحه...")
-                all_messages = await page.locator('div[data-message-id]').all()
-                found = False
-                for msg in all_messages:
-                    msg_id = await msg.get_attribute('data-message-id')
-                    msg_text = await msg.inner_text()
-                    if self.target_msg_id in msg_text or f"/{self.target_msg_id}" in msg_text:
-                        self.logger.info(f"🔍 پست هدف با شناسه جایگزین پیدا شد: {msg_id} (متن: {msg_text[:50]}...)")
-                        self.target_msg_id = msg_id
-                        found = True
-                        break
-                
-                if found:
-                    return True
-                
-                # مرحله ۳: اسکرول آرام در همان صفحه (بدون رفتن به صفحه اصلی)
-                self.logger.warning(f"⚠️ پست هدف در صفحه پیدا نشد. شروع اسکرول آرام در همان صفحه...")
-                found, found_id = await self._find_post_with_slow_scroll(page, seen_ids=None)
-                if found:
-                    self.target_msg_id = found_id
-                    self.logger.info(f"✅ پست هدف با اسکرول آرام پیدا شد: {self.target_msg_id}")
-                    return True
-                else:
-                    self.logger.error("❌ حتی با اسکرول آرام هم پستی پیدا نشد.")
-                    return False
-                
-            except Exception as e:
-                self.logger.error(f"❌ خطا در بارگذاری یا جستجوی صفحه: {e}")
-                await self._take_screenshot(page, "page_load_failed")
-                return False
+                except Exception as e:
+                    self.logger.warning(f"⚠️ تلاش {attempt+1} برای بارگذاری پیام‌ها ناموفق: {e}")
+                    if attempt < 2:
+                        await human_sleep(3, 0.5)
+            self.logger.error("❌ پس از کلیک، پیام‌ها پیدا نشدند.")
+            await self._take_screenshot(page, "no_messages_after_click")
+            return False
+
+        for retry in range(2):
+            if retry > 0:
+                self.logger.info(f"🔄 تلاش مجدد ({retry+1})... بازگشت به صفحه قبل و دوباره جستجو")
+                await page.go_back()
+                await human_sleep(2, 0.3)
+            success = await perform_search_and_click()
+            if success:
+                return True
+            else:
+                self.logger.warning(f"❌ تلاش {retry+1} ناموفق بود.")
+        return False
+
     # ═══════════════════ متد کمکی: بررسی وجود عبارت ═══════════════════
     async def _check_text_on_page(self, page, term: str) -> bool:
         try:
