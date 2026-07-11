@@ -509,7 +509,9 @@ class TelegramChannelScraper:
             except Exception as e:
                 self.logger.warning(f"⚠️ خطا در انتقال پیام هدف: {e}")
 
-        while len(items) < self.limit and scroll_attempts < MAX_SCROLL_ATTEMPTS:
+        # استفاده از limit پاس شده (اگر وجود داشته باشد)
+        effective_limit = limit if limit is not None else self.limit
+        while len(items) < effective_limit and scroll_attempts < MAX_SCROLL_ATTEMPTS:
             try:
                 messages = await page.locator('div[data-message-id]').all()
 
@@ -652,7 +654,7 @@ class TelegramChannelScraper:
                 await page.evaluate(f"window.scrollBy(0, {extra_amount})")
                 await human_sleep(1.5, 0.3)
 
-        items = items[:self.limit]
+        items = items[:effective_limit]
         self.logger.info(f"📊 {len(items)} پست جمع‌آوری شد.")
 
         await self._save_screenshot(page, "final")
