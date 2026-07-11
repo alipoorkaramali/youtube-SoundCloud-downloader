@@ -815,16 +815,20 @@ class TelegramChannelScraper:
 
             clicked = False
             result_selectors = [
-                'div[data-message-id]',
-                'div[class*="search-result"] a',
-                'div[class*="message"] a',
+                'div[class*="search-result"]',
+                'div[class*="result"]',
+                'div[class*="chatlist-item"]',
                 'div[role="button"][class*="item"]',
-                'div.chatlist-item',
+                'div[data-peer-id]',
                 'a[data-peer-id]',
+                'div[class*="ListItem"]',
+                'div.chatlist-item',
+                'div[class*="message"]',
+                'div[data-message-id]',
             ]
             for sel in result_selectors:
                 try:
-                    await page.wait_for_selector(sel, timeout=5000)
+                    await page.wait_for_selector(sel, state='visible', timeout=10000)
                     first_result = page.locator(sel).first
                     if await first_result.count() > 0:
                         await first_result.scroll_into_view_if_needed()
@@ -839,6 +843,21 @@ class TelegramChannelScraper:
                     self.logger.debug(f"سلکتور {sel} ناموفق: {e}")
                     continue
 
+            # ─── اگر هیچ سلکتوری کار نکرد، با متن جستجو پیدا کن ──
+            if not clicked:
+                self.logger.info("🔄 تلاش برای پیدا کردن نتیجه با متن جستجو...")
+                try:
+                    await page.wait_for_selector(f'div:has-text("{self.start_link}")', timeout=10000)
+                    text_result = page.locator(f'div:has-text("{self.start_link}")').first
+                    if await text_result.count() > 0:
+                        await text_result.scroll_into_view_if_needed()
+                        await text_result.click(timeout=5000, force=True)
+                        self.logger.info(f"✅ روی نتیجه با متن جستجو کلیک شد.")
+                        clicked = True
+                except Exception as e:
+                    self.logger.debug(f"جستجوی متنی ناموفق: {e}")
+
+            # ─── کلیک با JavaScript (آخرین راه) ──────────────────────
             if not clicked:
                 self.logger.info("🔄 تلاش کلیک با JavaScript روی اولین پیام...")
                 try:
@@ -862,7 +881,6 @@ class TelegramChannelScraper:
                 self.logger.error("❌ نتوانستیم روی هیچ نتیجه‌ای کلیک کنیم.")
                 await self._take_screenshot(page, "click_result_failed")
                 return False
-
             # ─── مرحله ۱: منتظر بارگذاری پیام‌ها ──────────────────
             try:
                 await page.wait_for_selector('div[data-message-id]', timeout=20000)
