@@ -118,20 +118,23 @@ jobs:
           cd "${{ github.event.inputs.folder }}"
           
           COMMON_OPTS="--cookies ../cookies.txt \
+            --no-check-formats \
+            --extractor-args youtube:player_client=web,android,ios \
+            --extractor-args youtube:skip=webpage \
             --extractor-retries 5 \
             --retries 20 \
             --fragment-retries 20 \
             --sleep-interval 4 \
             --sleep-subtitles 2 \
             --no-warnings \
-            --extractor-args youtube:player_client=web,android,ios,web_safari \
             --ignore-errors \
+            --no-playlist \
             --compat-options no-external-downloader-progress"
 
           # ============= یوتیوب =============
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              # ساده‌ترین روش: بهترین فرمت کامل موجود
+              # دانلود بهترین فرمت کامل موجود (با گزینه‌های تضمین‌شده)
               yt-dlp $COMMON_OPTS -f "best" \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
