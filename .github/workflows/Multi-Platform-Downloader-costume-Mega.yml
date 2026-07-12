@@ -141,6 +141,7 @@ jobs:
             --ignore-errors \
             --compat-options no-external-downloader-progress"
 
+          # ============= یوتیوب =============
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
               QUALITY="${{ github.event.inputs.quality }}"
@@ -149,27 +150,24 @@ jobs:
                   "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
               else
                 HEIGHT="${QUALITY%p}"
-                echo "🎬 Trying with quality ${QUALITY}..."
-                if ! yt-dlp $COMMON_OPTS -f "bestvideo[height<=$HEIGHT]+bestaudio/best" --merge-output-format mp4 \
-                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"; then
-                  echo "⚠️ Fallback to bestvideo+bestaudio..."
-                  yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
-                    "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-                fi
+                yt-dlp $COMMON_OPTS -S "res:${HEIGHT},codec:av1:h264" \
+                  -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
               fi
             else
-              # حالت صوتی یوتیوب - اصلاح شده با اولویت m4a
-              echo "🎵 Downloading audio with bestaudio[ext=m4a] fallback..."
-              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+              # حالت صوتی یوتیوب
+              yt-dlp $COMMON_OPTS -S "ext:m4a" -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
+
+          # ============= ساندکلاد =============
           else
-            # soundcloud
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+              yt-dlp $COMMON_OPTS -S "res:1080,codec:av1:h264" \
+                -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+              yt-dlp $COMMON_OPTS -S "ext:m4a" -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           fi
