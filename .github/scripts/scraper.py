@@ -336,6 +336,11 @@ class TelegramChannelScraper:
                     items.append(item)
                     newly_added.append(item)
 
+            # ─── اگر هیچ پست جدیدی اضافه نشد، از حلقه خارج شو ───
+            if not newly_added:
+                self.logger.info("ℹ️ تمام پست‌های دریافت‌شده تکراری هستند. پایان.")
+                break
+
             self.logger.info(f"📥 {len(newly_added)} پست جدید جمع‌آوری شد (مجموع: {len(items)}/{self.limit})")
 
             # 🔥 دانلود فوری رسانه‌های پست‌های جدید
