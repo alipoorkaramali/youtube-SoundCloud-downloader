@@ -115,28 +115,40 @@ jobs:
           echo "✅ کوکی با موفقیت decrypt شد"
 
       # ============================================================
-      # مرحله 3: کش کردن ffmpeg (برای سرعت بخشیدن به اجراهای بعدی)
+      # مرحله 3: دریافت نسخه‌ی ffmpeg از مخزن (برای تعیین کلید کش)
       # ============================================================
-      - name: 💾 Cache ffmpeg binary
+      - name: 🔍 Get latest ffmpeg version
+        id: get-ffmpeg-version
+        run: |
+          sudo apt-get update
+          # دریافت نسخه‌ی ffmpeg از مخزن (بدون نصب)
+          VERSION=$(apt-cache show ffmpeg | grep Version | head -1 | awk '{print $2}')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "✅ آخرین نسخه‌ی موجود: $VERSION"
+
+      # ============================================================
+      # مرحله 4: کش کردن ffmpeg بر اساس نسخه
+      # ============================================================
+      - name: 💾 Cache ffmpeg binary (version: ${{ env.VERSION }})
         id: cache-ffmpeg
         uses: actions/cache@v4
         with:
           path: /usr/bin/ffmpeg
-          key: ${{ runner.os }}-ffmpeg-latest
+          key: ${{ runner.os }}-ffmpeg-${{ env.VERSION }}
 
       # ============================================================
-      # مرحله 4: نصب جدیدترین نسخه ffmpeg (در صورت عدم وجود کش)
+      # مرحله 5: نصب ffmpeg (در صورت عدم وجود کش برای این نسخه)
       # ============================================================
-      - name: 📦 Install latest ffmpeg (if not cached)
+      - name: 📦 Install ffmpeg version ${{ env.VERSION }} (if not cached)
         if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          # نمایش نسخه برای تأیید
           ffmpeg -version
+          echo "✅ ffmpeg version ${{ env.VERSION }} نصب و کش شد."
 
       # ============================================================
-      # مرحله 5: نصب yt-dlp (بدون نصب مجدد ffmpeg)
+      # مرحله 6: نصب yt-dlp (بدون نصب مجدد ffmpeg)
       # ============================================================
       - name: ⚙️ Setup yt-dlp (without ffmpeg)
         uses: AnimMouse/setup-yt-dlp@v3
@@ -146,7 +158,7 @@ jobs:
           nightly: true         # استفاده از نسخه nightly برای پشتیبانی بهتر
 
       # ============================================================
-      # مرحله 6: نصب افزونه PO Token (برای دور زدن محدودیت‌های یوتیوب)
+      # مرحله 7: نصب افزونه PO Token (برای دور زدن محدودیت‌های یوتیوب)
       # ============================================================
       - name: 📦 Install PO Token Plugin
         run: |
@@ -154,7 +166,7 @@ jobs:
           echo "✅ PO Token Plugin installed"
 
       # ============================================================
-      # مرحله 7: کش کردن rclone (برای آپلود به مگا)
+      # مرحله 8: کش کردن rclone (برای آپلود به مگا)
       # ============================================================
       - name: 💾 Cache rclone binary
         id: cache-rclone
@@ -164,7 +176,7 @@ jobs:
           key: ${{ runner.os }}-rclone-v1.74.1
 
       # ============================================================
-      # مرحله 8: نصب rclone (در صورت عدم وجود کش)
+      # مرحله 9: نصب rclone (در صورت عدم وجود کش)
       # ============================================================
       - name: 📦 Install latest rclone (if not cached)
         if: steps.cache-rclone.outputs.cache-hit != 'true'
@@ -176,7 +188,7 @@ jobs:
           ~/bin/rclone version
 
       # ============================================================
-      # مرحله 9: رمزگشایی تنظیمات rclone (برای اتصال به Mega.nz)
+      # مرحله 10: رمزگشایی تنظیمات rclone (برای اتصال به Mega.nz)
       # ============================================================
       - name: 🔓 Decrypt rclone config
         run: |
@@ -191,7 +203,7 @@ jobs:
           echo "✅ rclone config loaded"
 
       # ============================================================
-      # مرحله 10: دانلود فایل (بدون انتخاب کیفیت - همیشه بهترین)
+      # مرحله 11: دانلود فایل (بدون انتخاب کیفیت - همیشه بهترین)
       # ============================================================
       - name: ▶️ دانلود فایل
         id: download
@@ -250,7 +262,7 @@ jobs:
           echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
 
       # ============================================================
-      # مرحله 11: پردازش ویدیو با پروفایل بهینه‌سازی
+      # مرحله 12: پردازش ویدیو با پروفایل بهینه‌سازی (با مخفی کردن هشدارها)
       # ============================================================
       - name: 🗜️ پردازش ویدیو (بهینه‌سازی هوشمند)
         # فقط در صورتی اجرا شود که پروفایل برابر با 'original' نباشد
@@ -299,8 +311,8 @@ jobs:
               ;;
           esac
 
-          # ----- ساخت دستور ffmpeg به صورت پویا -----
-          FFMPEG_CMD="ffmpeg -i \"$INPUT_FILE\""
+          # ----- ساخت دستور ffmpeg با loglevel error برای مخفی کردن هشدارها -----
+          FFMPEG_CMD="ffmpeg -loglevel error -stats -i \"$INPUT_FILE\""
           FFMPEG_CMD="$FFMPEG_CMD -vf \"scale=$RESOLUTION:flags=lanczos\""
           FFMPEG_CMD="$FFMPEG_CMD -c:v $CODEC -crf $CRF -preset $PRESET"
           FFMPEG_CMD="$FFMPEG_CMD -c:a aac -b:a $AUDIO_BITRATE"
@@ -341,7 +353,7 @@ jobs:
           fi
 
       # ============================================================
-      # مرحله 12: تقسیم فایل به ZIP چندبخشی (در صورت درخواست)
+      # مرحله 13: تقسیم فایل به ZIP چندبخشی (در صورت درخواست)
       # ============================================================
       - name: ✂️ Split into zip volumes (if requested)
         if: github.event.inputs.split_choice == 'split'
@@ -357,7 +369,7 @@ jobs:
           ls -la
 
       # ============================================================
-      # مرحله 13: آپلود به Mega.nz با استفاده از rclone
+      # مرحله 14: آپلود به Mega.nz با استفاده از rclone
       # ============================================================
       - name: ☁️ آپلود به Mega.nz
         run: |
