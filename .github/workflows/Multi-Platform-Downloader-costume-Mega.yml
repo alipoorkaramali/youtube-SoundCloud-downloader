@@ -1,4 +1,4 @@
-name: 🎬🎵 Costume Downloader + Mega.nz (with ZIP split + Quality Control)
+name: 🎬🎵 Costume Downloader + Mega.nz (with Resolution & Compression)
 
 on:
   workflow_dispatch:
@@ -22,50 +22,30 @@ on:
         options:
           - audio
           - video
-      # =============== ورودی‌های جدید برای کنترل کیفیت ===============
-      video_quality:
-        description: '🎬 کیفیت نهایی ویدیو (فقط برای حالت ویدیو)'
+      # =============== منوی رزولوشن ===============
+      resolution:
+        description: '📐 رزولوشن (ابعاد تصویر)'
         required: false
         default: 'original'
         type: choice
         options:
           - 'original'   # بدون تغییر
-          - '1080p'      # کاهش به 1080p
-          - '720p'       # کاهش به 720p
-          - '480p'       # کاهش به 480p
-          - 'custom'     # ابعاد دلخواه (در ورودی بعدی مشخص می‌شود)
-      custom_resolution:
-        description: '📐 ابعاد دلخواه (مثال: 854x480 یا 1280x720) - فقط در صورت انتخاب custom'
-        required: false
-        default: '1280x720'
-      video_codec:
-        description: '🎞️ کدک ویدیو برای فشرده‌سازی'
-        required: false
-        default: 'libx264'
-        type: choice
-        options:
-          - 'libx264'    # H.264 (سازگار با اکثر دستگاه‌ها)
-          - 'libx265'    # H.265 (حجم کمتر، کیفیت بهتر، اما سازگاری کمتر)
-      crf_value:
-        description: '🎚️ فاکتور کیفیت (CRF) - عدد کمتر = کیفیت بالاتر و حجم بیشتر'
-        required: false
-        default: '23'
-      preset:
-        description: '⚡ سرعت پردازش (سریع‌تر = حجم بیشتر، کندتر = حجم کمتر و کیفیت بهتر)'
+          - '1080p'      # 1920x1080
+          - '720p'       # 1280x720
+          - '480p'       # 854x480
+          - '360p'       # 640x360
+      # =============== منوی فشرده‌سازی ===============
+      compression:
+        description: '🗜️ سطح فشرده‌سازی (کاهش حجم)'
         required: false
         default: 'medium'
         type: choice
         options:
-          - 'ultrafast'
-          - 'superfast'
-          - 'veryfast'
-          - 'faster'
-          - 'fast'
-          - 'medium'
-          - 'slow'
-          - 'slower'
-          - 'veryslow'
-      # ================================================================
+          - 'none'       # بدون فشرده‌سازی (فقط تغییر رزولوشن)
+          - 'light'      # فشرده‌سازی کم (کیفیت بالا)
+          - 'medium'     # فشرده‌سازی متوسط (تعادل کیفیت و حجم)
+          - 'high'       # فشرده‌سازی زیاد (حجم بسیار کم)
+      # =============================================
       folder:
         description: '📁 پوشه موقت'
         required: false
@@ -230,62 +210,106 @@ jobs:
           echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
 
       # ================================================================
-      # 8. کاهش کیفیت ویدیو با ffmpeg (فقط برای حالت ویدیو)
+      # 8. پردازش ویدیو (تغییر رزولوشن + فشرده‌سازی) - فقط برای ویدیو
       # ================================================================
-      - name: 🗜️ کاهش کیفیت ویدیو (اختیاری)
-        if: github.event.inputs.type == 'video' && github.event.inputs.video_quality != 'original'
+      - name: 🗜️ پردازش ویدیو (تغییر رزولوشن و فشرده‌سازی)
+        if: github.event.inputs.type == 'video' && (github.event.inputs.resolution != 'original' || github.event.inputs.compression != 'none')
         run: |
           cd "${{ github.event.inputs.folder }}"
           INPUT_FILE="${{ env.DOWNLOADED_FILE }}"
+          BASENAME="${INPUT_FILE%.*}"
+          OUTPUT_FILE="${BASENAME}_processed.mp4"
           
-          # تعیین ابعاد بر اساس انتخاب کاربر
-          QUALITY="${{ github.event.inputs.video_quality }}"
-          case "$QUALITY" in
-            "1080p")
-              RESOLUTION="1920:1080"
+          # ============================================================
+          # تعیین رزولوشن
+          # ============================================================
+          RESOLUTION_INPUT="${{ github.event.inputs.resolution }}"
+          case "$RESOLUTION_INPUT" in
+            "original") RESOLUTION="" ;;
+            "1080p")    RESOLUTION="1920:1080" ;;
+            "720p")     RESOLUTION="1280:720" ;;
+            "480p")     RESOLUTION="854:480" ;;
+            "360p")     RESOLUTION="640:360" ;;
+          esac
+          
+          # ============================================================
+          # تعیین سطح فشرده‌سازی
+          # ============================================================
+          COMPRESSION="${{ github.event.inputs.compression }}"
+          case "$COMPRESSION" in
+            "none")
+              CODEC="libx264"
+              CRF="18"
+              PRESET="medium"
+              AUDIO_BITRATE="128k"
               ;;
-            "720p")
-              RESOLUTION="1280:720"
+            "light")
+              CODEC="libx264"
+              CRF="23"
+              PRESET="medium"
+              AUDIO_BITRATE="128k"
               ;;
-            "480p")
-              RESOLUTION="854:480"
+            "medium")
+              CODEC="libx264"
+              CRF="28"
+              PRESET="fast"
+              AUDIO_BITRATE="128k"
               ;;
-            "custom")
-              RESOLUTION="${{ github.event.inputs.custom_resolution }}"
+            "high")
+              CODEC="libx265"
+              CRF="32"
+              PRESET="veryfast"
+              AUDIO_BITRATE="96k"
               ;;
           esac
           
-          # تعیین کدک و CRF
-          CODEC="${{ github.event.inputs.video_codec }}"
-          CRF="${{ github.event.inputs.crf_value }}"
-          PRESET="${{ github.event.inputs.preset }}"
+          # ============================================================
+          # ساخت دستور ffmpeg
+          # ============================================================
+          FFMPEG_CMD="ffmpeg -i \"$INPUT_FILE\""
           
-          # نام فایل خروجی
-          BASENAME="${INPUT_FILE%.*}"
-          EXTENSION="${INPUT_FILE##*.}"
-          OUTPUT_FILE="${BASENAME}_${QUALITY}.mp4"
+          # اضافه کردن فیلتر scale (اگر رزولوشن != original)
+          if [ -n "$RESOLUTION" ]; then
+            FFMPEG_CMD="$FFMPEG_CMD -vf \"scale=$RESOLUTION:flags=lanczos\""
+          fi
           
-          echo "📐 شروع کاهش کیفیت به $RESOLUTION با کدک $CODEC و CRF=$CRF ..."
+          # اضافه کردن تنظیمات ویدیو
+          FFMPEG_CMD="$FFMPEG_CMD -c:v $CODEC -crf $CRF -preset $PRESET"
           
-          # اجرای ffmpeg با تنظیمات انتخاب‌شده
-          ffmpeg -i "$INPUT_FILE" \
-            -vf "scale=$RESOLUTION:flags=lanczos" \
-            -c:v "$CODEC" \
-            -crf "$CRF" \
-            -preset "$PRESET" \
-            -c:a aac \
-            -b:a 128k \
-            -movflags +faststart \
-            "$OUTPUT_FILE"
+          # اضافه کردن تنظیمات صدا
+          FFMPEG_CMD="$FFMPEG_CMD -c:a aac -b:a $AUDIO_BITRATE"
           
-          # بررسی موفقیت
+          # اضافه کردن بهینه‌سازی و خروجی
+          FFMPEG_CMD="$FFMPEG_CMD -movflags +faststart \"$OUTPUT_FILE\""
+          
+          # ============================================================
+          # نمایش اطلاعات و اجرا
+          # ============================================================
+          echo "📐 شروع پردازش ویدیو:"
+          echo "   رزولوشن: ${RESOLUTION:-بدون تغییر}"
+          echo "   فشرده‌سازی: $COMPRESSION (کدک: $CODEC, CRF: $CRF)"
+          echo "   کیفیت صدا: $AUDIO_BITRATE"
+          echo ""
+          echo "🔄 در حال اجرای ffmpeg..."
+          
+          eval $FFMPEG_CMD
+          
+          # ============================================================
+          # بررسی نتیجه
+          # ============================================================
           if [ -f "$OUTPUT_FILE" ]; then
-            echo "✅ کیفیت ویدیو با موفقیت کاهش یافت."
+            ORIGINAL_SIZE=$(stat -c%s "$INPUT_FILE")
+            COMPRESSED_SIZE=$(stat -c%s "$OUTPUT_FILE")
+            REDUCTION=$((100 - (COMPRESSED_SIZE * 100 / ORIGINAL_SIZE)))
+            echo ""
+            echo "✅ پردازش با موفقیت انجام شد!"
+            echo "   حجم اصلی: $(numfmt --to=iec $ORIGINAL_SIZE)"
+            echo "   حجم نهایی: $(numfmt --to=iec $COMPRESSED_SIZE)"
+            echo "   کاهش حجم: ~${REDUCTION}٪"
             rm "$INPUT_FILE"
             echo "DOWNLOADED_FILE=$OUTPUT_FILE" >> $GITHUB_ENV
           else
-            echo "⚠️ خطا در کاهش کیفیت. فایل اصلی حفظ می‌شود."
-            # فایل اصلی را حفظ کن
+            echo "⚠️ خطا در پردازش. فایل اصلی حفظ می‌شود."
             echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
           fi
 
