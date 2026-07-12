@@ -1,4 +1,4 @@
-name: 🎬🎵 Costume Downloader + Mega.nz (with ZIP split)
+name: 🎬🎵 Costume Downloader + Mega.nz (with ZIP split + Quality Control)
 
 on:
   workflow_dispatch:
@@ -22,6 +22,50 @@ on:
         options:
           - audio
           - video
+      # =============== ورودی‌های جدید برای کنترل کیفیت ===============
+      video_quality:
+        description: '🎬 کیفیت نهایی ویدیو (فقط برای حالت ویدیو)'
+        required: false
+        default: 'original'
+        type: choice
+        options:
+          - 'original'   # بدون تغییر
+          - '1080p'      # کاهش به 1080p
+          - '720p'       # کاهش به 720p
+          - '480p'       # کاهش به 480p
+          - 'custom'     # ابعاد دلخواه (در ورودی بعدی مشخص می‌شود)
+      custom_resolution:
+        description: '📐 ابعاد دلخواه (مثال: 854x480 یا 1280x720) - فقط در صورت انتخاب custom'
+        required: false
+        default: '1280x720'
+      video_codec:
+        description: '🎞️ کدک ویدیو برای فشرده‌سازی'
+        required: false
+        default: 'libx264'
+        type: choice
+        options:
+          - 'libx264'    # H.264 (سازگار با اکثر دستگاه‌ها)
+          - 'libx265'    # H.265 (حجم کمتر، کیفیت بهتر، اما سازگاری کمتر)
+      crf_value:
+        description: '🎚️ فاکتور کیفیت (CRF) - عدد کمتر = کیفیت بالاتر و حجم بیشتر'
+        required: false
+        default: '23'
+      preset:
+        description: '⚡ سرعت پردازش (سریع‌تر = حجم بیشتر، کندتر = حجم کمتر و کیفیت بهتر)'
+        required: false
+        default: 'medium'
+        type: choice
+        options:
+          - 'ultrafast'
+          - 'superfast'
+          - 'veryfast'
+          - 'faster'
+          - 'fast'
+          - 'medium'
+          - 'slow'
+          - 'slower'
+          - 'veryslow'
+      # ================================================================
       folder:
         description: '📁 پوشه موقت'
         required: false
@@ -50,9 +94,15 @@ jobs:
       contents: write
 
     steps:
+      # ================================================================
+      # 1. دریافت کد مخزن
+      # ================================================================
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
+      # ================================================================
+      # 2. رمزگشایی کوکی (انتخاب تصادفی از چند فایل)
+      # ================================================================
       - name: 🔐 Decrypt Random Cookie
         run: |
           COOKIE_FILES=(config/cookies*.txt.gpg)
@@ -70,6 +120,9 @@ jobs:
           }
           echo "✅ کوکی با موفقیت decrypt شد"
 
+      # ================================================================
+      # 3. نصب yt-dlp و ffmpeg (با کش خودکار)
+      # ================================================================
       - name: ⚙️ Setup yt-dlp + ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
         with:
@@ -77,11 +130,17 @@ jobs:
           ffmpeg: true
           nightly: true
 
+      # ================================================================
+      # 4. نصب افزونه PO Token
+      # ================================================================
       - name: 📦 Install PO Token Plugin
         run: |
           python3 -m pip install --upgrade bgutil-ytdlp-pot-provider
           echo "✅ PO Token Plugin installed"
 
+      # ================================================================
+      # 5. کش کردن rclone
+      # ================================================================
       - name: 💾 Cache rclone binary
         id: cache-rclone
         uses: actions/cache@v4
@@ -98,6 +157,9 @@ jobs:
           chmod +x ~/bin/rclone
           ~/bin/rclone version
 
+      # ================================================================
+      # 6. رمزگشایی تنظیمات rclone
+      # ================================================================
       - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
@@ -110,6 +172,9 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
 
+      # ================================================================
+      # 7. دانلود فایل (بدون انتخاب کیفیت - همیشه بهترین)
+      # ================================================================
       - name: ▶️ دانلود فایل
         id: download
         run: |
@@ -117,6 +182,7 @@ jobs:
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
           
+          # گزینه‌های مشترک برای yt-dlp (تضمین‌شده)
           COMMON_OPTS="--cookies ../cookies.txt \
             --no-check-formats \
             --extractor-args youtube:player_client=web,android,ios \
@@ -134,11 +200,11 @@ jobs:
           # ============= یوتیوب =============
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              # دانلود بهترین فرمت کامل موجود (با گزینه‌های تضمین‌شده)
+              # بهترین فرمت کامل موجود
               yt-dlp $COMMON_OPTS -f "best" \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              # دانلود صوتی با بهترین کیفیت ممکن
+              # دانلود صوتی
               yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
@@ -163,6 +229,69 @@ jobs:
           echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
           echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
 
+      # ================================================================
+      # 8. کاهش کیفیت ویدیو با ffmpeg (فقط برای حالت ویدیو)
+      # ================================================================
+      - name: 🗜️ کاهش کیفیت ویدیو (اختیاری)
+        if: github.event.inputs.type == 'video' && github.event.inputs.video_quality != 'original'
+        run: |
+          cd "${{ github.event.inputs.folder }}"
+          INPUT_FILE="${{ env.DOWNLOADED_FILE }}"
+          
+          # تعیین ابعاد بر اساس انتخاب کاربر
+          QUALITY="${{ github.event.inputs.video_quality }}"
+          case "$QUALITY" in
+            "1080p")
+              RESOLUTION="1920:1080"
+              ;;
+            "720p")
+              RESOLUTION="1280:720"
+              ;;
+            "480p")
+              RESOLUTION="854:480"
+              ;;
+            "custom")
+              RESOLUTION="${{ github.event.inputs.custom_resolution }}"
+              ;;
+          esac
+          
+          # تعیین کدک و CRF
+          CODEC="${{ github.event.inputs.video_codec }}"
+          CRF="${{ github.event.inputs.crf_value }}"
+          PRESET="${{ github.event.inputs.preset }}"
+          
+          # نام فایل خروجی
+          BASENAME="${INPUT_FILE%.*}"
+          EXTENSION="${INPUT_FILE##*.}"
+          OUTPUT_FILE="${BASENAME}_${QUALITY}.mp4"
+          
+          echo "📐 شروع کاهش کیفیت به $RESOLUTION با کدک $CODEC و CRF=$CRF ..."
+          
+          # اجرای ffmpeg با تنظیمات انتخاب‌شده
+          ffmpeg -i "$INPUT_FILE" \
+            -vf "scale=$RESOLUTION:flags=lanczos" \
+            -c:v "$CODEC" \
+            -crf "$CRF" \
+            -preset "$PRESET" \
+            -c:a aac \
+            -b:a 128k \
+            -movflags +faststart \
+            "$OUTPUT_FILE"
+          
+          # بررسی موفقیت
+          if [ -f "$OUTPUT_FILE" ]; then
+            echo "✅ کیفیت ویدیو با موفقیت کاهش یافت."
+            rm "$INPUT_FILE"
+            echo "DOWNLOADED_FILE=$OUTPUT_FILE" >> $GITHUB_ENV
+          else
+            echo "⚠️ خطا در کاهش کیفیت. فایل اصلی حفظ می‌شود."
+            # فایل اصلی را حفظ کن
+            echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
+          fi
+
+      # ================================================================
+      # 9. تقسیم فایل به ZIP چندبخشی (در صورت درخواست)
+      # ================================================================
       - name: ✂️ Split into zip volumes (if requested)
         if: github.event.inputs.split_choice == 'split'
         run: |
@@ -176,6 +305,9 @@ jobs:
           echo "✅ Zip volumes created:"
           ls -la
 
+      # ================================================================
+      # 10. آپلود به Mega.nz
+      # ================================================================
       - name: ☁️ آپلود به Mega.nz
         run: |
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
