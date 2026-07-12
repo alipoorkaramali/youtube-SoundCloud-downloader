@@ -500,12 +500,21 @@ class TelegramChannelScraper:
 
         # ─── جمع‌آوری پست‌ها ────────────────────────────────────────────────
         items = []
-        seen_ids = set()
+        seen_ids = set(existing_seen_ids) if existing_seen_ids else set()
         scroll_attempts = 0
 
         start_collecting = False
+
         if self.start_link and self.target_msg_id:
             seen_ids.add(self.target_msg_id)
+            self.logger.info(f"🎯 پیام هدف {self.target_msg_id} به seen_ids اضافه شد.")
+
+        # اسکرول اولیه برای حالت down (جدیدتر)
+        if self.start_link and self.scroll_direction == 'down':
+            self.logger.info("⬇️ اسکرول اولیه به سمت پست‌های جدیدتر بعد از پیام هدف...")
+            await page.evaluate("window.scrollBy(0, 600)")
+            await human_sleep(1.5, 0.4)
+
         if self.start_link and self.target_msg_id:
             self.logger.info(f"🎯 پیدا کردن پیام هدف {self.target_msg_id}...")
             try:
@@ -529,13 +538,16 @@ class TelegramChannelScraper:
 
                 # ─── تعیین ترتیب پیمایش بر اساس جهت ──────────────────────
                 if self.start_link:
-                    # در حالت start_link، از نقطه شروع به سمت direction حرکت می‌کنیم
-                    if self.scroll_direction == 'up':
-                        msg_iter = reversed(messages)
+                    # در start_link:
+                    # down = از پیام هدف به سمت جدیدتر (پایین صفحه)
+                    # up  = از پیام هدف به سمت قدیمی‌تر (بالای صفحه)
+                # ─── تعیین ترتیب پیمایش بر اساس جهت ──────────────────────
+                if self.start_link:
+                    if self.scroll_direction == 'down':
+                        msg_iter = messages           # از بالا به پایین = جدیدتر
                     else:
-                        msg_iter = messages
+                        msg_iter = reversed(messages) # قدیمی‌تر
                 else:
-                    # حالت عادی: اگر direction == 'up' از جدید به قدیم، اگر 'down' از قدیم به جدید
                     if self.scroll_direction == 'up':
                         msg_iter = reversed(messages)
                     else:
@@ -556,13 +568,10 @@ class TelegramChannelScraper:
                         if self.start_link and not start_collecting:
                             if msg_id == self.target_msg_id:
                                 start_collecting = True
-                                self.logger.info(f"🎯 به پیام هدف رسیدیم (ID: {msg_id})، شروع جمع‌آوری...")
-                                seen_ids.add(msg_id)
+                                self.logger.info(f"🎯 به پیام هدف رسیدیم (ID: {msg_id})، شروع جمع‌آوری از پست‌های بعدی...")
+                                continue   # خود هدف را جمع نکن
                             else:
                                 continue
-
-                        if not start_collecting:
-                            continue
 
                         # ─── استخراج هوشمند متن پست ──────────────────────
                         text = ""
