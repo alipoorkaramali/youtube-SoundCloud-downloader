@@ -1,15 +1,8 @@
-# ================================================================
-# نام ورک‌فلو (نمایش در GitHub Actions)
-# ================================================================
 name: 🎬🎵 Costume Downloader + Mega.nz (Smart Optimization)
 
-# ================================================================
-# رویداد اجرا (فقط با فعال‌سازی دستی توسط کاربر)
-# ================================================================
 on:
   workflow_dispatch:
     inputs:
-      # ---------- ورودی پلتفرم ----------
       platform:
         description: '🌐 پلتفرم'
         required: true
@@ -18,13 +11,9 @@ on:
         options:
           - youtube
           - soundcloud
-
-      # ---------- ورودی لینک ----------
       url:
         description: '🔗 لینک دانلود'
         required: true
-
-      # ---------- ورودی نوع دانلود ----------
       type:
         description: 'نوع دانلود'
         required: true
@@ -33,33 +22,25 @@ on:
         options:
           - audio
           - video
-
-      # ---------- منوی بهینه‌سازی با توضیحات کامل برای کاربر ----------
       optimization_profile:
         description: '⚙️ کیفیت نهایی ویدیو (انتخاب کنید)'
         required: false
         default: 'balanced'
         type: choice
         options:
-          - 'balanced'    # ⭐ کیفیت عالی، حجم نصف (پیشفرض) - مناسب برای اکثر کاربران
-          - 'quality'     # 🎬 کیفیت فوق‌العاده، حجم کمی کمتر - مناسب برای نمایش روی تلویزیون
-          - 'size'        # 📱 کیفیت خوب، حجم خیلی کم - مناسب برای موبایل و ذخیره‌سازی
-          - 'ultra'       # 💾 کیفیت قابل‌قبول، حجم فوق‌العاده کم - مناسب برای ارسال و اشتراک‌گذاری
-          - 'original'    # 🔵 بدون تغییر - همان کیفیت اصلی
-
-      # ---------- پوشه موقت در رانر ----------
+          - 'balanced'    # ⭐ کیفیت عالی، حجم نصف (پیشفرض)
+          - 'quality'     # 🎬 کیفیت فوق‌العاده، حجم کمی کمتر
+          - 'size'        # 📱 کیفیت خوب، حجم خیلی کم
+          - 'ultra'       # 💾 کیفیت قابل‌قبول، حجم فوق‌العاده کم
+          - 'original'    # 🔵 بدون تغییر
       folder:
         description: '📁 پوشه موقت'
         required: false
         default: 'downloads'
-
-      # ---------- پوشه مقصد در Mega.nz ----------
       mega_folder:
         description: '📂 پوشه در Mega.nz'
         required: false
         default: 'YoutubeDownloads'
-
-      # ---------- انتخاب تقسیم فایل به ZIP چندبخشی ----------
       split_choice:
         description: 'تقسیم فایل به چند قسمت (ZIP volume)؟'
         required: true
@@ -68,45 +49,31 @@ on:
         options:
           - single
           - split
-
-      # ---------- اندازه هر قسمت ZIP ----------
       split_size:
         description: 'اندازه هر قسمت (مثال: 100M, 500M, 1G)'
         required: false
         default: '100M'
 
-# ================================================================
-# تعریف job (وظیفه)
-# ================================================================
 jobs:
   download:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # اجازه commit و push به مخزن (در صورت نیاز)
+      contents: write
 
     steps:
-      # ============================================================
-      # مرحله 1: دریافت کد مخزن
-      # ============================================================
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      # ============================================================
-      # مرحله 2: رمزگشایی کوکی (انتخاب تصادفی از چند فایل)
-      # ============================================================
       - name: 🔐 Decrypt Random Cookie
         run: |
-          # جستجوی تمام فایل‌های cookies*.txt.gpg در پوشه config
           COOKIE_FILES=(config/cookies*.txt.gpg)
           if [ ${#COOKIE_FILES[@]} -eq 0 ]; then
             echo "❌ هیچ فایل cookies*.txt.gpg یافت نشد!"
             exit 1
           fi
-          # انتخاب تصادفی یک فایل
           RANDOM_INDEX=$((RANDOM % ${#COOKIE_FILES[@]}))
           SELECTED_FILE="${COOKIE_FILES[$RANDOM_INDEX]}"
           echo "🎲 فایل انتخاب شده: $SELECTED_FILE"
-          # رمزگشایی با GPG و ذخیره به عنوان cookies.txt
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
               --decrypt "$SELECTED_FILE" > cookies.txt || {
             echo "❌ GPG Decrypt Failed!"
@@ -114,60 +81,41 @@ jobs:
           }
           echo "✅ کوکی با موفقیت decrypt شد"
 
-      # ============================================================
-      # مرحله 3: دریافت آخرین نسخه‌ی ffmpeg از مخزن (برای تعیین کلید کش)
-      # ============================================================
       - name: 🔍 Get latest ffmpeg version
         id: get-ffmpeg-version
         run: |
           sudo apt-get update
-          # دریافت نسخه‌ی ffmpeg از مخزن (بدون نصب)
           VERSION=$(apt-cache show ffmpeg | grep Version | head -1 | awk '{print $2}')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "✅ آخرین نسخه‌ی موجود در مخزن: $VERSION"
+          echo "✅ آخرین نسخه‌ی موجود: $VERSION"
 
-      # ============================================================
-      # مرحله 4: کش کردن ffmpeg بر اساس نسخه (کش هوشمند)
-      # ============================================================
-      - name: 💾 Cache ffmpeg binary (version: ${{ env.VERSION }})
+      - name: 💾 Cache ffmpeg binary (smart cache)
         id: cache-ffmpeg
         uses: actions/cache@v4
         with:
           path: /usr/bin/ffmpeg
           key: ${{ runner.os }}-ffmpeg-${{ env.VERSION }}
 
-      # ============================================================
-      # مرحله 5: نصب ffmpeg (در صورت عدم وجود کش برای این نسخه)
-      # ============================================================
-      - name: 📦 Install ffmpeg version ${{ env.VERSION }} (if not cached)
+      - name: 📦 Install ffmpeg version (if not cached)
         if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           ffmpeg -version
-          echo "✅ ffmpeg version ${{ env.VERSION }} نصب و کش شد."
+          echo "✅ ffmpeg نصب و کش شد."
 
-      # ============================================================
-      # مرحله 6: نصب yt-dlp (بدون نصب مجدد ffmpeg)
-      # ============================================================
       - name: ⚙️ Setup yt-dlp (without ffmpeg)
         uses: AnimMouse/setup-yt-dlp@v3
         with:
-          aria2: false          # غیرفعال کردن aria2 برای سادگی
-          ffmpeg: false         # مهم: از ffmpeg نصب‌شده در مرحله قبل استفاده می‌کند
-          nightly: true         # استفاده از نسخه nightly برای پشتیبانی بهتر
+          aria2: false
+          ffmpeg: false
+          nightly: true
 
-      # ============================================================
-      # مرحله 7: نصب افزونه PO Token (برای دور زدن محدودیت‌های یوتیوب)
-      # ============================================================
       - name: 📦 Install PO Token Plugin
         run: |
           python3 -m pip install --upgrade bgutil-ytdlp-pot-provider
           echo "✅ PO Token Plugin installed"
 
-      # ============================================================
-      # مرحله 8: کش کردن rclone (برای آپلود به مگا)
-      # ============================================================
       - name: 💾 Cache rclone binary
         id: cache-rclone
         uses: actions/cache@v4
@@ -175,9 +123,6 @@ jobs:
           path: ~/bin/rclone
           key: ${{ runner.os }}-rclone-v1.74.1
 
-      # ============================================================
-      # مرحله 9: نصب rclone (در صورت عدم وجود کش)
-      # ============================================================
       - name: 📦 Install latest rclone (if not cached)
         if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
@@ -187,9 +132,6 @@ jobs:
           chmod +x ~/bin/rclone
           ~/bin/rclone version
 
-      # ============================================================
-      # مرحله 10: رمزگشایی تنظیمات rclone (برای اتصال به Mega.nz)
-      # ============================================================
       - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
@@ -202,18 +144,13 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
 
-      # ============================================================
-      # مرحله 11: دانلود فایل (بدون انتخاب کیفیت - همیشه بهترین)
-      # ============================================================
       - name: ▶️ دانلود فایل
         id: download
         run: |
-          # پاکسازی پوشه قبلی
           rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
 
-          # گزینه‌های مشترک برای yt-dlp (تضمین‌شده و بدون خطا)
           COMMON_OPTS="--cookies ../cookies.txt \
             --no-check-formats \
             --extractor-args youtube:player_client=web,android,ios \
@@ -228,19 +165,14 @@ jobs:
             --no-playlist \
             --compat-options no-external-downloader-progress"
 
-          # ========== یوتیوب ==========
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              # بهترین فرمت کامل موجود (بدون خطا)
               yt-dlp $COMMON_OPTS -f "best" \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              # دانلود صوتی و تبدیل به MP3
               yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
-
-          # ========== ساندکلاد ==========
           else
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
               yt-dlp $COMMON_OPTS -f "best" \
@@ -251,7 +183,6 @@ jobs:
             fi
           fi
 
-          # ذخیره نام فایل دانلودشده
           DOWNLOADED_FILE=$(ls -1 | head -1)
           if [ -z "$DOWNLOADED_FILE" ]; then
             echo "❌ هیچ فایلی دانلود نشد!"
@@ -261,11 +192,7 @@ jobs:
           echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
           echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
 
-      # ============================================================
-      # مرحله 12: پردازش ویدیو با پروفایل بهینه‌سازی (فقط برای ویدیو)
-      # ============================================================
       - name: 🗜️ پردازش ویدیو (بهینه‌سازی هوشمند)
-        # فقط در صورتی اجرا شود که نوع ویدیو باشد و پروفایل برابر با 'original' نباشد
         if: github.event.inputs.type == 'video' && github.event.inputs.optimization_profile != 'original'
         run: |
           cd "${{ github.event.inputs.folder }}"
@@ -273,7 +200,6 @@ jobs:
           BASENAME="${INPUT_FILE%.*}"
           OUTPUT_FILE="${BASENAME}_optimized.mp4"
 
-          # ----- تعیین پروفایل بهینه‌سازی بر اساس انتخاب کاربر -----
           PROFILE="${{ github.event.inputs.optimization_profile }}"
 
           case "$PROFILE" in
@@ -311,25 +237,21 @@ jobs:
               ;;
           esac
 
-          # ----- ساخت دستور ffmpeg به صورت پویا با مخفی کردن هشدارها -----
-          # استفاده از -loglevel error برای نمایش فقط خطاها (مخفی کردن هشدار Late SEI)
-          FFMPEG_CMD="ffmpeg -loglevel error -stats -i \"$INPUT_FILE\""
+          FFMPEG_CMD="ffmpeg -i \"$INPUT_FILE\""
           FFMPEG_CMD="$FFMPEG_CMD -vf \"scale=$RESOLUTION:flags=lanczos\""
           FFMPEG_CMD="$FFMPEG_CMD -c:v $CODEC -crf $CRF -preset $PRESET"
           FFMPEG_CMD="$FFMPEG_CMD -c:a aac -b:a $AUDIO_BITRATE"
-          FFMPEG_CMD="$FFMPEG_CMD -movflags +faststart \"$OUTPUT_FILE\""
+          FFMPEG_CMD="$FFMPEG_CMD -movflags +faststart -stats -loglevel error \"$OUTPUT_FILE\""
 
-          # ----- نمایش اطلاعات و اجرا -----
           echo "📐 شروع بهینه‌سازی با پروفایل: $LABEL"
           echo "   رزولوشن: $RESOLUTION"
           echo "   کدک: $CODEC | CRF: $CRF | پریست: $PRESET"
           echo "   کیفیت صدا: $AUDIO_BITRATE"
           echo ""
-          echo "🔄 در حال اجرای ffmpeg (هشدارها مخفی شده‌اند)..."
+          echo "🔄 در حال اجرای ffmpeg..."
 
           eval $FFMPEG_CMD
 
-          # ----- بررسی نتیجه -----
           if [ -f "$OUTPUT_FILE" ]; then
             ORIGINAL_SIZE=$(stat -c%s "$INPUT_FILE")
             COMPRESSED_SIZE=$(stat -c%s "$OUTPUT_FILE")
@@ -340,7 +262,6 @@ jobs:
             echo "   حجم نهایی: $(numfmt --to=iec $COMPRESSED_SIZE)"
             echo "   کاهش حجم: ~${REDUCTION}٪"
 
-            # اگر کاهش حجم منفی بود (افزایش حجم)، به کاربر هشدار بده
             if [ $REDUCTION -lt 0 ]; then
               echo "⚠️ توجه: حجم فایل افزایش یافته است."
               echo "💡 پیشنهاد: از پروفایل 'size' یا 'ultra' استفاده کنید."
@@ -353,9 +274,6 @@ jobs:
             echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
           fi
 
-      # ============================================================
-      # مرحله 13: تقسیم فایل به ZIP چندبخشی (در صورت درخواست کاربر)
-      # ============================================================
       - name: ✂️ Split into zip volumes (if requested)
         if: github.event.inputs.split_choice == 'split'
         run: |
@@ -369,9 +287,6 @@ jobs:
           echo "✅ فایل‌های ZIP چندبخشی با موفقیت ساخته شدند:"
           ls -la
 
-      # ============================================================
-      # مرحله 14: آپلود به Mega.nz با استفاده از rclone
-      # ============================================================
       - name: ☁️ آپلود به Mega.nz
         run: |
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
