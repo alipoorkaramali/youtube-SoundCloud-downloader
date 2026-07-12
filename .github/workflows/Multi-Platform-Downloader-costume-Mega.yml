@@ -1,7 +1,7 @@
 # ================================================================
 # نام ورک‌فلو (نمایش در GitHub Actions)
 # ================================================================
-name: 🎬🎵 Costume Downloader + Mega.nz (with Resolution & Compression)
+name: 🎬🎵 Costume Downloader + Mega.nz (Smart Optimization)
 
 # ================================================================
 # رویداد اجرا (فقط با فعال‌سازی دستی)
@@ -34,30 +34,18 @@ on:
           - audio
           - video
 
-      # ---------- منوی رزولوشن (ابعاد تصویر) ----------
-      resolution:
-        description: '📐 رزولوشن (ابعاد تصویر)'
+      # ---------- منوی بهینه‌سازی (جایگزین دو منوی قبلی) ----------
+      optimization_profile:
+        description: '⚙️ پروفایل بهینه‌سازی (تعادل کیفیت و حجم)'
         required: false
-        default: 'original'
+        default: 'balanced'
         type: choice
         options:
-          - 'original'   # بدون تغییر
-          - '1080p'      # 1920x1080
-          - '720p'       # 1280x720
-          - '480p'       # 854x480
-          - '360p'       # 640x360
-
-      # ---------- منوی فشرده‌سازی (کاهش حجم) ----------
-      compression:
-        description: '🗜️ سطح فشرده‌سازی (کاهش حجم)'
-        required: false
-        default: 'medium'
-        type: choice
-        options:
-          - 'none'       # بدون فشرده‌سازی (فقط تغییر رزولوشن)
-          - 'light'      # فشرده‌سازی کم (کیفیت بالا)
-          - 'medium'     # فشرده‌سازی متوسط (تعادل کیفیت و حجم)
-          - 'high'       # فشرده‌سازی زیاد (حجم بسیار کم)
+          - 'balanced'    # بهترین تعادل - 720p + H.265 - کاهش ~۵۰٪
+          - 'quality'     # کیفیت بالا - 1080p + H.265 - کاهش ~۳۵٪
+          - 'size'        # حجم کم - 480p + H.265 - کاهش ~۶۵٪
+          - 'ultra'       # فوق‌العاده کم - 360p + H.265 - کاهش ~۷۵٪
+          - 'original'    # بدون تغییر - همان فایل اصلی
 
       # ---------- پوشه موقت در رانر ----------
       folder:
@@ -262,82 +250,70 @@ jobs:
           echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
 
       # ============================================================
-      # مرحله 11: پردازش ویدیو (تغییر رزولوشن + فشرده‌سازی)
+      # مرحله 11: پردازش ویدیو با پروفایل بهینه‌سازی (جایگزین دو منوی قبلی)
       # ============================================================
-      - name: 🗜️ پردازش ویدیو (تغییر رزولوشن و فشرده‌سازی)
-        # فقط در صورتی اجرا شود که نوع دانلود ویدیو باشد و حداقل یکی از دو گزینه تغییر کند
-        if: github.event.inputs.type == 'video' && (github.event.inputs.resolution != 'original' || github.event.inputs.compression != 'none')
+      - name: 🗜️ پردازش ویدیو (بهینه‌سازی هوشمند)
+        # فقط در صورتی اجرا شود که پروفایل برابر با 'original' نباشد
+        if: github.event.inputs.type == 'video' && github.event.inputs.optimization_profile != 'original'
         run: |
           cd "${{ github.event.inputs.folder }}"
           INPUT_FILE="${{ env.DOWNLOADED_FILE }}"
           BASENAME="${INPUT_FILE%.*}"
-          OUTPUT_FILE="${BASENAME}_processed.mp4"
+          OUTPUT_FILE="${BASENAME}_optimized.mp4"
 
-          # ----- تعیین رزولوشن بر اساس انتخاب کاربر -----
-          RESOLUTION_INPUT="${{ github.event.inputs.resolution }}"
-          case "$RESOLUTION_INPUT" in
-            "original") RESOLUTION="" ;;
-            "1080p")    RESOLUTION="1920:1080" ;;
-            "720p")     RESOLUTION="1280:720" ;;
-            "480p")     RESOLUTION="854:480" ;;
-            "360p")     RESOLUTION="640:360" ;;
-          esac
+          # ----- تعیین پروفایل بهینه‌سازی -----
+          PROFILE="${{ github.event.inputs.optimization_profile }}"
 
-          # ----- تعیین سطح فشرده‌سازی بر اساس انتخاب کاربر -----
-          COMPRESSION="${{ github.event.inputs.compression }}"
-          case "$COMPRESSION" in
-            "none")
-              CODEC="libx264"
-              CRF="18"
-              PRESET="medium"
-              AUDIO_BITRATE="128k"
-              ;;
-            "light")
-              CODEC="libx264"
-              CRF="23"
-              PRESET="medium"
-              AUDIO_BITRATE="128k"
-              ;;
-            "medium")
-              CODEC="libx264"
+          case "$PROFILE" in
+            "balanced")
+              RESOLUTION="1280:720"
+              CODEC="libx265"
               CRF="28"
-              PRESET="fast"
+              PRESET="medium"
               AUDIO_BITRATE="128k"
+              LABEL="بهترین تعادل (کاهش ~۵۰٪)"
               ;;
-            "high")
+            "quality")
+              RESOLUTION="1920:1080"
+              CODEC="libx265"
+              CRF="26"
+              PRESET="medium"
+              AUDIO_BITRATE="160k"
+              LABEL="کیفیت بالا (کاهش ~۳۵٪)"
+              ;;
+            "size")
+              RESOLUTION="854:480"
               CODEC="libx265"
               CRF="32"
-              PRESET="veryfast"
+              PRESET="fast"
               AUDIO_BITRATE="96k"
+              LABEL="حجم کم (کاهش ~۶۵٪)"
+              ;;
+            "ultra")
+              RESOLUTION="640:360"
+              CODEC="libx265"
+              CRF="35"
+              PRESET="veryfast"
+              AUDIO_BITRATE="64k"
+              LABEL="فوق‌العاده کم (کاهش ~۷۵٪)"
               ;;
           esac
 
           # ----- ساخت دستور ffmpeg به صورت پویا -----
           FFMPEG_CMD="ffmpeg -i \"$INPUT_FILE\""
-
-          # اضافه کردن فیلتر scale (اگر رزولوشن != original)
-          if [ -n "$RESOLUTION" ]; then
-            FFMPEG_CMD="$FFMPEG_CMD -vf \"scale=$RESOLUTION:flags=lanczos\""
-          fi
-
-          # اضافه کردن تنظیمات ویدیو
+          FFMPEG_CMD="$FFMPEG_CMD -vf \"scale=$RESOLUTION:flags=lanczos\""
           FFMPEG_CMD="$FFMPEG_CMD -c:v $CODEC -crf $CRF -preset $PRESET"
-
-          # اضافه کردن تنظیمات صدا
           FFMPEG_CMD="$FFMPEG_CMD -c:a aac -b:a $AUDIO_BITRATE"
-
-          # اضافه کردن بهینه‌سازی برای پخش آنلاین و خروجی
           FFMPEG_CMD="$FFMPEG_CMD -movflags +faststart \"$OUTPUT_FILE\""
 
           # ----- نمایش اطلاعات و اجرا -----
-          echo "📐 شروع پردازش ویدیو:"
-          echo "   رزولوشن: ${RESOLUTION:-بدون تغییر}"
-          echo "   فشرده‌سازی: $COMPRESSION (کدک: $CODEC, CRF: $CRF)"
+          echo "📐 شروع بهینه‌سازی با پروفایل: $LABEL"
+          echo "   رزولوشن: $RESOLUTION"
+          echo "   کدک: $CODEC | CRF: $CRF | پریست: $PRESET"
           echo "   کیفیت صدا: $AUDIO_BITRATE"
           echo ""
           echo "🔄 در حال اجرای ffmpeg..."
 
-          # اجرای دستور ساخته‌شده
           eval $FFMPEG_CMD
 
           # ----- بررسی نتیجه -----
@@ -346,14 +322,21 @@ jobs:
             COMPRESSED_SIZE=$(stat -c%s "$OUTPUT_FILE")
             REDUCTION=$((100 - (COMPRESSED_SIZE * 100 / ORIGINAL_SIZE)))
             echo ""
-            echo "✅ پردازش با موفقیت انجام شد!"
+            echo "✅ بهینه‌سازی با موفقیت انجام شد!"
             echo "   حجم اصلی: $(numfmt --to=iec $ORIGINAL_SIZE)"
             echo "   حجم نهایی: $(numfmt --to=iec $COMPRESSED_SIZE)"
             echo "   کاهش حجم: ~${REDUCTION}٪"
+
+            # اگر کاهش حجم منفی بود (افزایش حجم)، به کاربر هشدار بده
+            if [ $REDUCTION -lt 0 ]; then
+              echo "⚠️ توجه: حجم فایل افزایش یافته است."
+              echo "💡 پیشنهاد: از پروفایل 'size' یا 'ultra' استفاده کنید."
+            fi
+
             rm "$INPUT_FILE"
             echo "DOWNLOADED_FILE=$OUTPUT_FILE" >> $GITHUB_ENV
           else
-            echo "⚠️ خطا در پردازش. فایل اصلی حفظ می‌شود."
+            echo "⚠️ خطا در بهینه‌سازی. فایل اصلی حفظ می‌شود."
             echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
           fi
 
