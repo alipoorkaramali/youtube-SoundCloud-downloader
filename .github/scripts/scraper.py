@@ -543,11 +543,6 @@ class TelegramChannelScraper:
 
                 # ─── تعیین ترتیب پیمایش بر اساس جهت ──────────────────────
                 if self.start_link:
-                    # در start_link:
-                    # down = از پیام هدف به سمت جدیدتر (پایین صفحه)
-                    # up  = از پیام هدف به سمت قدیمی‌تر (بالای صفحه)
-                # ─── تعیین ترتیب پیمایش بر اساس جهت ──────────────────────
-                if self.start_link:
                     if self.scroll_direction == 'down':
                         msg_iter = messages           # از بالا به پایین = جدیدتر
                     else:
