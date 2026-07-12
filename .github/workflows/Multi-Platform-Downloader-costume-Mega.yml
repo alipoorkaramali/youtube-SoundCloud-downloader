@@ -4,7 +4,7 @@
 name: 🎬🎵 Costume Downloader + Mega.nz (Smart Optimization)
 
 # ================================================================
-# رویداد اجرا (فقط با فعال‌سازی دستی)
+# رویداد اجرا (فقط با فعال‌سازی دستی توسط کاربر)
 # ================================================================
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ on:
           - audio
           - video
 
-      # ---------- منوی بهینه‌سازی با توضیحات کامل ----------
+      # ---------- منوی بهینه‌سازی با توضیحات کامل برای کاربر ----------
       optimization_profile:
         description: '⚙️ کیفیت نهایی ویدیو (انتخاب کنید)'
         required: false
@@ -115,7 +115,7 @@ jobs:
           echo "✅ کوکی با موفقیت decrypt شد"
 
       # ============================================================
-      # مرحله 3: دریافت نسخه‌ی ffmpeg از مخزن (برای تعیین کلید کش)
+      # مرحله 3: دریافت آخرین نسخه‌ی ffmpeg از مخزن (برای تعیین کلید کش)
       # ============================================================
       - name: 🔍 Get latest ffmpeg version
         id: get-ffmpeg-version
@@ -124,10 +124,10 @@ jobs:
           # دریافت نسخه‌ی ffmpeg از مخزن (بدون نصب)
           VERSION=$(apt-cache show ffmpeg | grep Version | head -1 | awk '{print $2}')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "✅ آخرین نسخه‌ی موجود: $VERSION"
+          echo "✅ آخرین نسخه‌ی موجود در مخزن: $VERSION"
 
       # ============================================================
-      # مرحله 4: کش کردن ffmpeg بر اساس نسخه
+      # مرحله 4: کش کردن ffmpeg بر اساس نسخه (کش هوشمند)
       # ============================================================
       - name: 💾 Cache ffmpeg binary (version: ${{ env.VERSION }})
         id: cache-ffmpeg
@@ -154,7 +154,7 @@ jobs:
         uses: AnimMouse/setup-yt-dlp@v3
         with:
           aria2: false          # غیرفعال کردن aria2 برای سادگی
-          ffmpeg: false         # مهم: غیرفعال کردن نصب خودکار ffmpeg
+          ffmpeg: false         # مهم: از ffmpeg نصب‌شده در مرحله قبل استفاده می‌کند
           nightly: true         # استفاده از نسخه nightly برای پشتیبانی بهتر
 
       # ============================================================
@@ -262,10 +262,10 @@ jobs:
           echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
 
       # ============================================================
-      # مرحله 12: پردازش ویدیو با پروفایل بهینه‌سازی (با مخفی کردن هشدارها)
+      # مرحله 12: پردازش ویدیو با پروفایل بهینه‌سازی (فقط برای ویدیو)
       # ============================================================
       - name: 🗜️ پردازش ویدیو (بهینه‌سازی هوشمند)
-        # فقط در صورتی اجرا شود که پروفایل برابر با 'original' نباشد
+        # فقط در صورتی اجرا شود که نوع ویدیو باشد و پروفایل برابر با 'original' نباشد
         if: github.event.inputs.type == 'video' && github.event.inputs.optimization_profile != 'original'
         run: |
           cd "${{ github.event.inputs.folder }}"
@@ -273,7 +273,7 @@ jobs:
           BASENAME="${INPUT_FILE%.*}"
           OUTPUT_FILE="${BASENAME}_optimized.mp4"
 
-          # ----- تعیین پروفایل بهینه‌سازی -----
+          # ----- تعیین پروفایل بهینه‌سازی بر اساس انتخاب کاربر -----
           PROFILE="${{ github.event.inputs.optimization_profile }}"
 
           case "$PROFILE" in
@@ -311,7 +311,8 @@ jobs:
               ;;
           esac
 
-          # ----- ساخت دستور ffmpeg با loglevel error برای مخفی کردن هشدارها -----
+          # ----- ساخت دستور ffmpeg به صورت پویا با مخفی کردن هشدارها -----
+          # استفاده از -loglevel error برای نمایش فقط خطاها (مخفی کردن هشدار Late SEI)
           FFMPEG_CMD="ffmpeg -loglevel error -stats -i \"$INPUT_FILE\""
           FFMPEG_CMD="$FFMPEG_CMD -vf \"scale=$RESOLUTION:flags=lanczos\""
           FFMPEG_CMD="$FFMPEG_CMD -c:v $CODEC -crf $CRF -preset $PRESET"
@@ -324,7 +325,7 @@ jobs:
           echo "   کدک: $CODEC | CRF: $CRF | پریست: $PRESET"
           echo "   کیفیت صدا: $AUDIO_BITRATE"
           echo ""
-          echo "🔄 در حال اجرای ffmpeg..."
+          echo "🔄 در حال اجرای ffmpeg (هشدارها مخفی شده‌اند)..."
 
           eval $FFMPEG_CMD
 
@@ -353,7 +354,7 @@ jobs:
           fi
 
       # ============================================================
-      # مرحله 13: تقسیم فایل به ZIP چندبخشی (در صورت درخواست)
+      # مرحله 13: تقسیم فایل به ZIP چندبخشی (در صورت درخواست کاربر)
       # ============================================================
       - name: ✂️ Split into zip volumes (if requested)
         if: github.event.inputs.split_choice == 'split'
@@ -362,10 +363,10 @@ jobs:
           FILE="${{ env.DOWNLOADED_FILE }}"
           SIZE="${{ github.event.inputs.split_size }}"
           sudo apt-get update && sudo apt-get install -y zip
-          echo "Creating zip volumes of $SIZE from $FILE"
+          echo "📦 ایجاد فایل‌های ZIP با حجم هر قسمت: $SIZE"
           zip -s "$SIZE" "${FILE}.zip" "$FILE"
           rm "$FILE"
-          echo "✅ Zip volumes created:"
+          echo "✅ فایل‌های ZIP چندبخشی با موفقیت ساخته شدند:"
           ls -la
 
       # ============================================================
