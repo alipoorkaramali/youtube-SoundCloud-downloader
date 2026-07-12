@@ -25,16 +25,13 @@ on:
       quality:
         description: '🎬 کیفیت ویدیو (فقط برای حالت ویدیو)'
         required: false
-        default: 'best'
+        default: 'high'
         type: choice
         options:
-          - '144p'
-          - '240p'
-          - '360p'
-          - '480p'
-          - '720p'
-          - '1080p'
-          - 'best'
+          - 'low'      # حداکثر 480p
+          - 'medium'   # حداکثر 720p
+          - 'high'     # حداکثر 1080p
+          - 'best'     # بهترین کیفیت ممکن
       folder:
         description: '📁 پوشه موقت'
         required: false
@@ -145,29 +142,48 @@ jobs:
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
               QUALITY="${{ github.event.inputs.quality }}"
-              if [ "$QUALITY" = "best" ]; then
+              case "$QUALITY" in
+                "low")
+                  HEIGHT=480
+                  ;;
+                "medium")
+                  HEIGHT=720
+                  ;;
+                "high")
+                  HEIGHT=1080
+                  ;;
+                "best")
+                  HEIGHT=0
+                  ;;
+              esac
+              if [ "$HEIGHT" -eq 0 ]; then
                 yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
                   "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
               else
-                HEIGHT="${QUALITY%p}"
-                yt-dlp $COMMON_OPTS -S "res:${HEIGHT},codec:av1:h264" \
-                  -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                yt-dlp $COMMON_OPTS -f "bestvideo[height<=${HEIGHT}]+bestaudio/best" --merge-output-format mp4 \
+                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
+                yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
                   "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
               fi
             else
               # حالت صوتی یوتیوب
-              yt-dlp $COMMON_OPTS -S "ext:m4a" -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
+              yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
 
           # ============= ساندکلاد =============
           else
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp $COMMON_OPTS -S "res:1080,codec:av1:h264" \
-                -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+              yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
+              yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp $COMMON_OPTS -S "ext:m4a" -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
+              yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           fi
