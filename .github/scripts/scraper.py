@@ -322,14 +322,7 @@ class TelegramChannelScraper:
                 limit=self.limit - len(items)
             )
 
-            if not new_items:
-                retry_count += 1
-                if retry_count > max_retries:
-                    self.logger.warning("⚠️ پس از چندین تلاش، پست جدیدی پیدا نشد.")
-                    break
-                continue
-
-            # اضافه کردن پست‌های جدید
+            # فیلتر کردن پست‌های جدید (حذف تکراری‌ها)
             newly_added = []
             for item in new_items:
                 if item['id'] not in {i['id'] for i in items}:
@@ -338,41 +331,38 @@ class TelegramChannelScraper:
 
             self.logger.info(f"📥 {len(newly_added)} پست جدید جمع‌آوری شد (مجموع: {len(items)}/{self.limit})")
 
+            # اگر هیچ پست جدیدی اضافه نشد، یعنی کار تمام است
+            if not newly_added:
+                self.logger.info("✅ پست جدیدی یافت نشد. احتمالاً به انتهای کانال رسیده‌ایم. اسکریپت متوقف می‌شود.")
+                break
+
             # 🔥 دانلود فوری رسانه‌های پست‌های جدید
-            if newly_added:
-                self.logger.info(f"⬇️ شروع دانلود رسانه برای {len(newly_added)} پست جدید...")
-                try:
-                    batch_media_map, downloaded_batch = await self._download_media(
-                        newly_added, page, context
-                    )
-                    media_map.update(batch_media_map)
-                    self.logger.info(f"✅ {downloaded_batch} فایل رسانه در این دور دانلود شد.")
-                    
-                    # تأخیر بین batchها برای جلوگیری از فشار روی سرور تلگرام
-                    await human_sleep(3.0, 1.0)  # بین ۲ تا ۴ ثانیه
-                    
-                except Exception as e:
-                    self.logger.error(f"❌ خطا در دانلود این batch: {e}")
+            self.logger.info(f"⬇️ شروع دانلود رسانه برای {len(newly_added)} پست جدید...")
+            try:
+                batch_media_map, downloaded_batch = await self._download_media(
+                    newly_added, page, context
+                )
+                media_map.update(batch_media_map)
+                self.logger.info(f"✅ {downloaded_batch} فایل رسانه در این دور دانلود شد.")
+                await human_sleep(3.0, 1.0)
+            except Exception as e:
+                self.logger.error(f"❌ خطا در دانلود این batch: {e}")
 
-            # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
-            if new_items:
-                last_item = new_items[-1]
-                last_id_str = str(last_item['id']).strip()
-                
-                try:
-                    if '.' in last_id_str:
-                        last_id = int(float(last_id_str))
-                    else:
-                        last_id = int(last_id_str)
-                except:
-                    last_id = last_id_str
-                
-                new_start_link = f"https://t.me/{self.channel}/{last_id}"
-                self.start_link = new_start_link
-                self.target_msg_id = str(last_id)
-                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")
+            # به‌روزرسانی start_link با آخرین پست جدید
+            last_item = newly_added[-1]
+            last_id_str = str(last_item['id']).strip()
+            try:
+                if '.' in last_id_str:
+                    last_id = int(float(last_id_str))
+                else:
+                    last_id = int(last_id_str)
+            except:
+                last_id = last_id_str
 
-            retry_count = 0  # ریست شمارنده
+            new_start_link = f"https://t.me/{self.channel}/{last_id}"
+            self.start_link = new_start_link
+            self.target_msg_id = str(last_id)
+            self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")   #ریست شمارنده
 
         # ─── بعد از اتمام تمام دورها ─────────────────────────────
         if not items:
