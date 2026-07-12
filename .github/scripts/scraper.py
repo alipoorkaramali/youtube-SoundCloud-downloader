@@ -294,21 +294,24 @@ class TelegramChannelScraper:
 
         while len(items) < self.limit and retry_count <= max_retries:
             if retry_count > 0:
+                # اگر هیچ پستی نداریم، retry فایده‌ای ندارد
+                if not items:
+                    self.logger.info("ℹ️ هیچ پستی موجود نیست. پایان.")
+                    break
                 # تلاش مجدد با حدس شناسه
-                if items:
-                    last_id_str = items[-1]['id']
-                    if last_id_str.isdigit():
-                        last_id = int(last_id_str)
-                        step = -1 if self.scroll_direction == 'up' else 1
-                        guess_id = last_id + step
-                        if guess_id <= 0:
-                            break
-                        self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
-                        self.start_link = f"https://t.me/{self.channel}/{guess_id}"
-                        self.target_msg_id = str(guess_id)
-                    else:
-                        self.logger.warning(f"⚠️ شناسه غیرعددی ({last_id_str})، از retry صرف‌نظر می‌شود.")
+                last_id_str = items[-1]['id']
+                if last_id_str.isdigit():
+                    last_id = int(last_id_str)
+                    step = -1 if self.scroll_direction == 'up' else 1
+                    guess_id = last_id + step
+                    if guess_id <= 0:
                         break
+                    self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
+                    self.start_link = f"https://t.me/{self.channel}/{guess_id}"
+                    self.target_msg_id = str(guess_id)
+                else:
+                    self.logger.warning(f"⚠️ شناسه غیرعددی ({last_id_str})، از retry صرف‌نظر می‌شود.")
+                    break
 
             # ─── اطمینان از مرورگر ──────────────────────
             context, page = await self._ensure_browser(context, page)
