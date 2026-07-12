@@ -354,23 +354,33 @@ class TelegramChannelScraper:
                 except Exception as e:
                     self.logger.error(f"❌ خطا در دانلود این batch: {e}")
 
-            # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
+            # ─── به‌روزرسانی start_link برای دور بعدی (اصلاح شده و قوی) ──────────────
             if new_items:
-                last_item = new_items[-1]
-                last_id_str = str(last_item['id']).strip()
-                
-                try:
-                    if '.' in last_id_str:
-                        last_id = int(float(last_id_str))
+                if self.scroll_direction == 'up':
+                    # جهت بالا → قدیمی‌تر: کوچک‌ترین ID
+                    valid_items = [item for item in new_items if str(item.get('id', '')).strip().replace('.', '').isdigit()]
+                    if valid_items:
+                        last_item = min(valid_items, key=lambda x: int(float(x['id'])))
                     else:
-                        last_id = int(last_id_str)
+                        last_item = new_items[0]
+                else:
+                    # جهت پایین → جدیدتر: بزرگ‌ترین ID
+                    valid_items = [item for item in new_items if str(item.get('id', '')).strip().replace('.', '').isdigit()]
+                    if valid_items:
+                        last_item = max(valid_items, key=lambda x: int(float(x['id'])))
+                    else:
+                        last_item = new_items[-1]
+
+                try:
+                    last_id = int(float(str(last_item['id']).strip()))
                 except:
-                    last_id = last_id_str
-                
+                    last_id = str(last_item['id']).strip()
+
                 new_start_link = f"https://t.me/{self.channel}/{last_id}"
                 self.start_link = new_start_link
                 self.target_msg_id = str(last_id)
-                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")
+                
+                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id}) [جهت: {self.scroll_direction}]")
 
             retry_count = 0  # ریست شمارنده
 
@@ -494,6 +504,8 @@ class TelegramChannelScraper:
         scroll_attempts = 0
 
         start_collecting = False
+        if self.start_link and self.target_msg_id:
+            seen_ids.add(self.target_msg_id)
         if self.start_link and self.target_msg_id:
             self.logger.info(f"🎯 پیدا کردن پیام هدف {self.target_msg_id}...")
             try:
@@ -655,6 +667,9 @@ class TelegramChannelScraper:
                 await human_sleep(1.5, 0.3)
 
         items = items[:effective_limit]
+        if items and self.scroll_direction == 'up':
+            # مرتب‌سازی بر اساس ID برای اطمینان از ترتیب درست
+            items.sort(key=lambda x: int(x['id']) if str(x['id']).isdigit() else 0)
         self.logger.info(f"📊 {len(items)} پست جمع‌آوری شد.")
 
         await self._save_screenshot(page, "final")
