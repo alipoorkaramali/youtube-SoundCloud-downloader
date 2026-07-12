@@ -1,5 +1,11 @@
-name: 🎬🎵 Costume Downloader + Mega.nz (Smart Optimization)
+# ================================================================
+# نام ورک‌فلو (نمایش در GitHub Actions)
+# ================================================================
+name: 🎬🎵 Costume Downloader + Mega.nz (Smart Optimization Pro)
 
+# ================================================================
+# رویداد اجرا (فقط با فعال‌سازی دستی توسط کاربر)
+# ================================================================
 on:
   workflow_dispatch:
     inputs:
@@ -28,11 +34,12 @@ on:
         default: 'balanced'
         type: choice
         options:
-          - 'balanced'    # ⭐ کیفیت عالی، حجم نصف (پیشفرض)
-          - 'quality'     # 🎬 کیفیت فوق‌العاده، حجم کمی کمتر
-          - 'size'        # 📱 کیفیت خوب، حجم خیلی کم
-          - 'ultra'       # 💾 کیفیت قابل‌قبول، حجم فوق‌العاده کم
-          - 'original'    # 🔵 بدون تغییر
+          - 'balanced'      # ⭐ تعادل عالی، حجم ≈۵۰٪ (پیشفرض، سریع)
+          - 'quality'       # 🎬 کیفیت بالا، حجم کمتر (زمان بیشتر)
+          - 'high_quality'  # 🔥 حداکثر کیفیت + حجم بهینه (زمان طولانی)
+          - 'size'          # 📱 کیفیت خوب، حجم خیلی کم (سریع)
+          - 'ultra'         # 💾 کیفیت قابل‌قبول، حجم فوق‌العاده کم (خیلی سریع)
+          - 'original'      # 🔵 بدون تغییر - همان کیفیت اصلی
       folder:
         description: '📁 پوشه موقت'
         required: false
@@ -54,16 +61,26 @@ on:
         required: false
         default: '100M'
 
+# ================================================================
+# تعریف job (وظیفه) با timeout
+# ================================================================
 jobs:
   download:
     runs-on: ubuntu-latest
+    timeout-minutes: 120   # جلوگیری از Kill شدن توسط GitHub
     permissions:
       contents: write
 
     steps:
+      # ============================================================
+      # مرحله 1: دریافت کد مخزن
+      # ============================================================
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
+      # ============================================================
+      # مرحله 2: رمزگشایی کوکی (انتخاب تصادفی از چند فایل)
+      # ============================================================
       - name: 🔐 Decrypt Random Cookie
         run: |
           COOKIE_FILES=(config/cookies*.txt.gpg)
@@ -81,14 +98,20 @@ jobs:
           }
           echo "✅ کوکی با موفقیت decrypt شد"
 
+      # ============================================================
+      # مرحله 3: دریافت آخرین نسخه‌ی ffmpeg از مخزن (برای تعیین کلید کش)
+      # ============================================================
       - name: 🔍 Get latest ffmpeg version
         id: get-ffmpeg-version
         run: |
           sudo apt-get update
           VERSION=$(apt-cache show ffmpeg | grep Version | head -1 | awk '{print $2}')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "✅ آخرین نسخه‌ی موجود: $VERSION"
+          echo "✅ آخرین نسخه‌ی موجود در مخزن: $VERSION"
 
+      # ============================================================
+      # مرحله 4: کش کردن ffmpeg بر اساس نسخه (کش هوشمند)
+      # ============================================================
       - name: 💾 Cache ffmpeg binary (smart cache)
         id: cache-ffmpeg
         uses: actions/cache@v4
@@ -96,14 +119,20 @@ jobs:
           path: /usr/bin/ffmpeg
           key: ${{ runner.os }}-ffmpeg-${{ env.VERSION }}
 
-      - name: 📦 Install ffmpeg version (if not cached)
+      # ============================================================
+      # مرحله 5: نصب ffmpeg (در صورت عدم وجود کش برای این نسخه)
+      # ============================================================
+      - name: 📦 Install ffmpeg (if not cached)
         if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           ffmpeg -version
-          echo "✅ ffmpeg نصب و کش شد."
+          echo "✅ ffmpeg version ${{ env.VERSION }} نصب و کش شد."
 
+      # ============================================================
+      # مرحله 6: نصب yt-dlp (بدون نصب مجدد ffmpeg)
+      # ============================================================
       - name: ⚙️ Setup yt-dlp (without ffmpeg)
         uses: AnimMouse/setup-yt-dlp@v3
         with:
@@ -111,11 +140,17 @@ jobs:
           ffmpeg: false
           nightly: true
 
+      # ============================================================
+      # مرحله 7: نصب افزونه PO Token
+      # ============================================================
       - name: 📦 Install PO Token Plugin
         run: |
           python3 -m pip install --upgrade bgutil-ytdlp-pot-provider
           echo "✅ PO Token Plugin installed"
 
+      # ============================================================
+      # مرحله 8: کش کردن rclone
+      # ============================================================
       - name: 💾 Cache rclone binary
         id: cache-rclone
         uses: actions/cache@v4
@@ -123,6 +158,9 @@ jobs:
           path: ~/bin/rclone
           key: ${{ runner.os }}-rclone-v1.74.1
 
+      # ============================================================
+      # مرحله 9: نصب rclone (در صورت عدم وجود کش)
+      # ============================================================
       - name: 📦 Install latest rclone (if not cached)
         if: steps.cache-rclone.outputs.cache-hit != 'true'
         run: |
@@ -132,6 +170,9 @@ jobs:
           chmod +x ~/bin/rclone
           ~/bin/rclone version
 
+      # ============================================================
+      # مرحله 10: رمزگشایی تنظیمات rclone
+      # ============================================================
       - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
@@ -144,6 +185,9 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
 
+      # ============================================================
+      # مرحله 11: دانلود فایل (با گزینه‌های بهبودیافته)
+      # ============================================================
       - name: ▶️ دانلود فایل
         id: download
         run: |
@@ -151,19 +195,21 @@ jobs:
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
 
+          # گزینه‌های بهبودیافته برای پایداری و سرعت بیشتر
           COMMON_OPTS="--cookies ../cookies.txt \
             --no-check-formats \
-            --extractor-args youtube:player_client=web,android,ios \
-            --extractor-args youtube:skip=webpage \
-            --extractor-retries 5 \
-            --retries 20 \
-            --fragment-retries 20 \
-            --sleep-interval 4 \
-            --sleep-subtitles 2 \
+            --extractor-args youtube:player_client=web,android,ios,web_embedded \
+            --extractor-args youtube:skip=webpage,age_gate \
+            --extractor-retries 10 \
+            --retries 30 \
+            --fragment-retries 30 \
+            --sleep-interval 5 \
+            --sleep-subtitles 3 \
             --no-warnings \
             --ignore-errors \
             --no-playlist \
-            --compat-options no-external-downloader-progress"
+            --compat-options no-external-downloader-progress \
+            --concurrent-fragments 4"
 
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
@@ -192,7 +238,10 @@ jobs:
           echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
           echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
 
-      - name: 🗜️ پردازش ویدیو (بهینه‌سازی هوشمند)
+      # ============================================================
+      # مرحله 12: پردازش هوشمند ویدیو (نسخه نهایی با بهبودها)
+      # ============================================================
+      - name: 🗜️ پردازش هوشمند ویدیو (بهینه‌سازی حرفه‌ای)
         if: github.event.inputs.type == 'video' && github.event.inputs.optimization_profile != 'original'
         run: |
           cd "${{ github.event.inputs.folder }}"
@@ -200,80 +249,154 @@ jobs:
           BASENAME="${INPUT_FILE%.*}"
           OUTPUT_FILE="${BASENAME}_optimized.mp4"
 
-          PROFILE="${{ github.event.inputs.optimization_profile }}"
+          echo "🔍 در حال بررسی مشخصات فایل ورودی..."
+          echo ""
 
+          # ---- ۱. بررسی کدک اصلی ----
+          CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE" 2>/dev/null || echo "unknown")
+          echo "🔍 کدک فایل اصلی: $CODEC"
+
+          if [ "$CODEC" = "hevc" ] || [ "$CODEC" = "h265" ]; then
+            echo ""
+            echo "ℹ️ فایل اصلی قبلاً با کدک H.265 (HEVC) فشرده شده است."
+            echo "✅ فشرده‌سازی مجدد باعث افزایش حجم و افت کیفیت می‌شود."
+            echo "💡 فایل اصلی بدون تغییر حفظ می‌شود."
+            echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # ---- ۲. تشخیص رزولوشن ورودی ----
+          INPUT_WIDTH=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE" 2>/dev/null || echo 0)
+          INPUT_HEIGHT=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE" 2>/dev/null || echo 0)
+
+          if [ "$INPUT_WIDTH" -eq 0 ] || [ "$INPUT_HEIGHT" -eq 0 ]; then
+            INPUT_WIDTH=1920
+            INPUT_HEIGHT=1080
+            echo "⚠️ تشخیص رزولوشن ممکن نبود. مقادیر پیش‌فرض 1920x1080 استفاده می‌شود."
+          else
+            echo "📐 رزولوشن ورودی: ${INPUT_WIDTH}x${INPUT_HEIGHT}"
+          fi
+
+          # ---- ۳. تعیین پروفایل ----
+          PROFILE="${{ github.event.inputs.optimization_profile }}"
           case "$PROFILE" in
             "balanced")
-              RESOLUTION="1280:720"
+              TARGET_RESOLUTION="1280:720"
               CODEC="libx265"
-              CRF="28"
+              CRF="27"
               PRESET="medium"
               AUDIO_BITRATE="128k"
-              LABEL="⭐ کیفیت عالی، حجم نصف (پیشفرض)"
+              PIX_FMT="yuv420p"
+              LABEL="⭐ تعادل عالی - حجم ≈۵۰٪ (پیشنهادی سریع)"
               ;;
             "quality")
-              RESOLUTION="1920:1080"
+              TARGET_RESOLUTION="1920:1080"
               CODEC="libx265"
-              CRF="26"
-              PRESET="medium"
+              CRF="24"
+              PRESET="slow"
               AUDIO_BITRATE="160k"
-              LABEL="🎬 کیفیت فوق‌العاده، حجم کمی کمتر"
+              PIX_FMT="yuv420p"
+              LABEL="🎬 کیفیت بالا - حجم کمتر (زمان بیشتر)"
+              ;;
+            "high_quality")
+              TARGET_RESOLUTION="1920:1080"
+              CODEC="libx265"
+              CRF="21"
+              PRESET="slow"
+              AUDIO_BITRATE="192k"
+              PIX_FMT="yuv420p10le"   # 10-bit برای کیفیت بالاتر
+              LABEL="🔥 حداکثر کیفیت + حجم بهینه (زمان طولانی)"
               ;;
             "size")
-              RESOLUTION="854:480"
+              TARGET_RESOLUTION="854:480"
               CODEC="libx265"
-              CRF="32"
+              CRF="30"
               PRESET="fast"
               AUDIO_BITRATE="96k"
-              LABEL="📱 کیفیت خوب، حجم خیلی کم"
+              PIX_FMT="yuv420p"
+              LABEL="📱 حجم خیلی کم - کیفیت خوب (سریع)"
               ;;
             "ultra")
-              RESOLUTION="640:360"
+              TARGET_RESOLUTION="640:360"
               CODEC="libx265"
-              CRF="35"
+              CRF="33"
               PRESET="veryfast"
               AUDIO_BITRATE="64k"
-              LABEL="💾 کیفیت قابل‌قبول، حجم فوق‌العاده کم"
+              PIX_FMT="yuv420p"
+              LABEL="💾 حجم بسیار کم - کیفیت قابل‌قبول (خیلی سریع)"
               ;;
           esac
 
+          # ---- ۴. تصمیم‌گیری برای فیلتر مقیاس ----
+          TARGET_W=$(echo $TARGET_RESOLUTION | cut -d: -f1)
+          TARGET_H=$(echo $TARGET_RESOLUTION | cut -d: -f2)
+
+          if [ "$INPUT_WIDTH" -le "$TARGET_W" ] && [ "$INPUT_HEIGHT" -le "$TARGET_H" ]; then
+            SCALE_FILTER="scale=iw:ih:flags=lanczos"
+            echo "ℹ️ رزولوشن ورودی کوچک‌تر از هدف است. بدون تغییر اندازه (upscale نمی‌شود)."
+          else
+            SCALE_FILTER="scale=$TARGET_RESOLUTION:flags=lanczos"
+            echo "📐 تغییر اندازه به: $TARGET_RESOLUTION"
+          fi
+
+          # ---- ۵. ساخت دستور ffmpeg ----
+          echo ""
+          echo "📐 شروع بهینه‌سازی با پروفایل: $LABEL"
+          echo "   کدک: $CODEC | CRF: $CRF | Preset: $PRESET"
+          echo "   کیفیت صدا: $AUDIO_BITRATE"
+          echo "   فرمت پیکسلی: $PIX_FMT"
+          echo "   فیلتر مقیاس: $SCALE_FILTER"
+          echo ""
+
+          START_TIME=$(date +%s)
+
           FFMPEG_CMD="ffmpeg -i \"$INPUT_FILE\""
-          FFMPEG_CMD="$FFMPEG_CMD -vf \"scale=$RESOLUTION:flags=lanczos\""
+          FFMPEG_CMD="$FFMPEG_CMD -vf \"$SCALE_FILTER\""
           FFMPEG_CMD="$FFMPEG_CMD -c:v $CODEC -crf $CRF -preset $PRESET"
+          FFMPEG_CMD="$FFMPEG_CMD -pix_fmt $PIX_FMT -tag:v hvc1"
           FFMPEG_CMD="$FFMPEG_CMD -c:a aac -b:a $AUDIO_BITRATE"
           FFMPEG_CMD="$FFMPEG_CMD -movflags +faststart -stats -loglevel error \"$OUTPUT_FILE\""
 
-          echo "📐 شروع بهینه‌سازی با پروفایل: $LABEL"
-          echo "   رزولوشن: $RESOLUTION"
-          echo "   کدک: $CODEC | CRF: $CRF | پریست: $PRESET"
-          echo "   کیفیت صدا: $AUDIO_BITRATE"
+          echo "🔄 در حال اجرای ffmpeg (ممکن است چند دقیقه طول بکشد)..."
           echo ""
-          echo "🔄 در حال اجرای ffmpeg..."
 
           eval $FFMPEG_CMD
 
+          # ---- ۶. بررسی نتیجه ----
           if [ -f "$OUTPUT_FILE" ]; then
             ORIGINAL_SIZE=$(stat -c%s "$INPUT_FILE")
             COMPRESSED_SIZE=$(stat -c%s "$OUTPUT_FILE")
             REDUCTION=$((100 - (COMPRESSED_SIZE * 100 / ORIGINAL_SIZE)))
+
+            END_TIME=$(date +%s)
+            DURATION=$((END_TIME - START_TIME))
+
             echo ""
             echo "✅ بهینه‌سازی با موفقیت انجام شد!"
+            echo "   زمان پردازش: $(($DURATION / 60)) دقیقه و $(($DURATION % 60)) ثانیه"
             echo "   حجم اصلی: $(numfmt --to=iec $ORIGINAL_SIZE)"
             echo "   حجم نهایی: $(numfmt --to=iec $COMPRESSED_SIZE)"
             echo "   کاهش حجم: ~${REDUCTION}٪"
 
             if [ $REDUCTION -lt 0 ]; then
-              echo "⚠️ توجه: حجم فایل افزایش یافته است."
-              echo "💡 پیشنهاد: از پروفایل 'size' یا 'ultra' استفاده کنید."
+              echo ""
+              echo "⚠️ توجه: حجم فایل افزایش یافته است (غیرمنتظره!)."
+              echo "💡 فایل اصلی حفظ می‌شود."
+              rm "$OUTPUT_FILE"
+              echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
+            else
+              rm "$INPUT_FILE"
+              echo "DOWNLOADED_FILE=$OUTPUT_FILE" >> $GITHUB_ENV
             fi
-
-            rm "$INPUT_FILE"
-            echo "DOWNLOADED_FILE=$OUTPUT_FILE" >> $GITHUB_ENV
           else
+            echo ""
             echo "⚠️ خطا در بهینه‌سازی. فایل اصلی حفظ می‌شود."
             echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
           fi
 
+      # ============================================================
+      # مرحله 13: تقسیم فایل به ZIP چندبخشی
+      # ============================================================
       - name: ✂️ Split into zip volumes (if requested)
         if: github.event.inputs.split_choice == 'split'
         run: |
@@ -287,7 +410,10 @@ jobs:
           echo "✅ فایل‌های ZIP چندبخشی با موفقیت ساخته شدند:"
           ls -la
 
-      - name: ☁️ آپلود به Mega.nz
+      # ============================================================
+      # مرحله 14: آپلود به Mega.nz و نمایش لینک مستقیم
+      # ============================================================
+      - name: ☁️ آپلود به Mega.nz + نمایش لینک
         run: |
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
           REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
@@ -311,3 +437,13 @@ jobs:
 
           echo "🔍 لیست نهایی فایل‌ها در مگا:"
           ~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH"
+
+          # نمایش لینک مستقیم دانلود برای فایل‌های آپلودشده
+          echo ""
+          echo "📎 لینک‌های دانلود مستقیم (برای هر فایل):"
+          # پیدا کردن فایل‌های آپلودشده در مگا و نمایش لینک
+          FILES=$(~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH" | awk '{print $2}')
+          for FILE in $FILES; do
+            LINK=$(~/bin/rclone --config "$CONFIG_FILE" link "$REMOTE_PATH/$FILE" 2>/dev/null || echo "ناموفق")
+            echo "  - $FILE : $LINK"
+          done
