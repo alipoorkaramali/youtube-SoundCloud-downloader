@@ -294,24 +294,21 @@ class TelegramChannelScraper:
 
         while len(items) < self.limit and retry_count <= max_retries:
             if retry_count > 0:
-                # اگر هیچ پستی نداریم، retry فایده‌ای ندارد
-                if not items:
-                    self.logger.info("ℹ️ هیچ پستی موجود نیست. پایان.")
-                    break
                 # تلاش مجدد با حدس شناسه
-                last_id_str = items[-1]['id']
-                if last_id_str.isdigit():
-                    last_id = int(last_id_str)
-                    step = -1 if self.scroll_direction == 'up' else 1
-                    guess_id = last_id + step
-                    if guess_id <= 0:
+                if items:
+                    last_id_str = items[-1]['id']
+                    if last_id_str.isdigit():
+                        last_id = int(last_id_str)
+                        step = -1 if self.scroll_direction == 'up' else 1
+                        guess_id = last_id + step
+                        if guess_id <= 0:
+                            break
+                        self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
+                        self.start_link = f"https://t.me/{self.channel}/{guess_id}"
+                        self.target_msg_id = str(guess_id)
+                    else:
+                        self.logger.warning(f"⚠️ شناسه غیرعددی ({last_id_str})، از retry صرف‌نظر می‌شود.")
                         break
-                    self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
-                    self.start_link = f"https://t.me/{self.channel}/{guess_id}"
-                    self.target_msg_id = str(guess_id)
-                else:
-                    self.logger.warning(f"⚠️ شناسه غیرعددی ({last_id_str})، از retry صرف‌نظر می‌شود.")
-                    break
 
             # ─── اطمینان از مرورگر ──────────────────────
             context, page = await self._ensure_browser(context, page)
@@ -339,11 +336,6 @@ class TelegramChannelScraper:
                     items.append(item)
                     newly_added.append(item)
 
-            # ─── اگر هیچ پست جدیدی اضافه نشد، از حلقه خارج شو ───
-            if not newly_added:
-                self.logger.info("ℹ️ تمام پست‌های دریافت‌شده تکراری هستند. پایان.")
-                break
-
             self.logger.info(f"📥 {len(newly_added)} پست جدید جمع‌آوری شد (مجموع: {len(items)}/{self.limit})")
 
             # 🔥 دانلود فوری رسانه‌های پست‌های جدید
@@ -362,33 +354,23 @@ class TelegramChannelScraper:
                 except Exception as e:
                     self.logger.error(f"❌ خطا در دانلود این batch: {e}")
 
-            # ─── به‌روزرسانی start_link برای دور بعدی (اصلاح شده و قوی) ──────────────
+            # ─── به‌روزرسانی start_link برای دور بعدی ──────────────
             if new_items:
-                if self.scroll_direction == 'up':
-                    # جهت بالا → قدیمی‌تر: کوچک‌ترین ID
-                    valid_items = [item for item in new_items if str(item.get('id', '')).strip().replace('.', '').isdigit()]
-                    if valid_items:
-                        last_item = min(valid_items, key=lambda x: int(float(x['id'])))
-                    else:
-                        last_item = new_items[0]
-                else:
-                    # جهت پایین → جدیدتر: بزرگ‌ترین ID
-                    valid_items = [item for item in new_items if str(item.get('id', '')).strip().replace('.', '').isdigit()]
-                    if valid_items:
-                        last_item = max(valid_items, key=lambda x: int(float(x['id'])))
-                    else:
-                        last_item = new_items[-1]
-
+                last_item = new_items[-1]
+                last_id_str = str(last_item['id']).strip()
+                
                 try:
-                    last_id = int(float(str(last_item['id']).strip()))
+                    if '.' in last_id_str:
+                        last_id = int(float(last_id_str))
+                    else:
+                        last_id = int(last_id_str)
                 except:
-                    last_id = str(last_item['id']).strip()
-
+                    last_id = last_id_str
+                
                 new_start_link = f"https://t.me/{self.channel}/{last_id}"
                 self.start_link = new_start_link
                 self.target_msg_id = str(last_id)
-                
-                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id}) [جهت: {self.scroll_direction}]")
+                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")
 
             retry_count = 0  # ریست شمارنده
 
@@ -508,21 +490,10 @@ class TelegramChannelScraper:
 
         # ─── جمع‌آوری پست‌ها ────────────────────────────────────────────────
         items = []
-        seen_ids = set(existing_seen_ids) if existing_seen_ids else set()
+        seen_ids = set()
         scroll_attempts = 0
 
         start_collecting = False
-
-        if self.start_link and self.target_msg_id:
-            seen_ids.add(self.target_msg_id)
-            self.logger.info(f"🎯 پیام هدف {self.target_msg_id} به seen_ids اضافه شد.")
-
-        # اسکرول اولیه برای حالت down (جدیدتر)
-        if self.start_link and self.scroll_direction == 'down':
-            self.logger.info("⬇️ اسکرول اولیه به سمت پست‌های جدیدتر بعد از پیام هدف...")
-            await page.evaluate("window.scrollBy(0, 600)")
-            await human_sleep(1.5, 0.4)
-
         if self.start_link and self.target_msg_id:
             self.logger.info(f"🎯 پیدا کردن پیام هدف {self.target_msg_id}...")
             try:
@@ -546,11 +517,13 @@ class TelegramChannelScraper:
 
                 # ─── تعیین ترتیب پیمایش بر اساس جهت ──────────────────────
                 if self.start_link:
-                    if self.scroll_direction == 'down':
-                        msg_iter = messages           # از بالا به پایین = جدیدتر
+                    # در حالت start_link، از نقطه شروع به سمت direction حرکت می‌کنیم
+                    if self.scroll_direction == 'up':
+                        msg_iter = reversed(messages)
                     else:
-                        msg_iter = reversed(messages) # قدیمی‌تر
+                        msg_iter = messages
                 else:
+                    # حالت عادی: اگر direction == 'up' از جدید به قدیم، اگر 'down' از قدیم به جدید
                     if self.scroll_direction == 'up':
                         msg_iter = reversed(messages)
                     else:
@@ -571,10 +544,13 @@ class TelegramChannelScraper:
                         if self.start_link and not start_collecting:
                             if msg_id == self.target_msg_id:
                                 start_collecting = True
-                                self.logger.info(f"🎯 به پیام هدف رسیدیم (ID: {msg_id})، شروع جمع‌آوری از پست‌های بعدی...")
-                                continue   # خود هدف را جمع نکن
+                                self.logger.info(f"🎯 به پیام هدف رسیدیم (ID: {msg_id})، شروع جمع‌آوری...")
+                                seen_ids.add(msg_id)
                             else:
                                 continue
+
+                        if not start_collecting:
+                            continue
 
                         # ─── استخراج هوشمند متن پست ──────────────────────
                         text = ""
@@ -679,9 +655,6 @@ class TelegramChannelScraper:
                 await human_sleep(1.5, 0.3)
 
         items = items[:effective_limit]
-        if items and self.scroll_direction == 'up':
-            # مرتب‌سازی بر اساس ID برای اطمینان از ترتیب درست
-            items.sort(key=lambda x: int(x['id']) if str(x['id']).isdigit() else 0)
         self.logger.info(f"📊 {len(items)} پست جمع‌آوری شد.")
 
         await self._save_screenshot(page, "final")
