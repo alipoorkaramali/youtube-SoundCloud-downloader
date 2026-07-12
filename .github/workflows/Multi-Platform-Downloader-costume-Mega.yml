@@ -28,10 +28,10 @@ on:
         default: 'high'
         type: choice
         options:
-          - 'low'      # حداکثر 480p
-          - 'medium'   # حداکثر 720p
-          - 'high'     # حداکثر 1080p
-          - 'best'     # بهترین کیفیت ممکن
+          - 'low'      # اولویت با کیفیت‌های تا 480p
+          - 'medium'   # اولویت با کیفیت‌های تا 720p
+          - 'high'     # اولویت با کیفیت‌های تا 1080p
+          - 'best'     # بدون اولویت خاص – بهترین کیفیت ممکن
       folder:
         description: '📁 پوشه موقت'
         required: false
@@ -60,9 +60,15 @@ jobs:
       contents: write
 
     steps:
+      # ================================================================
+      # 1. دریافت کد مخزن
+      # ================================================================
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
+      # ================================================================
+      # 2. رمزگشایی کوکی (انتخاب تصادفی از چند فایل cookies*.txt.gpg)
+      # ================================================================
       - name: 🔐 Decrypt Random Cookie
         run: |
           COOKIE_FILES=(config/cookies*.txt.gpg)
@@ -80,6 +86,9 @@ jobs:
           }
           echo "✅ کوکی با موفقیت decrypt شد"
 
+      # ================================================================
+      # 3. نصب yt-dlp و ffmpeg (با کش خودکار)
+      # ================================================================
       - name: ⚙️ Setup yt-dlp + ffmpeg
         uses: AnimMouse/setup-yt-dlp@v3
         with:
@@ -87,11 +96,17 @@ jobs:
           ffmpeg: true
           nightly: true
 
+      # ================================================================
+      # 4. نصب افزونه PO Token (برای دور زدن محدودیت‌های یوتیوب)
+      # ================================================================
       - name: 📦 Install PO Token Plugin
         run: |
           python3 -m pip install --upgrade bgutil-ytdlp-pot-provider
           echo "✅ PO Token Plugin installed"
 
+      # ================================================================
+      # 5. کش کردن rclone (برای آپلود به مگا)
+      # ================================================================
       - name: 💾 Cache rclone binary
         id: cache-rclone
         uses: actions/cache@v4
@@ -108,6 +123,9 @@ jobs:
           chmod +x ~/bin/rclone
           ~/bin/rclone version
 
+      # ================================================================
+      # 6. رمزگشایی تنظیمات rclone (برای اتصال به Mega.nz)
+      # ================================================================
       - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
@@ -120,13 +138,18 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
 
+      # ================================================================
+      # 7. مرحله دانلود (با استفاده از -f "best" و -S برای اولویت‌بندی)
+      # ================================================================
       - name: ▶️ دانلود فایل
         id: download
         run: |
+          # پاکسازی پوشه قبلی
           rm -rf "${{ github.event.inputs.folder }}" 2>/dev/null || true
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
           
+          # گزینه‌های مشترک برای همه دستورات yt-dlp
           COMMON_OPTS="--cookies ../cookies.txt \
             --extractor-retries 5 \
             --retries 20 \
@@ -138,56 +161,53 @@ jobs:
             --ignore-errors \
             --compat-options no-external-downloader-progress"
 
-          # ============= یوتیوب =============
+          # ============================================================
+          # بخش یوتیوب
+          # ============================================================
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
+              # --- دانلود ویدیو با اولویت‌بندی کیفیت (با -f "best") ---
               QUALITY="${{ github.event.inputs.quality }}"
               case "$QUALITY" in
                 "low")
-                  HEIGHT=480
+                  # اولویت با ارتفاع ≤ 480 و کدک av1 یا h264
+                  SORT_OPTS="-S res:480,codec:av1:h264"
                   ;;
                 "medium")
-                  HEIGHT=720
+                  SORT_OPTS="-S res:720,codec:av1:h264"
                   ;;
                 "high")
-                  HEIGHT=1080
+                  SORT_OPTS="-S res:1080,codec:av1:h264"
                   ;;
                 "best")
-                  HEIGHT=0
+                  SORT_OPTS=""
                   ;;
               esac
-              if [ "$HEIGHT" -eq 0 ]; then
-                yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
-                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-              else
-                yt-dlp $COMMON_OPTS -f "bestvideo[height<=${HEIGHT}]+bestaudio/best" --merge-output-format mp4 \
-                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
-                yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
-                  "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
-              fi
+              # استفاده از -f "best" به جای bestvideo+bestaudio
+              yt-dlp $COMMON_OPTS $SORT_OPTS -f "best" \
+                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              # حالت صوتی یوتیوب
-              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
-                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
-              yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+              # --- دانلود صوتی یوتیوب (اولویت با m4a) ---
+              yt-dlp $COMMON_OPTS -S "ext:m4a" -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
 
-          # ============= ساندکلاد =============
+          # ============================================================
+          # بخش ساندکلاد
+          # ============================================================
           else
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp $COMMON_OPTS -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
-                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
-              yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+              # ساندکلاد معمولاً ویدیو ندارد، اما اگر داشته باشد:
+              yt-dlp $COMMON_OPTS -S "res:1080,codec:av1:h264" -f "best" \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             else
-              yt-dlp $COMMON_OPTS -f "bestaudio[ext=m4a]/bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
-                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s" || \
-              yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
+              # صوتی ساندکلاد
+              yt-dlp $COMMON_OPTS -S "ext:m4a" -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
                 "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
             fi
           fi
          
+          # --- بررسی اینکه فایلی دانلود شده است ---
           DOWNLOADED_FILE=$(ls -1 | head -1)
           if [ -z "$DOWNLOADED_FILE" ]; then
             echo "❌ هیچ فایلی دانلود نشد!"
@@ -197,6 +217,9 @@ jobs:
           echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
           echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
 
+      # ================================================================
+      # 8. تقسیم فایل به ZIP چندبخشی (در صورت درخواست کاربر)
+      # ================================================================
       - name: ✂️ Split into zip volumes (if requested)
         if: github.event.inputs.split_choice == 'split'
         run: |
@@ -210,6 +233,9 @@ jobs:
           echo "✅ Zip volumes created:"
           ls -la
 
+      # ================================================================
+      # 9. آپلود به Mega.nz با استفاده از rclone
+      # ================================================================
       - name: ☁️ آپلود به Mega.nz
         run: |
           CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
