@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Tuple
 
 from config_loader import Config
 from playwright_downloader import PlaywrightDownloader
+from output_generator import OutputGenerator
 
 # ═══════════════════ Constants ═══════════════════
 MAX_SCROLL_ATTEMPTS = 8
@@ -54,10 +55,6 @@ class TelegramChannelScraper:
 
         # ─── تنظیمات مربوط به اسکرول (قبل از logger) ────────────────
         self.scroll_direction = getattr(config, 'scroll_direction', 'up').lower()
-
-        # ─── متغیرهای مدیریت زمان ────────────────────────────────
-        self.last_download_success = False
-        self.last_operation_success = False
 
         # ═══════════════════════════════════════════════════════════════
         # مرحله ۲: راه‌اندازی logger (بعد از متغیرهای اولیه)
@@ -275,22 +272,17 @@ class TelegramChannelScraper:
     async def run(self):
         timeout = getattr(self.config, 'timeout_seconds', OVERALL_TIMEOUT)
         try:
-            await self._run_impl(timeout=timeout)
+            await asyncio.wait_for(self._run_impl(), timeout=timeout)
+        except asyncio.TimeoutError:
+            self.logger.error(f"⏰ اسکریپت به دلیل محدودیت زمانی {timeout} ثانیه متوقف شد.")
         except Exception as e:
             self.logger.critical(f"❌ خطای مرگبار در اجرای اصلی: {e}", exc_info=True)
 
-    async def _run_impl(self, timeout: int):
+    async def _run_impl(self):
         if self.start_link:
             self.logger.info(f"🚀 شروع اسکریپر با لینک: {self.start_link} (limit={self.limit})")
         else:
             self.logger.info(f"🚀 شروع اسکریپر مستقل برای @{self.channel} (limit={self.limit})")
-
-        # ─── مدیریت زمان ────────────────────────────────────────────
-        start_time = asyncio.get_event_loop().time()
-        deadline = start_time + timeout
-        # ریست flagها برای این اجرا
-        self.last_download_success = False
-        self.last_operation_success = False
 
         # ─── متغیرهای کلی ─────────────────────────────
         max_retries = 3
@@ -301,22 +293,6 @@ class TelegramChannelScraper:
         page = None
 
         while len(items) < self.limit and retry_count <= max_retries:
-            # ─── بررسی زمان و تمدید در صورت نیاز ──────────────────
-            now = asyncio.get_event_loop().time()
-            if now > deadline:
-                if self.last_download_success:
-                    extend_seconds = getattr(self.config, 'download_quiet_seconds', 60)
-                    deadline += extend_seconds
-                    self.logger.info(f"⏳ تمدید زمان به دلیل دانلود موفق: +{extend_seconds} ثانیه (deadline جدید: {deadline - start_time:.0f}s)")
-                    self.last_download_success = False
-                elif self.last_operation_success:
-                    deadline += 600
-                    self.logger.info(f"⏳ تمدید زمان به دلیل عملیات موفق غیردانلود: +۶۰۰ ثانیه (deadline جدید: {deadline - start_time:.0f}s)")
-                    self.last_operation_success = False
-                else:
-                    self.logger.warning("⏰ زمان تمام شد و هیچ عملیات موفقی در آخرین دور رخ نداد. توقف.")
-                    break
-                    
             if retry_count > 0:
                 # تلاش مجدد با حدس شناسه
                 if items:
@@ -354,8 +330,6 @@ class TelegramChannelScraper:
                     newly_added.append(item)
 
             self.logger.info(f"📥 {len(newly_added)} پست جدید جمع‌آوری شد (مجموع: {len(items)}/{self.limit})")
-            if newly_added:
-                self.last_operation_success = True
 
             # اگر هیچ پست جدیدی اضافه نشد، یعنی کار تمام است
             if not newly_added:
@@ -370,8 +344,6 @@ class TelegramChannelScraper:
                 )
                 media_map.update(batch_media_map)
                 self.logger.info(f"✅ {downloaded_batch} فایل رسانه در این دور دانلود شد.")
-                if downloaded_batch > 0:
-                    self.last_download_success = True
                 await human_sleep(3.0, 1.0)
             except Exception as e:
                 self.logger.error(f"❌ خطا در دانلود این batch: {e}")
@@ -401,18 +373,15 @@ class TelegramChannelScraper:
 
         self.logger.info(f"🎉 جمع‌آوری تمام شد. مجموع {len(items)} پست.")
 
-        # تولید خروجی نهایی (فقط JSON، بدون HTML)
-        import json
-        output_file = self.base_dir / f"{self.channel}_posts.json"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump({
-                'channel': self.channel,
-                'posts': items,
-                'media': {k: [str(p) for p in v] for k, v in media_map.items()},
-                'total_posts': len(items),
-                'total_media': sum(len(files) for files in media_map.values())
-            }, f, ensure_ascii=False, indent=2)
-        self.logger.info(f"📄 خروجی JSON ذخیره شد: {output_file}")
+        # تولید خروجی نهایی
+        gen = OutputGenerator(
+            self.base_dir,
+            self.channel,
+            items,
+            media_map,
+            debug_mode=self.debug_mode
+        )
+        gen.run_all()
 
         if context:
             await context.close()
@@ -655,8 +624,6 @@ class TelegramChannelScraper:
             # ─── اسکرول هوشمند با جهت ──────────────────────────────────
             old_height = await page.evaluate("document.documentElement.scrollHeight")
             scrolled = await self._smart_scroll(page, self.scroll_direction, step=SCROLL_STEP_BASE, max_attempts=3)
-            if scrolled:
-                self.last_operation_success = True
             new_height = await page.evaluate("document.documentElement.scrollHeight")
 
             if new_height == old_height:
