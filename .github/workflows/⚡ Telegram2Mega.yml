@@ -174,13 +174,12 @@ jobs:
       - name: 🚀 Run Telegram Scraper
         if: ${{ !inputs.debug_mode }}
         run: xvfb-run python .github/scripts/main.py --config config/config.yaml
-        timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
+        timeout-minutes: 360
         
       - name: 🐞 Run Debug Scraper
         if: ${{ inputs.debug_mode }}
         run: xvfb-run python .github/scripts/debug_scraper.py
-        timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
-
+        timeout-minutes: 360
       # ════════════════════════════════════════════
       # موقتی فقط برای دیباگ
       # ════════════════════════════════════════════
