@@ -158,7 +158,6 @@ jobs:
           TIMEOUT_MINUTES=$((TIMEOUT_SECONDS / 60))
           echo "TIMEOUT_SECONDS=$TIMEOUT_SECONDS" >> $GITHUB_ENV
           echo "TIMEOUT_MINUTES=$TIMEOUT_MINUTES" >> $GITHUB_ENV
-          echo "TIMEOUT_MINUTES=$TIMEOUT_MINUTES" >> $GITHUB_OUTPUT   # ← این خط را اضافه کنید
           echo "⏱️ زمان محاسبه‌شده: ${TIMEOUT_SECONDS} ثانیه (${TIMEOUT_MINUTES} دقیقه)"
       #-----------------------------------------------------------------------------------------
       - name: 🧹 Clean old output (keep resume_state.json)
@@ -175,12 +174,12 @@ jobs:
       - name: 🚀 Run Telegram Scraper
         if: ${{ !inputs.debug_mode }}
         run: xvfb-run python .github/scripts/main.py --config config/config.yaml
-        timeout-minutes: ${{ steps.calc_timeout.outputs.TIMEOUT_MINUTES }}   # ← تغییر
-
+        timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
+        
       - name: 🐞 Run Debug Scraper
         if: ${{ inputs.debug_mode }}
         run: xvfb-run python .github/scripts/debug_scraper.py
-        timeout-minutes: ${{ steps.calc_timeout.outputs.TIMEOUT_MINUTES }}
+        timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
 
       # ════════════════════════════════════════════
       # موقتی فقط برای دیباگ
