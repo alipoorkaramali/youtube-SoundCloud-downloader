@@ -158,7 +158,7 @@ jobs:
           TIMEOUT_MINUTES=$((TIMEOUT_SECONDS / 60))
           echo "TIMEOUT_SECONDS=$TIMEOUT_SECONDS" >> $GITHUB_ENV
           echo "TIMEOUT_MINUTES=$TIMEOUT_MINUTES" >> $GITHUB_ENV
-          echo "TIMEOUT_MINUTES=$TIMEOUT_MINUTES" >> $GITHUB_OUTPUT   # ← خط جدید
+          echo "TIMEOUT_MINUTES=$TIMEOUT_MINUTES" >> $GITHUB_OUTPUT   # ← این خط را اضافه کنید
           echo "⏱️ زمان محاسبه‌شده: ${TIMEOUT_SECONDS} ثانیه (${TIMEOUT_MINUTES} دقیقه)"
       #-----------------------------------------------------------------------------------------
       - name: 🧹 Clean old output (keep resume_state.json)
