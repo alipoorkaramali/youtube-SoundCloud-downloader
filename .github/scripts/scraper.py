@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Tuple
 
 from config_loader import Config
 from playwright_downloader import PlaywrightDownloader
-#from output_generator import OutputGenerator
+from output_generator import OutputGenerator
 
 # ═══════════════════ Constants ═══════════════════
 MAX_SCROLL_ATTEMPTS = 8
@@ -373,8 +373,21 @@ class TelegramChannelScraper:
 
         self.logger.info(f"🎉 جمع‌آوری تمام شد. مجموع {len(items)} پست.")
 
-        # خروجی‌های اضافی تولید نمی‌شود، فقط دانلود انجام شده است
-        self.logger.info(f"✅ دانلود {len(items)} پست با موفقیت انجام شد.")
+        # تولید خروجی نهایی (فقط در حالت دیباگ)
+        if self.debug_mode:
+            self.logger.info("🐞 حالت دیباگ: تولید خروجی‌های کامل (JSON, CSV, HTML, ZIP)")
+            gen = OutputGenerator(
+                self.base_dir,
+                self.channel,
+                items,
+                media_map,
+                debug_mode=self.debug_mode
+            )
+            gen.run_all()
+        else:
+            self.logger.info("📁 حالت عادی: فقط رسانه‌ها دانلود شدند و برای آپلود آماده هستند.")
+            # در حالت عادی هیچ خروجی اضافی تولید نمی‌شود
+
         if context:
             await context.close()
     async def _ensure_browser(self, context, page):
@@ -432,7 +445,7 @@ class TelegramChannelScraper:
         if not entered:
             await context.close()
             return [], None, None
-        #await self._save_screenshot(page, "initial")
+        await self._save_screenshot(page, "initial")
 
         # ═══════════════ پرش به ابتدا یا انتهای صفحه بر اساس جهت اسکرول ═══════════════
         if not self.start_link:
@@ -639,8 +652,8 @@ class TelegramChannelScraper:
         items = items[:effective_limit]
         self.logger.info(f"📊 {len(items)} پست جمع‌آوری شد.")
 
-        #await self._save_screenshot(page, "final")
-        #await self._capture_post_screenshots(page, items)
+        await self._save_screenshot(page, "final")
+        await self._capture_post_screenshots(page, items)
 
         if items:
             first_id = items[0]['id']
