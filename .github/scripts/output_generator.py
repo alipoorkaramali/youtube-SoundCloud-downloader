@@ -156,5 +156,5 @@ class OutputGenerator:
     def run_all(self):
         self.generate_json()
         self.generate_csv()
-        # self.generate_html()   # تولید HTML غیرفعال شد
+        self.generate_html()
         self.create_zip()
