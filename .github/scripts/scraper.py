@@ -10,7 +10,6 @@ from typing import List, Dict, Any, Tuple
 
 from config_loader import Config
 from playwright_downloader import PlaywrightDownloader
-from output_generator import OutputGenerator
 
 # ═══════════════════ Constants ═══════════════════
 MAX_SCROLL_ATTEMPTS = 8
@@ -402,15 +401,18 @@ class TelegramChannelScraper:
 
         self.logger.info(f"🎉 جمع‌آوری تمام شد. مجموع {len(items)} پست.")
 
-        # تولید خروجی نهایی
-        gen = OutputGenerator(
-            self.base_dir,
-            self.channel,
-            items,
-            media_map,
-            debug_mode=self.debug_mode
-        )
-        gen.run_all()
+        # تولید خروجی نهایی (فقط JSON، بدون HTML)
+        import json
+        output_file = self.base_dir / f"{self.channel}_posts.json"
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'channel': self.channel,
+                'posts': items,
+                'media': {k: [str(p) for p in v] for k, v in media_map.items()},
+                'total_posts': len(items),
+                'total_media': sum(len(files) for files in media_map.values())
+            }, f, ensure_ascii=False, indent=2)
+        self.logger.info(f"📄 خروجی JSON ذخیره شد: {output_file}")
 
         if context:
             await context.close()
