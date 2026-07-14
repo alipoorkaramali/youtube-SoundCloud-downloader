@@ -17,10 +17,12 @@ class Config:
     channel_name: str = ''
     resume: bool = True
     start_link: str = ''
+    mega_folder: str = 'TelegramArchive'
     timeout_seconds: int = 2100
     download_quiet_seconds: int = 20
-    scroll_direction: str = 'up'   # ← این خط جدید
+    scroll_direction: str = 'up'
     save_screenshots: bool = True
+
 def load_config(path: str = "config.yaml") -> Config:
     """بارگذاری تنظیمات از فایل YAML"""
     config_path = Path(path)
@@ -44,7 +46,9 @@ def load_config(path: str = "config.yaml") -> Config:
     timeout_seconds = data.get('timeout_seconds', 2100)
     download_quiet_seconds = data.get('download_quiet_seconds', 20)
     scroll_direction = data.get('scroll_direction', 'up')
-    save_screenshots = data.get('save_screenshots', True)    
+    save_screenshots = data.get('save_screenshots', True)
+    mega_folder = data.get('mega_folder', 'TelegramArchive')   # ← اینجا باید باشد
+    
     if scroll_direction not in ['up', 'down']:
         scroll_direction = 'up'
         
@@ -58,6 +62,7 @@ def load_config(path: str = "config.yaml") -> Config:
         channel_name=data.get('channel_name', ''),
         resume=data.get('resume', True),
         start_link=data.get('start_link', ''),
+        mega_folder=mega_folder,           # ← ترتیب درست
         timeout_seconds=timeout_seconds,
         download_quiet_seconds=download_quiet_seconds,
         scroll_direction=scroll_direction,
