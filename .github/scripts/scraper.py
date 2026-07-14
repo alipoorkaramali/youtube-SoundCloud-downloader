@@ -56,6 +56,9 @@ class TelegramChannelScraper:
         # ─── تنظیمات مربوط به اسکرول (قبل از logger) ────────────────
         self.scroll_direction = getattr(config, 'scroll_direction', 'up').lower()
 
+        # ─── متغیرهای مدیریت زمان ────────────────────────────────────
+        self.last_download_success = False
+
         # ═══════════════════════════════════════════════════════════════
         # مرحله ۲: راه‌اندازی logger (بعد از متغیرهای اولیه)
         # ═══════════════════════════════════════════════════════════════
@@ -344,9 +347,34 @@ class TelegramChannelScraper:
                 )
                 media_map.update(batch_media_map)
                 self.logger.info(f"✅ {downloaded_batch} فایل رسانه در این دور دانلود شد.")
+                if downloaded_batch > 0:
+                    self.last_download_success = True   # اگر از متغیر استفاده می‌کنید (اختیاری)
                 await human_sleep(3.0, 1.0)
             except Exception as e:
                 self.logger.error(f"❌ خطا در دانلود این batch: {e}")
+
+            # ─── چک کردن حجم و آپلود در صورت نیاز ──────────────────
+            total_size = sum(f.stat().st_size for f in self.media_dir.rglob('*') if f.is_file())
+            size_mb = total_size / (1024 * 1024)
+            if size_mb > 1024:  # ۱ گیگابایت
+                self.logger.info(f"📦 حجم پوشه media به {size_mb:.1f} MB رسید. شروع آپلود...")
+                uploaded = await self._upload_and_cleanup()
+                if uploaded:
+                    # به‌روزرسانی resume_state برای ادامه از این نقطه
+                    import json
+                    resume_file = self.base_dir / "resume_state.json"
+                    if resume_file.exists():
+                        with open(resume_file, 'r') as f:
+                            state = json.load(f)
+                    else:
+                        state = {}
+                    state['last_post_id'] = str(newly_added[-1]['id'])
+                    state['downloaded_posts'] = [p['id'] for p in items]
+                    with open(resume_file, 'w') as f:
+                        json.dump(state, f, indent=2)
+                    self.logger.info(f"📝 وضعیت ذخیره شد: آخرین پست {state['last_post_id']}")
+                else:
+                    self.logger.warning("⚠️ آپلود ناموفق بود، ادامه با فایل‌های محلی...")
 
             # به‌روزرسانی start_link با آخرین پست جدید
             last_item = newly_added[-1]
@@ -1050,3 +1078,56 @@ class TelegramChannelScraper:
                     downloaded += len(files)
 
         return media_map, downloaded
+    # ═══════════════════ آپلود و پاکسازی ═══════════════════
+    async def _upload_and_cleanup(self) -> bool:
+        """
+        آپلود پوشه media به مگا و پاکسازی فایل‌های محلی
+        برمی‌گرداند: True اگر آپلود موفق بود، False اگر خطا رخ داد
+        """
+        import subprocess
+        import shutil
+        
+        media_path = self.media_dir
+        if not media_path.exists() or not any(media_path.iterdir()):
+            return True  # چیزی برای آپلود نیست
+        
+        # محاسبه حجم پوشه
+        total_size = sum(f.stat().st_size for f in media_path.rglob('*') if f.is_file())
+        size_mb = total_size / (1024 * 1024)
+        
+        if size_mb < 100:  # کمتر از ۱۰۰ مگابایت، آپلود نمی‌کنیم
+            self.logger.info(f"📦 حجم پوشه media: {size_mb:.1f} MB (کمتر از ۱۰۰ MB، آپلود نمی‌شود)")
+            return True
+        
+        self.logger.info(f"☁️ شروع آپلود {size_mb:.1f} MB به مگا...")
+        
+        try:
+            # آپلود با rclone
+            channel = self.channel
+            mega_folder = getattr(self.config, 'mega_folder', 'TelegramArchive')
+            
+            cmd = [
+                "rclone", "copy",
+                str(media_path),
+                f"mega:{mega_folder}/{channel}/media",
+                "--progress",
+                "--transfers", "4",
+                "-vv"
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            
+            if result.returncode == 0:
+                self.logger.info(f"✅ آپلود {size_mb:.1f} MB با موفقیت انجام شد")
+                # پاکسازی فایل‌های محلی
+                shutil.rmtree(media_path)
+                media_path.mkdir(parents=True, exist_ok=True)
+                self.logger.info("🧹 فایل‌های محلی پاکسازی شدند")
+                return True
+            else:
+                self.logger.error(f"❌ خطا در آپلود: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ خطا در آپلود: {e}")
+            return False
