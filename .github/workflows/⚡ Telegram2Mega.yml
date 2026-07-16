@@ -198,7 +198,16 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
           rclone listremotes
-          
+      
+      - name: 🔍 Debug all artifacts
+        if: ${{ github.event.inputs.retry_failed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📋 لیست همه آرتیفکت‌ها:"
+          curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            | jq '.artifacts[] | {id: .id, name: .name, created_at: .created_at, expired: .expired}' 
       - name: 📥 Download previous report for retry
         if: ${{ github.event.inputs.retry_failed == 'true' }}
         env:
