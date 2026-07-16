@@ -1155,8 +1155,11 @@ class TelegramChannelScraper:
         return media_map, downloaded, failed_posts
     # ═══════════════════ ساخت گذارش از موفق یا عدم موفقیت دانلود ═══════════════════
     async def _generate_download_report(self, items: List[Dict], media_map: Dict, failed_posts: List[Dict]):
-        """تولید گزارش نهایی دانلودها"""
+        """تولید گزارش نهایی دانلودها با کپشن پست‌ها"""
         report_path = self.base_dir / "download_report.txt"
+        
+        # ─── ساخت دیکشنری برای دسترسی سریع به کپشن هر پست ───
+        post_text = {item['id']: item.get('text', '') for item in items}
         
         successful_ids = set(media_map.keys())
         failed_ids = {item['id'] for item in failed_posts}
@@ -1174,45 +1177,60 @@ class TelegramChannelScraper:
             f.write(f"📈 تعداد کل پست‌های بررسی‌شده: {len(items)}\n")
             f.write("=" * 60 + "\n\n")
             
-            # پست‌های موفق
+            # ─── پست‌های موفق ──────────────────────────────────
             f.write("✅ پست‌های دانلود شده (موفق):\n")
             f.write("-" * 40 + "\n")
             if successful_ids:
                 for i, post_id in enumerate(sorted(successful_ids, key=int), 1):
                     url = f"https://t.me/{self.channel}/{post_id}"
                     count = len(media_map.get(post_id, []))
+                    caption = post_text.get(post_id, '')
+                    # خلاصه کپشن (۵۰ کاراکتر اول)
+                    caption_summary = caption[:50] + ('...' if len(caption) > 50 else '')
                     f.write(f"  {i}. پست {post_id} - {count} فایل - {url}\n")
+                    if caption_summary:
+                        f.write(f"      📝 کپشن: {caption_summary}\n")
             else:
                 f.write("  (هیچ پستی دانلود نشد)\n")
             f.write("\n")
             
-            # پست‌های ناموفق
+            # ─── پست‌های ناموفق ──────────────────────────────────
             f.write("❌ پست‌های ناموفق (شکست خورده):\n")
             f.write("-" * 40 + "\n")
             if failed_posts:
                 sorted_failed = sorted(failed_posts, key=lambda x: int(x['id']))
                 for i, item in enumerate(sorted_failed, 1):
+                    post_id = item['id']
                     reason = item.get('reason', 'نامشخص')
-                    url = item.get('url', f"https://t.me/{self.channel}/{item['id']}")
-                    f.write(f"  {i}. پست {item['id']} - {reason} - {url}\n")
+                    url = item.get('url', f"https://t.me/{self.channel}/{post_id}")
+                    caption = post_text.get(post_id, '')
+                    caption_summary = caption[:50] + ('...' if len(caption) > 50 else '')
+                    f.write(f"  {i}. پست {post_id} - {reason} - {url}\n")
+                    if caption_summary:
+                        f.write(f"      📝 کپشن: {caption_summary}\n")
             else:
                 f.write("  (هیچ پست ناموفقی وجود ندارد)\n")
             f.write("\n")
             
-            # پست‌های پردازش نشده (اختیاری)
+            # ─── پست‌های پردازش نشده (اختیاری) ──────────────────
             if unprocessed:
                 f.write("⚠️ پست‌های پردازش نشده:\n")
                 f.write("-" * 40 + "\n")
                 for i, post_id in enumerate(sorted(unprocessed, key=int), 1):
                     url = f"https://t.me/{self.channel}/{post_id}"
+                    caption = post_text.get(post_id, '')
+                    caption_summary = caption[:50] + ('...' if len(caption) > 50 else '')
                     f.write(f"  {i}. پست {post_id} - {url}\n")
+                    if caption_summary:
+                        f.write(f"      📝 کپشن: {caption_summary}\n")
                 f.write("\n")
             
             f.write("=" * 60 + "\n")
             f.write("🏁 پایان گزارش\n")
         
         self.logger.info(f"📄 گزارش نهایی در {report_path} ذخیره شد.")
-    # ═══════════════════ آپلود و پاکسازی ═══════════════════
+            
+# ═══════════════════ آپلود و پاکسازی ═══════════════════
     async def _upload_and_cleanup(self) -> bool:
         """
         آپلود هوشمند پوشه media به مگا با جلوگیری از آپلود تکراری
