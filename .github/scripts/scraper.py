@@ -534,6 +534,9 @@ class TelegramChannelScraper:
         items = []
         seen_ids = set()
         scroll_attempts = 0
+        # ─── ذخیره موقعیت اولیه برای برگشت ──────────────────────
+        original_scroll_y_fetch = await page.evaluate("window.scrollY")
+        scroll_stack_fetch = []  # برای ثبت اسکرول‌های اضافی
 
         start_collecting = False
         if self.start_link and self.target_msg_id:
@@ -693,9 +696,17 @@ class TelegramChannelScraper:
             if self.start_link and not start_collecting:
                 self.logger.info("🔄 هنوز به پیام هدف نرسیدیم، اسکرول اضافی...")
                 extra_amount = -SCROLL_STEP_BASE * 2 if self.scroll_direction == 'up' else SCROLL_STEP_BASE * 2
+                scroll_stack_fetch.append(extra_amount)   # ← ثبت اسکرول
                 await page.evaluate(f"window.scrollBy(0, {extra_amount})")
                 await human_sleep(1.5, 0.3)
-
+        # ─── برگشت به نقطه‌ی اولیه ──────────────────────────────
+        for amount in reversed(scroll_stack_fetch):
+            await page.evaluate(f"window.scrollBy(0, {-amount})")
+            await human_sleep(0.3, 0.1)
+        current_y = await page.evaluate("window.scrollY")
+        if abs(current_y - original_scroll_y_fetch) > 30:
+            await page.evaluate(f"window.scrollTo(0, {original_scroll_y_fetch})")
+            self.logger.info(f"   ↩️ برگشت به موقعیت اولیه (fetch): {original_scroll_y_fetch}px")
         items = items[:effective_limit]
         self.logger.info(f"📊 {len(items)} پست جمع‌آوری شد.")
 
