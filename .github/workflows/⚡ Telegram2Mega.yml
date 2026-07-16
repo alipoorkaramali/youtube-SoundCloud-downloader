@@ -201,11 +201,45 @@ jobs:
           
       - name: 📥 Download previous report for retry
         if: ${{ github.event.inputs.retry_failed == 'true' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: download-report-${{ github.event.inputs.channel }}
-          path: Download/telegram_downloads/${{ github.event.inputs.channel }}/
-        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARTIFACT_NAME="download-report-${{ github.event.inputs.channel }}"
+          OUTPUT_DIR="Download/telegram_downloads/${{ github.event.inputs.channel }}/"
+          
+          mkdir -p "$OUTPUT_DIR"
+          
+          echo "🔍 جستجوی آخرین آرتیفکت با نام: $ARTIFACT_NAME"
+          
+          # دریافت آخرین آرتیفکت با نام مشخص
+          ARTIFACT_ID=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$ARTIFACT_NAME&per_page=1" \
+            | jq -r '.artifacts[0].id')
+          
+          if [ "$ARTIFACT_ID" == "null" ] || [ -z "$ARTIFACT_ID" ]; then
+            echo "⚠️ آرتیفکتی با نام $ARTIFACT_NAME یافت نشد!"
+            echo "ℹ️ ممکن است هنوز گزارشی برای این کانال تولید نشده باشد."
+            exit 0
+          fi
+          
+          echo "✅ آخرین آرتیفکت با ID: $ARTIFACT_ID یافت شد"
+          
+          # دانلود آرتیفکت
+          curl -L -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" \
+            -o /tmp/artifact.zip
+          
+          # استخراج فایل گزارش
+          unzip -j /tmp/artifact.zip "download_report.txt" -d "$OUTPUT_DIR" || \
+            unzip -j /tmp/artifact.zip -d "$OUTPUT_DIR"
+          
+          if [ -f "$OUTPUT_DIR/download_report.txt" ]; then
+            echo "✅ گزارش با موفقیت دانلود شد: $OUTPUT_DIR/download_report.txt"
+            ls -la "$OUTPUT_DIR/download_report.txt"
+          else
+            echo "❌ فایل گزارش در آرتیفکت پیدا نشد!"
+            exit 1
+          fi
         
       - name: 🚀 Run Telegram Scraper
         if: ${{ !inputs.debug_mode }}
