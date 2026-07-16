@@ -347,12 +347,26 @@ class TelegramChannelScraper:
         else:
             self.logger.info(f"🚀 شروع اسکریپر مستقل برای @{self.channel} (limit={self.limit})")
 
+        # ─── اگر حالت retry فعال باشد ──────────────────────────
+        retry_failed = getattr(self.config, 'retry_failed', False)
+        if retry_failed:
+            failed_ids = self._extract_failed_posts_from_report()
+            if not failed_ids:
+                self.logger.info("✅ هیچ پست ناموفقی برای تلاش مجدد وجود ندارد.")
+                return
+            self.logger.info(f"🔄 تلاش مجدد برای {len(failed_ids)} پست ناموفق...")
+            # نادیده گرفتن ورودی‌های کاربر
+            self.limit = len(failed_ids)
+            self.start_link = f"https://t.me/{self.channel}/{failed_ids[0]}"
+            self.target_msg_id = failed_ids[0]
+            # scroll_direction و max_media_mb از config خوانده می‌شوند (تغییری نمی‌کنند)
+
         # ─── متغیرهای کلی ─────────────────────────────
         max_retries = 3
         retry_count = 0
-        items = []                    # همه پست‌ها
-        media_map = {}                # نقشه رسانه‌های همه پست‌ها
-        all_failed_posts = []         # ← جمع‌آوری پست‌های ناموفق از همه دورها
+        items = []
+        media_map = {}
+        all_failed_posts = []
         context = None
         page = None
 
@@ -1229,7 +1243,29 @@ class TelegramChannelScraper:
             f.write("🏁 پایان گزارش\n")
         
         self.logger.info(f"📄 گزارش نهایی در {report_path} ذخیره شد.")
-            
+
+    def _extract_failed_posts_from_report(self) -> List[str]:
+        """استخراج شناسه پست‌های ناموفق از فایل گزارش"""
+        report_path = self.base_dir / "download_report.txt"
+        if not report_path.exists():
+            self.logger.warning("⚠️ فایل گزارش یافت نشد!")
+            return []
+        
+        failed_ids = []
+        in_failed_section = False
+        with open(report_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if "❌ پست‌های ناموفق (شکست خورده):" in line:
+                    in_failed_section = True
+                    continue
+                if in_failed_section and line.startswith("  "):
+                    match = re.search(r'پست (\d+)', line)
+                    if match:
+                        failed_ids.append(match.group(1))
+                elif in_failed_section and line.startswith("="):
+                    break
+        return failed_ids
+
 # ═══════════════════ آپلود و پاکسازی ═══════════════════
     async def _upload_and_cleanup(self) -> bool:
         """
