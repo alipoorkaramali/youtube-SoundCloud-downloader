@@ -6,8 +6,7 @@ import logging
 import random
 import time
 from pathlib import Path
-from typing import List, Dict, Optional
-
+from typing import List, Dict, Optional, Tuple
 from playwright.async_api import Page, Download
 
 logger = logging.getLogger("TelegramScraper")
@@ -38,7 +37,8 @@ class PlaywrightDownloader:
                  delay: float = 5.0, max_retries: int = 2,
                  debug_screenshots_dir: Path = None,
                  quiet_base: int = 20,
-                 timeout_manager=None):
+                 timeout_manager=None,
+                 channel: str = ''):   # ← پارامتر جدید
                  
         self.profile_dir = profile_dir
         self.media_dir = media_dir
@@ -54,11 +54,13 @@ class PlaywrightDownloader:
             self.debug_dir = self.media_dir.parent / "debug_rightclick"
         self.debug_dir.mkdir(parents=True, exist_ok=True)
 
-        self.quiet_base = quiet_base   # ← آستانهٔ سکوت پایه برای دانلود هر رسانه
+        self.quiet_base = quiet_base
         self.timeout_manager = timeout_manager
+        self.channel = channel                     # ← جدید
+        self.failed_posts = []                     # ← جدید
     
     async def download_all(self, page: Page, context, post_ids: List[str],
-                           media_map: Optional[Dict[str, List[str]]] = None) -> None:
+                           media_map: Optional[Dict[str, List[str]]] = None) -> Tuple[Dict, List]:
         if media_map is None:
             media_map = {}
         if not post_ids:
@@ -78,11 +80,21 @@ class PlaywrightDownloader:
                 )
             except asyncio.TimeoutError:
                 logger.warning(f"⏰ پست {post_id} تایم‌اوت کلی شد، رد می‌شود.")
+                self.failed_posts.append({   # ← اضافه کن
+                    'id': post_id,
+                    'reason': 'تایم‌اوت کلی',
+                    'url': f"https://t.me/{self.channel}/{post_id}"
+                })
             except Exception as e:
                 logger.error(f"❌ خطا در پست {post_id}: {e}")
-            if idx < len(post_ids):
-                await human_sleep(self.delay, 0.5)
-
+                self.failed_posts.append({   # ← اضافه کن
+                    'id': post_id,
+                    'reason': f'خطا: {str(e)[:50]}',
+                    'url': f"https://t.me/{self.channel}/{post_id}"
+                })
+                
+        return media_map, self.failed_posts
+                               
     async def _process_post(self, page: Page, post_id: str,
                             media_map: Dict[str, List[str]]) -> None:
         logger.info(f"📍 شروع دانلود پست {post_id}")
@@ -154,6 +166,12 @@ class PlaywrightDownloader:
                     logger.info(f"   ↩️ برگشت به موقعیت اولیه: {original_scroll_y}px")
             except Exception as e:
                 logger.warning(f"   ⚠️ خطا در برگشت اسکرول‌ها: {e}")
+            # ─── ثبت پست ناموفق ──────────────────────────────────
+            self.failed_posts.append({
+                'id': post_id,
+                'reason': 'پست پیدا نشد',
+                'url': f"https://t.me/{self.channel}/{post_id}"
+            })
             return
             
         logger.info(f"   📍 پست {post_id} آماده شد.")
@@ -438,7 +456,13 @@ class PlaywrightDownloader:
             logger.info(f"   🔄 پست {post_id} دوباره به مرکز صفحه منتقل شد.")
         except Exception as e:
             logger.debug(f"   ⚠️ خطا در انتقال مجدد پست {post_id}: {e}")
-
+        # ─── ثبت پست ناموفق در صورت عدم دانلود ──────────────────
+        if not downloaded_files:
+            self.failed_posts.append({
+                'id': post_id,
+                'reason': 'دانلود نشد (بدون فایل یا خطا)',
+                'url': f"https://t.me/{self.channel}/{post_id}"
+            })
         if downloaded_files:
             media_map[post_id] = downloaded_files
             logger.info(f"📦 پست {post_id}: {len(downloaded_files)} رسانه دانلود شد.")            
