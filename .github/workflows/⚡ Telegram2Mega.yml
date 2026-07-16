@@ -203,6 +203,30 @@ jobs:
         run: xvfb-run python .github/scripts/debug_scraper.py
         timeout-minutes: 360
       # ════════════════════════════════════════════
+      # آپلود گذارش به artifact
+      # ════════════════════════════════════════════
+      - name: 📤 Upload download report as artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: download-report
+          path: Download/telegram_downloads/${{ github.event.inputs.channel }}/download_report.txt
+      # ════════════════════════════════════════════
+      # آپلود گذارش به مگا
+      # ════════════════════════════════════════════
+      - name: ☁️ Upload download report to Mega
+        if: ${{ !inputs.debug_mode }}
+        run: |
+          REPORT_PATH="Download/telegram_downloads/${{ github.event.inputs.channel }}/download_report.txt"
+          if [ -f "$REPORT_PATH" ]; then
+            rclone copy "$REPORT_PATH" \
+                       "mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}/" \
+                       --progress -vv
+            echo "✅ گزارش در مسیر mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}/download_report.txt قرار گرفت"
+          else
+            echo "⚠️ فایل گزارش یافت نشد (skip)"
+          fi      
+      # ════════════════════════════════════════════
       # موقتی فقط برای دیباگ
       # ════════════════════════════════════════════
 
