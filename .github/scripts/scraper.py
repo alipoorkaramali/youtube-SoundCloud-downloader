@@ -352,6 +352,7 @@ class TelegramChannelScraper:
         retry_count = 0
         items = []                    # همه پست‌ها
         media_map = {}                # نقشه رسانه‌های همه پست‌ها
+        all_failed_posts = []         # ← جمع‌آوری پست‌های ناموفق از همه دورها
         context = None
         page = None
 
@@ -402,13 +403,14 @@ class TelegramChannelScraper:
             # 🔥 دانلود فوری رسانه‌های پست‌های جدید
             self.logger.info(f"⬇️ شروع دانلود رسانه برای {len(newly_added)} پست جدید...")
             try:
-                batch_media_map, downloaded_batch = await self._download_media(
+                batch_media_map, downloaded_batch, batch_failed = await self._download_media(
                     newly_added, page, context
                 )
+                all_failed_posts.extend(batch_failed)
                 media_map.update(batch_media_map)
                 self.logger.info(f"✅ {downloaded_batch} فایل رسانه در این دور دانلود شد.")
                 if downloaded_batch > 0:
-                    self.last_download_success = True   # اگر از متغیر استفاده می‌کنید (اختیاری)
+                    self.last_download_success = True
                 await human_sleep(3.0, 1.0)
             except Exception as e:
                 self.logger.error(f"❌ خطا در دانلود این batch: {e}")
@@ -475,7 +477,8 @@ class TelegramChannelScraper:
         else:
             self.logger.info("📁 حالت عادی: فقط رسانه‌ها دانلود شدند و برای آپلود آماده هستند.")
             # در حالت عادی هیچ خروجی اضافی تولید نمی‌شود
-
+        # ─── تولید گزارش نهایی ──────────────────────────────
+        await self._generate_download_report(items, media_map, all_failed_posts)
         if context:
             await context.close()
     async def _ensure_browser(self, context, page):
@@ -1126,10 +1129,11 @@ class TelegramChannelScraper:
         self.logger.info(f"✅ اسکرین‌شات‌ها تمام شد. مجموع: {len(items)}")
 
     # ═══════════════════ دانلود رسانه‌ها ═══════════════════
-    async def _download_media(self, items: List[Dict], page, context) -> tuple[dict, int]:
+    async def _download_media(self, items: List[Dict], page, context) -> Tuple[dict, int, List]:
         post_ids = [str(item['id']) for item in items]
         media_map = {}
         downloaded = 0
+        failed_posts = []
         if post_ids:
             try:
                 downloader = PlaywrightDownloader(
@@ -1139,15 +1143,75 @@ class TelegramChannelScraper:
                     self.delay_between_posts,
                     debug_screenshots_dir=self.debug_screenshots_dir,
                     quiet_base=getattr(self.config, 'download_quiet_seconds', 1.0),
-                    timeout_manager=self.timeout_manager
+                    timeout_manager=self.timeout_manager,
+                    channel=self.channel          # ← پارامتر جدید
                 )
-                await downloader.download_all(page, context, post_ids, media_map)
+                media_map, failed_posts = await downloader.download_all(page, context, post_ids, media_map)
             except Exception as e:
                 self.logger.error(f"❌ خطا در فرآیند دانلود: {e}")
             finally:
                 for files in media_map.values():
                     downloaded += len(files)
-        return media_map, downloaded
+        return media_map, downloaded, failed_posts
+    # ═══════════════════ ساخت گذارش از موفق یا عدم موفقیت دانلود ═══════════════════
+    async def _generate_download_report(self, items: List[Dict], media_map: Dict, failed_posts: List[Dict]):
+        """تولید گزارش نهایی دانلودها"""
+        report_path = self.base_dir / "download_report.txt"
+        
+        successful_ids = set(media_map.keys())
+        failed_ids = {item['id'] for item in failed_posts}
+        
+        # پست‌هایی که در هیچ لیستی نیستند (احتمالاً پردازش نشده‌اند)
+        unprocessed = []
+        for item in items:
+            if item['id'] not in successful_ids and item['id'] not in failed_ids:
+                unprocessed.append(item['id'])
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write("=" * 60 + "\n")
+            f.write(f"📊 گزارش نهایی دانلود - کانال: @{self.channel}\n")
+            f.write(f"📅 تاریخ: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"📈 تعداد کل پست‌های بررسی‌شده: {len(items)}\n")
+            f.write("=" * 60 + "\n\n")
+            
+            # پست‌های موفق
+            f.write("✅ پست‌های دانلود شده (موفق):\n")
+            f.write("-" * 40 + "\n")
+            if successful_ids:
+                for i, post_id in enumerate(sorted(successful_ids, key=int), 1):
+                    url = f"https://t.me/{self.channel}/{post_id}"
+                    count = len(media_map.get(post_id, []))
+                    f.write(f"  {i}. پست {post_id} - {count} فایل - {url}\n")
+            else:
+                f.write("  (هیچ پستی دانلود نشد)\n")
+            f.write("\n")
+            
+            # پست‌های ناموفق
+            f.write("❌ پست‌های ناموفق (شکست خورده):\n")
+            f.write("-" * 40 + "\n")
+            if failed_posts:
+                sorted_failed = sorted(failed_posts, key=lambda x: int(x['id']))
+                for i, item in enumerate(sorted_failed, 1):
+                    reason = item.get('reason', 'نامشخص')
+                    url = item.get('url', f"https://t.me/{self.channel}/{item['id']}")
+                    f.write(f"  {i}. پست {item['id']} - {reason} - {url}\n")
+            else:
+                f.write("  (هیچ پست ناموفقی وجود ندارد)\n")
+            f.write("\n")
+            
+            # پست‌های پردازش نشده (اختیاری)
+            if unprocessed:
+                f.write("⚠️ پست‌های پردازش نشده:\n")
+                f.write("-" * 40 + "\n")
+                for i, post_id in enumerate(sorted(unprocessed, key=int), 1):
+                    url = f"https://t.me/{self.channel}/{post_id}"
+                    f.write(f"  {i}. پست {post_id} - {url}\n")
+                f.write("\n")
+            
+            f.write("=" * 60 + "\n")
+            f.write("🏁 پایان گزارش\n")
+        
+        self.logger.info(f"📄 گزارش نهایی در {report_path} ذخیره شد.")
     # ═══════════════════ آپلود و پاکسازی ═══════════════════
     async def _upload_and_cleanup(self) -> bool:
         """
