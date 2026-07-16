@@ -138,7 +138,7 @@ jobs:
           c['max_media_mb'] = ${{ github.event.inputs.max_media_mb }}
           download_quiet = int('${{ github.event.inputs.download_quiet_timeout }}')
           limit = int('${{ github.event.inputs.limit }}')
-          c['timeout_seconds'] = (download_quiet * limit) + 1800
+          c['timeout_seconds'] = (download_quiet + 4) * limit + 2800
           c['download_quiet_seconds'] = download_quiet
           c['mega_folder'] = '${{ github.event.inputs.mega_folder }}'
           c['save_screenshots'] = '${{ github.event.inputs.save_screenshots }}'.lower() == 'true'
