@@ -23,7 +23,23 @@ async def human_sleep(base: float, jitter: float = 0.4):
     time = base * (1 + random.uniform(-jitter, jitter))
     await asyncio.sleep(max(0.1, time))
 
-
+class TimeoutManager:
+    def __init__(self, base_timeout: int):
+        self.base_timeout = base_timeout
+        self.extra_time = 0
+        self.start_time = asyncio.get_event_loop().time()
+        self.logger = logging.getLogger("TelegramScraper")
+    
+    def add_time(self, seconds: int):
+        self.extra_time += seconds
+        self.logger.info(f"⏱️ تایم‌اوت {seconds} ثانیه تمدید شد (مجموع اضافه: {self.extra_time})")
+    
+    def get_remaining(self) -> float:
+        elapsed = asyncio.get_event_loop().time() - self.start_time
+        total_timeout = self.base_timeout + self.extra_time
+        remaining = total_timeout - elapsed
+        return max(0, remaining)
+        
 class TelegramChannelScraper:
     def __init__(self, config: Config):
         # ═══════════════════════════════════════════════════════════════
@@ -273,13 +289,16 @@ class TelegramChannelScraper:
 
     # ═══════════════════ متد اصلی با Timeout ═══════════════════
     async def run(self):
-        timeout = getattr(self.config, 'timeout_seconds', OVERALL_TIMEOUT)
+        base_timeout = getattr(self.config, 'timeout_seconds', OVERALL_TIMEOUT)
+        self.timeout_manager = TimeoutManager(base_timeout)
+        self.logger.info(f"⏱️ تایم‌اوت کلی: {base_timeout} ثانیه (با قابلیت تمدید پویا)")
+    
         try:
-            await asyncio.wait_for(self._run_impl(), timeout=timeout)
+            await asyncio.wait_for(self._run_impl(), timeout=base_timeout + 3600)
         except asyncio.TimeoutError:
-            self.logger.error(f"⏰ اسکریپت به دلیل محدودیت زمانی {timeout} ثانیه متوقف شد.")
+            self.logger.error(f"⏰ تایم‌اوت کلی {base_timeout + self.timeout_manager.extra_time} ثانیه به پایان رسید.")
         except Exception as e:
-            self.logger.critical(f"❌ خطای مرگبار در اجرای اصلی: {e}", exc_info=True)
+            self.logger.critical(f"❌ خطای مرگبار: {e}", exc_info=True)
 
     async def _run_impl(self):
         if self.start_link:
@@ -1058,7 +1077,6 @@ class TelegramChannelScraper:
     async def _download_media(self, items: List[Dict], page, context) -> tuple[dict, int]:
         post_ids = [str(item['id']) for item in items]
         media_map = {}
-
         downloaded = 0
         if post_ids:
             try:
@@ -1068,7 +1086,8 @@ class TelegramChannelScraper:
                     self.max_media_bytes,
                     self.delay_between_posts,
                     debug_screenshots_dir=self.debug_screenshots_dir,
-                    quiet_base=getattr(self.config, 'download_quiet_seconds', 1.0)
+                    quiet_base=getattr(self.config, 'download_quiet_seconds', 1.0),
+                    timeout_manager=self.timeout_manager
                 )
                 await downloader.download_all(page, context, post_ids, media_map)
             except Exception as e:
@@ -1076,7 +1095,6 @@ class TelegramChannelScraper:
             finally:
                 for files in media_map.values():
                     downloaded += len(files)
-
         return media_map, downloaded
     # ═══════════════════ آپلود و پاکسازی ═══════════════════
     async def _upload_and_cleanup(self) -> bool:
