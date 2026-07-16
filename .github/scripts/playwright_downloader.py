@@ -37,7 +37,9 @@ class PlaywrightDownloader:
     def __init__(self, profile_dir: Path, media_dir: Path, max_bytes: int,
                  delay: float = 5.0, max_retries: int = 2,
                  debug_screenshots_dir: Path = None,
-                 quiet_base: int = 20):
+                 quiet_base: int = 20,
+                 timeout_manager=None):
+                 
         self.profile_dir = profile_dir
         self.media_dir = media_dir
         self.max_bytes = max_bytes
@@ -53,7 +55,8 @@ class PlaywrightDownloader:
         self.debug_dir.mkdir(parents=True, exist_ok=True)
 
         self.quiet_base = quiet_base   # ← آستانهٔ سکوت پایه برای دانلود هر رسانه
-
+        self.timeout_manager = timeout_manager
+    
     async def download_all(self, page: Page, context, post_ids: List[str],
                            media_map: Optional[Dict[str, List[str]]] = None) -> None:
         if media_map is None:
@@ -309,30 +312,54 @@ class PlaywrightDownloader:
                 if menu_success:
                     await human_sleep(2.5 if visible_count > 4 else 1.5)
 
-                    quiet_threshold = self.quiet_base + (visible_count * 4)
-                    logger.info(f"   ⏳ آستانه سکوت برای این پست: {quiet_threshold} ثانیه")
+                    # آستانه سکوت برای مرحله اول (انتظار برای اولین دانلود)
+                    first_download_quiet_threshold = self.quiet_base + (visible_count * 4)
+                    # آستانه سکوت برای دانلودهای بعدی (بعد از اولین فایل)
+                    subsequent_quiet_threshold = max(10, self.quiet_base)
 
                     absolute_timeout = 600
                     check_interval = 2
                     waited = 0
                     last_count = 0
                     quiet_elapsed = 0
+                    has_first_download = False
+
+                    logger.info(f"   ⏳ آستانه سکوت برای اولین دانلود: {first_download_quiet_threshold} ثانیه")
+                    logger.info(f"   ⏳ آستانه سکوت برای دانلودهای بعدی: {subsequent_quiet_threshold} ثانیه")
 
                     while waited < absolute_timeout:
                         await asyncio.sleep(check_interval)
                         waited += check_interval
                         current_count = len(downloaded_files)
+
                         if current_count > last_count:
+                            # دانلود جدید رخ داده
                             last_count = current_count
                             quiet_elapsed = 0
-                            logger.debug(f"   ⏳ {waited}s – {current_count} فایل دریافت شد (فعالیت جدید)")
+                            if not has_first_download:
+                                has_first_download = True
+                                logger.info(f"   ✅ اولین فایل برای پست {post_id} دانلود شد! ادامه می‌دهیم...")
+                            else:
+                                logger.debug(f"   ⏳ {waited}s – {current_count} فایل دریافت شد (فعالیت جدید)")
                         else:
                             quiet_elapsed += check_interval
                             logger.debug(f"   ⏳ {waited}s – {current_count} فایل، {quiet_elapsed}s سکوت")
 
-                        if quiet_elapsed >= quiet_threshold:
-                            logger.info(f"   🔇 {quiet_threshold} ثانیه بدون دانلود جدید – اتمام دانلودهای این پست")
-                            break
+                            # اگر هنوز اولین دانلود رخ نداده و به آستانه سکوت رسیدیم
+                            if not has_first_download and quiet_elapsed >= first_download_quiet_threshold:
+                                # تمدید زمان با استفاده از TimeoutManager
+                                if self.timeout_manager:
+                                    extension_time = first_download_quiet_threshold
+                                    self.timeout_manager.add_time(extension_time)
+                                    logger.info(f"   ⏳ تمدید {extension_time} ثانیه به تایم‌اوت کلی (اولین دانلود هنوز رخ نداده)")
+                                # ریست کردن زمان سکوت برای ادامه انتظار
+                                quiet_elapsed = 0
+                                logger.info(f"   ⏳ هنوز اولین فایل دانلود نشده، منتظر می‌مانیم...")
+
+                            # اگر اولین دانلود رخ داده و به آستانه سکوت برای دانلودهای بعدی رسیدیم
+                            elif has_first_download and quiet_elapsed >= subsequent_quiet_threshold:
+                                logger.info(f"   🔇 {subsequent_quiet_threshold} ثانیه بدون دانلود جدید بعد از اولین فایل – اتمام دانلودهای این پست")
+                                break
 
                     if waited >= absolute_timeout:
                         logger.warning(f"   ⚠️ زمان کلی {absolute_timeout}s به پایان رسید – {len(downloaded_files)} فایل دریافت شد.")
