@@ -5,6 +5,8 @@ import asyncio
 import logging
 import random
 import re
+import hashlib
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
@@ -22,7 +24,46 @@ OVERALL_TIMEOUT = 35 * 60  # fallback
 async def human_sleep(base: float, jitter: float = 0.4):
     time = base * (1 + random.uniform(-jitter, jitter))
     await asyncio.sleep(max(0.1, time))
+def get_file_identifier(file_path: Path, use_hash: bool = True, max_hash_time: float = 3.0) -> dict:
+    """
+    تولید شناسه منحصربه‌فرد برای فایل بر اساس محتوا (هش) یا حجم+تاریخ
+    - use_hash: اگر True باشه و فایل کوچک باشه، هش می‌گیره
+    - max_hash_time: حداکثر زمان مجاز برای هش‌گیری (ثانیه)
+    برمی‌گرداند: دیکشنری شامل شناسه و روش استفاده‌شده
+    """
+    stat = file_path.stat()
+    size = stat.st_size
+    mtime = stat.st_mtime
 
+    # اگر فایل بزرگتر از ۵۰ مگابایت یا تعداد فایل‌ها زیاد باشه، use_hash رو false می‌کنیم (در کد اصلی مدیریت می‌شه)
+    identifier = {
+        'name': file_path.name,
+        'size': size,
+        'mtime': mtime,
+        'method': 'size_mtime',  # پیش‌فرض
+        'hash': None,
+        'composite_id': f"{size}_{int(mtime)}"
+    }
+
+    if use_hash and size < 50 * 1024 * 1024:  # فقط برای فایل‌های زیر ۵۰ مگ
+        try:
+            start = time.time()
+            md5 = hashlib.md5()
+            with open(file_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(8192), b''):
+                    md5.update(chunk)
+                    if time.time() - start > max_hash_time:
+                        raise TimeoutError("هش‌گیری زمان‌بر شد")
+            identifier['hash'] = md5.hexdigest()
+            identifier['method'] = 'hash'
+            identifier['composite_id'] = md5.hexdigest()  # برای مقایسه
+        except Exception:
+            # فال‌بک به روش حجم+تاریخ
+            identifier['method'] = 'size_mtime'
+            identifier['hash'] = None
+            identifier['composite_id'] = f"{size}_{int(mtime)}"
+
+    return identifier
 class TimeoutManager:
     def __init__(self, base_timeout: int):
         self.base_timeout = base_timeout
@@ -1110,44 +1151,126 @@ class TelegramChannelScraper:
     # ═══════════════════ آپلود و پاکسازی ═══════════════════
     async def _upload_and_cleanup(self) -> bool:
         """
-        آپلود پوشه media به مگا و پاکسازی فایل‌های محلی
-        برمی‌گرداند: True اگر آپلود موفق بود، False اگر خطا رخ داد
+        آپلود هوشمند پوشه media به مگا با جلوگیری از آپلود تکراری
+        برمی‌گرداند: True اگر آپلود موفق بود یا چیزی برای آپلود نبود
         """
         import subprocess
         import shutil
-        
+        import json
+
         media_path = self.media_dir
         if not media_path.exists() or not any(media_path.iterdir()):
-            return True  # چیزی برای آپلود نیست
-        
-        # محاسبه حجم پوشه
-        total_size = sum(f.stat().st_size for f in media_path.rglob('*') if f.is_file())
-        size_mb = total_size / (1024 * 1024)
-        
-        if size_mb < 100:  # کمتر از ۱۰۰ مگابایت، آپلود نمی‌کنیم
-            self.logger.info(f"📦 حجم پوشه media: {size_mb:.1f} MB (کمتر از ۱۰۰ MB، آپلود نمی‌شود)")
             return True
+
+        # ─── جمع‌آوری فایل‌های جدید ──────────────────────────
+        all_files = list(media_path.rglob('*'))
+        total_files = len([f for f in all_files if f.is_file()])
         
-        self.logger.info(f"☁️ شروع آپلود {size_mb:.1f} MB به مگا...")
+        # اگر تعداد فایل‌ها زیاد است، از هش استفاده نکن (برای سرعت)
+        use_hash = total_files < 50  # آستانه: کمتر از ۵۰ فایل
+
+        new_files = []
+        for f in all_files:
+            if f.is_file():
+                identifier = get_file_identifier(f, use_hash=use_hash)
+                new_files.append({
+                    'name': f.name,
+                    'path': str(f.relative_to(media_path)),
+                    'size': identifier['size'],
+                    'mtime': identifier['mtime'],
+                    'hash': identifier.get('hash'),
+                    'method': identifier['method'],
+                    'composite_id': identifier.get('composite_id', f"{identifier['size']}_{int(identifier['mtime'])}")
+                })
+
+        if not new_files:
+            return True
+
+        # ─── بارگذاری لیست فایل‌های آپلود شده قبلی ─────────────
+        state_file = self.base_dir / "uploaded_files.json"
+        uploaded_ids = set()
+        uploaded_hashes = set()
         
+        if state_file.exists():
+            try:
+                with open(state_file, 'r') as f:
+                    uploaded_data = json.load(f)
+                    for item in uploaded_data:
+                        if item.get('method') == 'hash' and item.get('hash'):
+                            uploaded_hashes.add(item['hash'])
+                        else:
+                            uploaded_ids.add(item.get('composite_id', f"{item['size']}_{int(item['mtime'])}"))
+            except Exception as e:
+                self.logger.warning(f"⚠️ خطا در خواندن لیست آپلود: {e}")
+
+        # ─── فیلتر کردن فایل‌های جدید ──────────────────────────
+        files_to_upload = []
+        for f in new_files:
+            is_uploaded = False
+            if f['method'] == 'hash' and f['hash']:
+                if f['hash'] in uploaded_hashes:
+                    is_uploaded = True
+            else:
+                if f['composite_id'] in uploaded_ids:
+                    is_uploaded = True
+            
+            if not is_uploaded:
+                files_to_upload.append(f)
+
+        if not files_to_upload:
+            self.logger.info("✅ همه فایل‌ها قبلاً آپلود شده‌اند (بر اساس شناسه).")
+            # پوشه محلی رو پاک کن چون همه فایل‌ها آپلود شدن
+            shutil.rmtree(media_path)
+            media_path.mkdir(parents=True, exist_ok=True)
+            return True
+
+        # ─── آپلود فقط فایل‌های جدید ────────────────────────────
+        self.logger.info(f"☁️ شروع آپلود {len(files_to_upload)} فایل جدید به مگا...")
+        self.logger.info(f"   📊 روش شناسایی: {'هش (MD5)' if use_hash else 'حجم + تاریخ'}")
+
         try:
-            # آپلود با rclone
             channel = self.channel
             mega_folder = getattr(self.config, 'mega_folder', 'TelegramArchive')
-            
+
             cmd = [
                 "rclone", "copy",
                 str(media_path),
                 f"mega:{mega_folder}/{channel}/media",
                 "--progress",
                 "--transfers", "4",
+                "--ignore-existing",  # برای امنیت بیشتر
                 "-vv"
             ]
-            
+
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            
+
             if result.returncode == 0:
-                self.logger.info(f"✅ آپلود {size_mb:.1f} MB با موفقیت انجام شد")
+                self.logger.info(f"✅ آپلود {len(files_to_upload)} فایل جدید با موفقیت انجام شد")
+
+                # ─── به‌روزرسانی لیست فایل‌های آپلود شده ──────────
+                if state_file.exists():
+                    with open(state_file, 'r') as f:
+                        existing = json.load(f)
+                else:
+                    existing = []
+                
+                # اضافه کردن فایل‌های جدید
+                existing.extend(files_to_upload)
+                
+                # حذف تکراری‌ها بر اساس composite_id یا hash
+                seen = set()
+                unique_files = []
+                for item in existing:
+                    key = item.get('hash') if item.get('method') == 'hash' else item.get('composite_id')
+                    if key and key not in seen:
+                        seen.add(key)
+                        unique_files.append(item)
+                
+                with open(state_file, 'w') as f:
+                    json.dump(unique_files, f, indent=2)
+                
+                self.logger.info(f"📝 لیست آپلود شده‌ها به‌روزرسانی شد (مجموع: {len(unique_files)} فایل).")
+
                 # پاکسازی فایل‌های محلی
                 shutil.rmtree(media_path)
                 media_path.mkdir(parents=True, exist_ok=True)
@@ -1156,7 +1279,7 @@ class TelegramChannelScraper:
             else:
                 self.logger.error(f"❌ خطا در آپلود: {result.stderr}")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"❌ خطا در آپلود: {e}")
             return False
