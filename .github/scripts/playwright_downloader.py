@@ -94,6 +94,10 @@ class PlaywrightDownloader:
         success = False
         max_attempts = 7
         logger.info(f"   🔍 جستجوی پست {post_id} ...")
+        # ذخیره موقعیت اولیه صفحه برای برگشت بعدی
+        original_scroll_y = await page.evaluate("window.scrollY")
+        scroll_stack = []  # لیست برای ثبت اسکرول‌های انجام‌شده
+        logger.info(f"   📌 موقعیت اولیه صفحه: {original_scroll_y}px")
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -118,15 +122,14 @@ class PlaywrightDownloader:
                 # اسکرول کمکی فقط در صورت نیاز (مقادیر کم، بدون خروج از کانال)
                 if attempt < max_attempts:
                     if attempt <= 2:
-                        # کمی بالا برای رد شدن از پست‌های پین‌شده
-                        await page.evaluate("window.scrollBy(0, -800)")
+                        scroll_amount = -800
                     elif attempt <= 4:
-                        # کمی پایین برای بارگذاری محتوای جدید
-                        await page.evaluate("window.scrollBy(0, 1200)")
+                        scroll_amount = 1200
                     else:
-                        # برگشت مختصر به وسط برای تازه‌سازی
-                        await page.evaluate("window.scrollBy(0, -600)")
-
+                        scroll_amount = -600
+    
+                    scroll_stack.append(scroll_amount)  # ثبت اسکرول
+                    await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
                     await human_sleep(2.0, 0.5)
 
             except Exception as e:
@@ -134,16 +137,6 @@ class PlaywrightDownloader:
 
         if not success:
             logger.warning(f"⚠️ پست {post_id} بعد از {max_attempts} تلاش پیدا نشد.")
-
-            try:
-                element_exists = await page.locator(f'[data-message-id="{post_id}"]').count() > 0
-                if element_exists:
-                    logger.info(f"   ℹ️ المان وجود دارد ولی نمایان نشد (احتمال حذف شده)")
-                else:
-                    logger.info(f"   ℹ️ المان در DOM وجود ندارد (خیلی قدیمی)")
-            except:
-                pass
-
             try:
                 path = self.debug_dir / f"post_not_found_{post_id}.png"
                 await page.screenshot(path=path)
@@ -151,7 +144,18 @@ class PlaywrightDownloader:
             except:
                 pass
 
+            try:
+                for amount in reversed(scroll_stack):
+                    await page.evaluate(f"window.scrollBy(0, {-amount})")
+                    await human_sleep(0.3, 0.1)
+                current_y = await page.evaluate("window.scrollY")
+                if abs(current_y - original_scroll_y) > 30:
+                    await page.evaluate(f"window.scrollTo(0, {original_scroll_y})")
+                    logger.info(f"   ↩️ برگشت به موقعیت اولیه: {original_scroll_y}px")
+            except Exception as e:
+                logger.warning(f"   ⚠️ خطا در برگشت اسکرول‌ها: {e}")
             return
+            
         logger.info(f"   📍 پست {post_id} آماده شد.")
         await human_sleep(1.5, 0.4)
 
@@ -351,7 +355,7 @@ class PlaywrightDownloader:
                                 if self.timeout_manager:
                                     extension_time = first_download_quiet_threshold
                                     self.timeout_manager.add_time(extension_time)
-                                    logger.info(f"   ⏳ تمدید {extension_time} ثانیه به تایم‌اوت کلی (اولین دانلود هنوز رخ نداده)")
+                                    logger.info(f"   ⏳ تمدید {extension_time} ثانیه به تایم‌اوت کلی برای پست {post_id} (اولین دانلود هنوز رخ نداده)")
                                 # ریست کردن زمان سکوت برای ادامه انتظار
                                 quiet_elapsed = 0
                                 logger.info(f"   ⏳ هنوز اولین فایل دانلود نشده، منتظر می‌مانیم...")
@@ -401,9 +405,9 @@ class PlaywrightDownloader:
                     await self._download_link(page, link, post_id, idx, media_map)
             else:
                 logger.warning(f"   ⚠️ هیچ لینکی برای دانلود مستقیم یافت نشد.")
+
         # ─── پاک‌سازی اسکرین‌شات‌های ضربدر در صورت موفقیت ───
         if menu_success or downloaded_files:
-            # دانلود موفق بوده → اسکرین‌شات‌های ضربدر را حذف کن
             if hasattr(self, '_debug_cross_files'):
                 for path in self._debug_cross_files:
                     try:
@@ -415,14 +419,29 @@ class PlaywrightDownloader:
                 self._debug_cross_files = []
                 logger.info(f"   🧹 اسکرین‌شات‌های ضربدر پاک شدند (دانلود موفق)")
         else:
-            # دانلود ناموفق بوده → اسکرین‌شات‌های ضربدر نگه داشته می‌شوند
             if hasattr(self, '_debug_cross_files') and self._debug_cross_files:
                 logger.warning(f"   ⚠️ اسکرین‌شات‌های ضربدر برای بررسی خطا نگه داشته شدند ({len(self._debug_cross_files)} فایل)")
 
+        # ─── برگشت به نقطه اول ──────────────────────────────────
+        for amount in reversed(scroll_stack):
+            await page.evaluate(f"window.scrollBy(0, {-amount})")
+            await human_sleep(0.3, 0.1)
+        current_y = await page.evaluate("window.scrollY")
+        if abs(current_y - original_scroll_y) > 30:
+            await page.evaluate(f"window.scrollTo(0, {original_scroll_y})")
+            logger.info(f"   ↩️ برگشت به موقعیت اولیه: {original_scroll_y}px")
+
+        # ─── مرحله ۴ (اختیاری): تمرکز مجدد روی پست ──────────────
+        try:
+            await message_locator.scroll_into_view_if_needed()
+            await human_sleep(0.3, 0.1)
+            logger.info(f"   🔄 پست {post_id} دوباره به مرکز صفحه منتقل شد.")
+        except Exception as e:
+            logger.debug(f"   ⚠️ خطا در انتقال مجدد پست {post_id}: {e}")
+
         if downloaded_files:
             media_map[post_id] = downloaded_files
-            logger.info(f"📦 پست {post_id}: {len(downloaded_files)} رسانه دانلود شد.")
-            
+            logger.info(f"📦 پست {post_id}: {len(downloaded_files)} رسانه دانلود شد.")            
     async def _draw_debug_cross(self, page: Page, x: float, y: float, name: str):
         """رسم ضربدر قرمز و ذخیره اسکرین‌شات (فایل به self._debug_cross_files اضافه می‌شود)"""
         await page.evaluate(f"""
