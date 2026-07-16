@@ -54,6 +54,11 @@ on:
         description: '⏳ آستانه سکوت برای اتمام دانلود (ثانیه)'
         required: false
         default: '20'
+      retry_failed:
+        description: '🔄 تلاش مجدد برای پست‌های ناموفق (فعال کردن این گزینه، سایر ورودی‌ها را نادیده می‌گیرد. فقط نام کانال کافی است)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -143,6 +148,7 @@ jobs:
           c['mega_folder'] = '${{ github.event.inputs.mega_folder }}'
           c['save_screenshots'] = '${{ github.event.inputs.save_screenshots }}'.lower() == 'true'
           c['resume'] = '${{ github.event.inputs.resume }}'.lower() == 'true'
+          c['retry_failed'] = '${{ github.event.inputs.retry_failed }}'.lower() == 'true'
           # اگر start_link خالی باشد، کلید را حذف می‌کنیم تا از شرط‌های خالی جلوگیری شود
           if not c.get('start_link'):
               c.pop('start_link', None)
@@ -192,7 +198,15 @@ jobs:
           chmod 600 ~/.config/rclone/rclone.conf
           echo "✅ rclone config loaded"
           rclone listremotes
-
+          
+      - name: 📥 Download previous report for retry
+        if: ${{ github.event.inputs.retry_failed == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: download-report-${{ github.event.inputs.channel }}
+          path: Download/telegram_downloads/${{ github.event.inputs.channel }}/
+        continue-on-error: true
+        
       - name: 🚀 Run Telegram Scraper
         if: ${{ !inputs.debug_mode }}
         run: xvfb-run python .github/scripts/main.py --config config/config.yaml
@@ -209,8 +223,9 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: download-report
+          name: download-report-${{ github.event.inputs.channel }}
           path: Download/telegram_downloads/${{ github.event.inputs.channel }}/download_report.txt
+          overwrite: true
       # ════════════════════════════════════════════
       # آپلود گذارش به مگا
       # ════════════════════════════════════════════
