@@ -355,12 +355,65 @@ class TelegramChannelScraper:
                 self.logger.info("✅ هیچ پست ناموفقی برای تلاش مجدد وجود ندارد.")
                 return
             self.logger.info(f"🔄 تلاش مجدد برای {len(failed_ids)} پست ناموفق...")
-            # نادیده گرفتن ورودی‌های کاربر
-            self.limit = len(failed_ids)
-            self.start_link = f"https://t.me/{self.channel}/{failed_ids[0]}"
-            self.target_msg_id = failed_ids[0]
-            # scroll_direction و max_media_mb از config خوانده می‌شوند (تغییری نمی‌کنند)
-
+            
+            # ─── پردازش تک‌تک پست‌ها ──────────────────────────
+            context = None
+            page = None
+            retry_media_map = {}
+            retry_failed_posts = []
+            retry_items = []  # برای گزارش نهایی
+            
+            for idx, post_id in enumerate(failed_ids, 1):
+                self.logger.info(f"📥 [{idx}/{len(failed_ids)}] پردازش پست {post_id} ...")
+                
+                # تنظیم لینک مستقیم برای این پست
+                self.start_link = f"https://t.me/{self.channel}/{post_id}"
+                self.target_msg_id = str(post_id)
+                
+                # اطمینان از مرورگر
+                context, page = await self._ensure_browser(context, page)
+                
+                # دریافت فقط همین پست
+                items, context, page = await self._fetch_posts_from_telegram(
+                    existing_seen_ids=set(),
+                    keep_browser_open=True,
+                    existing_context=context,
+                    existing_page=page,
+                    limit=1,
+                    target_ids=[str(post_id)]  # ← فقط این پست را بگیر
+                )
+                
+                if not items:
+                    self.logger.warning(f"⚠️ پست {post_id} پیدا نشد!")
+                    retry_failed_posts.append({
+                        'id': str(post_id),
+                        'reason': 'پست پیدا نشد',
+                        'url': f"https://t.me/{self.channel}/{post_id}"
+                    })
+                    continue
+                
+                # دانلود رسانه‌های این پست
+                post_data = items[0]
+                media_map, downloaded, failed = await self._download_media([post_data], page, context)
+                
+                if media_map:
+                    retry_media_map.update(media_map)
+                    retry_items.append(post_data)
+                    self.logger.info(f"✅ پست {post_id} با {downloaded} فایل دانلود شد.")
+                else:
+                    retry_failed_posts.append({
+                        'id': str(post_id),
+                        'reason': 'دانلود نشد (بدون فایل یا خطا)',
+                        'url': f"https://t.me/{self.channel}/{post_id}"
+                    })
+                    self.logger.warning(f"❌ پست {post_id} ناموفق بود.")
+            
+            # ─── تولید گزارش نهایی retry ──────────────────────
+            await self._generate_download_report(retry_items, retry_media_map, retry_failed_posts)
+            if context:
+                await context.close()
+            self.logger.info("🏁 تلاش مجدد تمام شد.")
+            return  # خروج از تابع (اجرای عادی ادامه پیدا نمی‌کند)
         # ─── متغیرهای کلی ─────────────────────────────
         max_retries = 3
         retry_count = 0
@@ -514,7 +567,7 @@ class TelegramChannelScraper:
             self.logger.info("🔄 صفحه‌ی جدید در context موجود ساخته شد.")
         return context, page
     # ═══════════════════ استخراج پست‌ها با پشتیبانی از جهت اسکرول ═══════════════════
-    async def _fetch_posts_from_telegram(self, existing_seen_ids: set = None, keep_browser_open: bool = False, existing_context: Any = None, existing_page: Any = None, limit: int = None) -> Tuple[List[Dict], Any, Any]:
+    async def _fetch_posts_from_telegram(self, existing_seen_ids: set = None, keep_browser_open: bool = False, existing_context: Any = None, existing_page: Any = None, limit: int = None, target_ids: List[str] = None) -> Tuple[List[Dict], Any, Any]:
         from playwright.async_api import async_playwright
 
         # ─── اگر context و page از قبل وجود دارند، از آن‌ها استفاده کن ──
@@ -643,7 +696,9 @@ class TelegramChannelScraper:
                                 pass
                         if not msg_id or msg_id in seen_ids:
                             continue
-
+                        # ─── فیلتر بر اساس target_ids ──────────────────
+                        if target_ids and msg_id not in target_ids:
+                            continue
                         if self.start_link and not start_collecting:
                             if msg_id == self.target_msg_id:
                                 start_collecting = True
