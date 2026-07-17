@@ -96,6 +96,8 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y jq unzip xvfb
 
       - name: 💾 Cache Playwright browsers
         uses: actions/cache@v4
@@ -167,15 +169,51 @@ jobs:
           echo "TIMEOUT_MINUTES=$TIMEOUT_MINUTES" >> $GITHUB_ENV
           echo "⏱️ زمان محاسبه‌شده: ${TIMEOUT_SECONDS} ثانیه (${TIMEOUT_MINUTES} دقیقه)"
       #-----------------------------------------------------------------------------------------
-      - name: 🧹 Clean old output (keep resume_state.json)
+      - name: 📥 Download previous resume state (if resume is enabled)
+        if: ${{ github.event.inputs.resume == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           OUTPUT_DIR="Download/telegram_downloads/${{ github.event.inputs.channel }}"
-          if [ -d "$OUTPUT_DIR" ]; then
-            # حذف همه‌چیز به جز resume_state.json
-            find "$OUTPUT_DIR" -mindepth 1 -not -name "resume_state.json" -exec rm -rf {} +
-            echo "✅ پوشه پاکسازی شد (resume_state.json حفظ شد)"
+          mkdir -p "$OUTPUT_DIR"
+    
+          ARTIFACT_NAME="resume-state-${{ github.event.inputs.channel }}"
+          echo "🔍 جستجوی آرتیفکت با نام: $ARTIFACT_NAME"
+    
+          # پیدا کردن آخرین آرتیفکت (مرتب‌سازی بر اساس تاریخ، نزولی)
+          ARTIFACT_ID=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$ARTIFACT_NAME&per_page=5" \
+            | jq -r '.artifacts | sort_by(.created_at) | reverse | .[0].id')
+    
+          if [ "$ARTIFACT_ID" != "null" ] && [ -n "$ARTIFACT_ID" ]; then
+            echo "✅ آرتیفکت وضعیت قبلی پیدا شد (ID: $ARTIFACT_ID)"
+            curl -L -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" \
+              -o /tmp/resume_state.zip
+      
+            # استخراج فایل JSON از زیپ
+            unzip -j /tmp/resume_state.zip -d "$OUTPUT_DIR"
+      
+            if [ -f "$OUTPUT_DIR/resume_state.json" ]; then
+              echo "✅ فایل resume_state.json با موفقیت بازیابی شد"
+              cat "$OUTPUT_DIR/resume_state.json" | jq '.' # نمایش محتوا برای دیباگ
+            else
+              echo "⚠️ فایل در زیپ پیدا نشد"
+            fi
           else
-            echo "ℹ️ پوشه خروجی وجود ندارد، نیازی به پاکسازی نیست"
+            echo "ℹ️ هیچ وضعیت قبلی یافت نشد، اسکریپت از ابتدا شروع می‌کند."
+          fi
+      - name: 🧹 Clean old media (keep resume_state.json)
+        run: |
+          OUTPUT_DIR="Download/telegram_downloads/${{ github.event.inputs.channel }}"
+    
+          # بررسی چندگانه برای جلوگیری از اشتباه فاجعه‌بار
+          if [ -d "$OUTPUT_DIR" ] && [ "$OUTPUT_DIR" != "/" ] && [ "$OUTPUT_DIR" != "." ] && [ "$OUTPUT_DIR" != "Download" ]; then
+            echo "🧹 پاکسازی پوشه: $OUTPUT_DIR (به جز resume_state.json)"
+            find "$OUTPUT_DIR" -mindepth 1 -not -name "resume_state.json" -exec rm -rf {} +
+            echo "✅ پاکسازی انجام شد."
+          else
+            echo "ℹ️ پوشه خالی یا نامعتبر است، پاکسازی انجام نشد."
           fi
 
       # ════════════════════════════════════════════
@@ -353,6 +391,15 @@ jobs:
           else
             echo "✅ Output directory is ready"
           fi
+      #-------------------------------------------------
+      - name: 📤 Upload resume state as artifact (for next run)
+        if: ${{ always() }}  # حتی اگر اسکریپت fail کند، وضعیت فعلی را آپلود کن
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-state-${{ github.event.inputs.channel }}
+          path: Download/telegram_downloads/${{ github.event.inputs.channel }}/resume_state.json
+          overwrite: true
+          retention-days: 7  # وضعیت را به مدت ۷ روز نگه دار (کافی است)
       # ════════════════════════════════════════════
       # آپلود حالت عادی (فقط پوشه media)
       # ════════════════════════════════════════════
