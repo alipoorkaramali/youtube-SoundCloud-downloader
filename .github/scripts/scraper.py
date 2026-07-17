@@ -663,11 +663,31 @@ class TelegramChannelScraper:
         # ─── منتظر بارگذاری پیام‌های کانال ──────────────────────────
         self.logger.info("⏳ منتظر بارگذاری پیام‌های کانال...")
         try:
-            await page.wait_for_selector('div[data-message-id]', timeout=15000)
-            self.logger.info("✅ پیام‌ها بارگذاری شدند.")
-            # ─── تأخیر کوتاه برای رندر کامل ──────────────────────
-            await asyncio.sleep(4)
+            # منتظر بمان تا حداقل یک پیام با محتوای غیرخالی ظاهر شود
+            await page.wait_for_function(
+                """() => {
+                    const messages = document.querySelectorAll('div[data-message-id]');
+                    if (messages.length === 0) return false;
+                    for (const msg of messages) {
+                        const text = msg.innerText?.trim() || '';
+                        if (text.length > 10) return true;
+                    }
+                    return false;
+                }""",
+                timeout=15000
+            )
+            self.logger.info("✅ پیام‌ها با محتوا بارگذاری شدند.")
+            
+            # اگر direction 'up' است، ابتدا به پایین صفحه برو تا جدیدترین‌ها لود شوند
+            if self.scroll_direction == 'up' and not self.start_link:
+                self.logger.info("⬇️ پرش به پایین صفحه برای بارگذاری جدیدترین پست‌ها...")
+                await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+                await asyncio.sleep(2)
+                self.logger.info("✅ به پایین صفحه رفتیم.")
+            
+            await asyncio.sleep(2)  # تأخیر نهایی برای رندر
             self.logger.info("⏳ منتظر رندر کامل پیام‌ها...")
+            
         except Exception as e:
             self.logger.warning(f"⚠️ timeout در انتظار پیام‌ها: {e}. ادامه با اسکرول...")
 
