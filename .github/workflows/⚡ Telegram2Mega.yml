@@ -268,6 +268,37 @@ jobs:
         if: ${{ inputs.debug_mode }}
         run: xvfb-run python .github/scripts/debug_scraper.py
         timeout-minutes: 360
+
+      # ════════════════════════════════════════════
+      # پاکسازی آرتیفکت‌های قدیمی (فقط آخرین نسخه)
+      # ════════════════════════════════════════════
+      - name: 🧹 Clean old artifacts (keep only latest)
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARTIFACT_NAME="download-report-${{ github.event.inputs.channel }}"
+          echo "🔍 جستجوی آرتیفکت‌های قدیمی با نام: $ARTIFACT_NAME"
+          
+          # دریافت لیست همه آرتیفکت‌ها با این نام
+          ARTIFACTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$ARTIFACT_NAME&per_page=100")
+          
+          # استخراج ID آرتیفکت‌های قدیمی (همه به جز آخرین)
+          OLD_IDS=$(echo "$ARTIFACTS" | jq -r '.artifacts | sort_by(.created_at) | reverse | .[1:][] | .id')
+          
+          if [ -n "$OLD_IDS" ]; then
+            echo "🗑️ حذف آرتیفکت‌های قدیمی..."
+            for id in $OLD_IDS; do
+              echo "   حذف آرتیفکت با ID: $id"
+              curl -X DELETE -H "Authorization: token $GH_TOKEN" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id" \
+                -s -o /dev/null
+            done
+            echo "✅ آرتیفکت‌های قدیمی حذف شدند."
+          else
+            echo "ℹ️ هیچ آرتیفکت قدیمی‌ای برای حذف وجود ندارد."
+          fi
       # ════════════════════════════════════════════
       # آپلود گذارش به artifact
       # ════════════════════════════════════════════
