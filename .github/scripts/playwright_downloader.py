@@ -361,7 +361,7 @@ class PlaywrightDownloader:
                             quiet_elapsed = 0
                             if not has_first_download:
                                 has_first_download = True
-                                logger.info(f"   ✅ اولین فایل برای پست {post_id} دانلود شد! زمان سکوت ریست شد.")
+                                logger.info(f"   ✅ اولین فایل برای پست {post_id} دانلود شد! ادامه میدهیم .")
                             else:
                                 logger.debug(f"   ⏳ {waited}s – {current_count} فایل دریافت شد (فعالیت جدید)")
                         else:
