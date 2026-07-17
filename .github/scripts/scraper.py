@@ -112,7 +112,7 @@ class TelegramChannelScraper:
 
         # ─── تنظیمات مربوط به اسکرول (قبل از logger) ────────────────
         self.scroll_direction = getattr(config, 'scroll_direction', 'up').lower()
-
+        self._manual_scroll_done = False
         # ─── متغیرهای مدیریت زمان ────────────────────────────────────
         self.last_download_success = False
 
@@ -682,8 +682,34 @@ class TelegramChannelScraper:
             if self.scroll_direction == 'up' and not self.start_link:
                 self.logger.info("⬇️ پرش به پایین صفحه برای بارگذاری جدیدترین پست‌ها...")
                 await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-                await asyncio.sleep(2)
+                await asyncio.sleep(3)  # افزایش تأخیر
                 self.logger.info("✅ به پایین صفحه رفتیم.")
+                
+                # ─── منتظر بارگذاری پیام‌های جدید ──────────────────
+                self.logger.info("⏳ منتظر بارگذاری پیام‌های جدید در پایین صفحه...")
+                try:
+                    await page.wait_for_function(
+                        """() => {
+                            const messages = document.querySelectorAll('div[data-message-id]');
+                            if (messages.length === 0) return false;
+                            // بررسی کنید که حداقل یک پیام در نیمه پایینی صفحه باشد
+                            const viewportHeight = window.innerHeight;
+                            for (const msg of messages) {
+                                const rect = msg.getBoundingClientRect();
+                                if (rect.top > viewportHeight * 0.3 && rect.top < viewportHeight * 0.9) {
+                                    const text = msg.innerText?.trim() || '';
+                                    if (text.length > 10) return true;
+                                }
+                            }
+                            return false;
+                        }""",
+                        timeout=10000
+                    )
+                    self.logger.info("✅ پیام‌های جدید در پایین صفحه بارگذاری شدند.")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ timeout در انتظار پیام‌های جدید: {e}")
+                
+                self._manual_scroll_done = True  # ← تنظیم flag
             
             await asyncio.sleep(2)  # تأخیر نهایی برای رندر
             self.logger.info("⏳ منتظر رندر کامل پیام‌ها...")
@@ -694,7 +720,7 @@ class TelegramChannelScraper:
         await self._save_screenshot(page, "initial")
 
         # ═══════════════ پرش به ابتدا یا انتهای صفحه بر اساس جهت اسکرول ═══════════════
-        if not self.start_link:
+        if not self.start_link and not self._manual_scroll_done:
             if self.scroll_direction == 'up':
                 self.logger.info("⬇️ تلاش برای پرش به جدیدترین پست‌ها...")
                 clicked = False
@@ -726,6 +752,8 @@ class TelegramChannelScraper:
                     await page.evaluate("window.scrollBy(0, -2000)")
                     await human_sleep(1, 0.2)
                 self.logger.info("   ✅ به بالای صفحه رفتیم.")
+        elif self._manual_scroll_done:
+            self.logger.info("ℹ️ پرش دستی انجام شده، از جستجوی دکمه صرف‌نظر می‌شود.")
         else:
             self.logger.info("ℹ️ در حالت start_link، پرش به پایین/بالا انجام نمی‌شود.")
 
