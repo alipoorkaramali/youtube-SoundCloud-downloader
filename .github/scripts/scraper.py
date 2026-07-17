@@ -1222,39 +1222,108 @@ class TelegramChannelScraper:
                 for files in media_map.values():
                     downloaded += len(files)
         return media_map, downloaded, failed_posts
-    # ═══════════════════ ساخت گذارش از موفق یا عدم موفقیت دانلود ═══════════════════
+    #==========================متد ساخت گذارش=======================================
     async def _generate_download_report(self, items: List[Dict], media_map: Dict, failed_posts: List[Dict]):
-        """تولید گزارش نهایی دانلودها با کپشن پست‌ها"""
+        """تولید گزارش نهایی دانلودها با کپشن پست‌ها (به‌روزرسانی هوشمند)"""
         report_path = self.base_dir / "download_report.txt"
+        
+        # ─── خواندن گزارش قبلی (اگر وجود داشته باشد) ──────────────
+        previous_successful = set()
+        previous_failed = {}
+        
+        if report_path.exists():
+            try:
+                with open(report_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    
+                # استخراج موفق‌های قبلی
+                in_success = False
+                for line in content.split('\n'):
+                    if "✅ پست‌های دانلود شده (موفق):" in line:
+                        in_success = True
+                        continue
+                    if in_success and line.strip().startswith("❌"):
+                        break
+                    if in_success and line.strip().startswith("  "):
+                        match = re.search(r'پست (\d+)', line)
+                        if match:
+                            previous_successful.add(match.group(1))
+                
+                # استخراج ناموفق‌های قبلی
+                in_failed = False
+                for line in content.split('\n'):
+                    if "❌ پست‌های ناموفق (شکست خورده):" in line:
+                        in_failed = True
+                        continue
+                    if in_failed and line.strip().startswith("⚠️"):
+                        break
+                    if in_failed and line.strip().startswith("  "):
+                        match = re.search(r'پست (\d+)', line)
+                        if match:
+                            previous_failed[match.group(1)] = True
+            except Exception as e:
+                self.logger.warning(f"⚠️ خطا در خواندن گزارش قبلی: {e}")
         
         # ─── ساخت دیکشنری برای دسترسی سریع به کپشن هر پست ───
         post_text = {item['id']: item.get('text', '') for item in items}
         
-        successful_ids = set(media_map.keys())
-        failed_ids = {item['id'] for item in failed_posts}
+        # ─── ادغام داده‌ها ──────────────────────────────────────────
+        # موفق‌های جدید
+        new_successful = set(media_map.keys())
         
-        # پست‌هایی که در هیچ لیستی نیستند (احتمالاً پردازش نشده‌اند)
-        unprocessed = []
-        for item in items:
-            if item['id'] not in successful_ids and item['id'] not in failed_ids:
-                unprocessed.append(item['id'])
+        # ناموفق‌های جدید
+        new_failed = {item['id']: item for item in failed_posts}
         
+        # شروع با موفق‌های قبلی
+        all_successful = set(previous_successful)
+        all_failed = dict(previous_failed)  # فقط شناسه‌ها برای سرعت
+        
+        # اضافه کردن موفق‌های جدید
+        for post_id in new_successful:
+            all_successful.add(post_id)
+            # اگر قبلاً ناموفق بود، از ناموفق‌ها حذفش کن
+            if post_id in all_failed:
+                del all_failed[post_id]
+        
+        # اضافه کردن ناموفق‌های جدید (فقط اگر در موفق‌ها نباشند)
+        for post_id, item in new_failed.items():
+            if post_id not in all_successful:
+                all_failed[post_id] = item
+        
+        # ─── تولید گزارش نهایی ──────────────────────────────────────
+        # ساخت لیست نهایی آیتم‌ها (برای تعداد کل)
+        all_items = []
+        for post_id in all_successful:
+            # پیدا کردن کپشن از items جدید یا پیش‌فرض
+            caption = post_text.get(post_id, '')
+            all_items.append({'id': post_id, 'text': caption})
+        for post_id in all_failed.keys():
+            if post_id not in all_successful:
+                caption = post_text.get(post_id, '')
+                all_items.append({'id': post_id, 'text': caption})
+        
+        # مرتب‌سازی بر اساس شناسه
+        all_items.sort(key=lambda x: int(x['id']))
+        
+        # ─── نوشتن گزارش ──────────────────────────────────────────────
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write("=" * 60 + "\n")
             f.write(f"📊 گزارش نهایی دانلود - کانال: @{self.channel}\n")
             f.write(f"📅 تاریخ: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"📈 تعداد کل پست‌های بررسی‌شده: {len(items)}\n")
+            f.write(f"📈 تعداد کل پست‌های بررسی‌شده: {len(all_items)}\n")
             f.write("=" * 60 + "\n\n")
             
             # ─── پست‌های موفق ──────────────────────────────────
             f.write("✅ پست‌های دانلود شده (موفق):\n")
             f.write("-" * 40 + "\n")
-            if successful_ids:
-                for i, post_id in enumerate(sorted(successful_ids, key=int), 1):
+            if all_successful:
+                for i, post_id in enumerate(sorted(all_successful, key=int), 1):
                     url = f"https://t.me/{self.channel}/{post_id}"
                     count = len(media_map.get(post_id, []))
+                    # اگر پست در media_map نبود (از قبلی)، از previous_successful استفاده کن
+                    if count == 0 and post_id in previous_successful:
+                        count = 1  # یا هر عددی که برای نمایش مناسب است
                     caption = post_text.get(post_id, '')
-                    # خلاصه کپشن (۵۰ کاراکتر اول)
                     caption_summary = caption[:50] + ('...' if len(caption) > 50 else '')
                     f.write(f"  {i}. پست {post_id} - {count} فایل - {url}\n")
                     if caption_summary:
@@ -1266,8 +1335,8 @@ class TelegramChannelScraper:
             # ─── پست‌های ناموفق ──────────────────────────────────
             f.write("❌ پست‌های ناموفق (شکست خورده):\n")
             f.write("-" * 40 + "\n")
-            if failed_posts:
-                sorted_failed = sorted(failed_posts, key=lambda x: int(x['id']))
+            if all_failed:
+                sorted_failed = sorted(all_failed.values(), key=lambda x: int(x['id']))
                 for i, item in enumerate(sorted_failed, 1):
                     post_id = item['id']
                     reason = item.get('reason', 'نامشخص')
@@ -1282,6 +1351,13 @@ class TelegramChannelScraper:
             f.write("\n")
             
             # ─── پست‌های پردازش نشده (اختیاری) ──────────────────
+            # پیدا کردن پست‌هایی که در هیچ لیستی نیستند
+            all_known = set(all_successful) | set(all_failed.keys())
+            unprocessed = []
+            for item in items:
+                if item['id'] not in all_known:
+                    unprocessed.append(item['id'])
+            
             if unprocessed:
                 f.write("⚠️ پست‌های پردازش نشده:\n")
                 f.write("-" * 40 + "\n")
@@ -1298,7 +1374,6 @@ class TelegramChannelScraper:
             f.write("🏁 پایان گزارش\n")
         
         self.logger.info(f"📄 گزارش نهایی در {report_path} ذخیره شد.")
-
     def _extract_failed_posts_from_report(self) -> List[str]:
         """استخراج شناسه پست‌های ناموفق از فایل گزارش"""
         report_path = self.base_dir / "download_report.txt"
