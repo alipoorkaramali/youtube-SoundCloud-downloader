@@ -98,6 +98,7 @@ class PlaywrightDownloader:
     async def _process_post(self, page: Page, post_id: str,
                             media_map: Dict[str, List[str]]) -> None:
         logger.info(f"📍 شروع دانلود پست {post_id}")
+        logger.info(f"   🔄 زمان سکوت برای این پست از صفر شروع می‌شود.")
         self._debug_cross_files = []
 
         # ──────────────── نمایش پست (اسکرول هوشمند بدون خروج از کانال) ────────────────
@@ -348,7 +349,7 @@ class PlaywrightDownloader:
 
                     logger.info(f"   ⏳ آستانه سکوت برای اولین دانلود: {first_download_quiet_threshold} ثانیه")
                     logger.info(f"   ⏳ آستانه سکوت برای دانلودهای بعدی: {subsequent_quiet_threshold} ثانیه")
-
+                    logger.info(f"   ⏳ شروع انتظار برای پست {post_id} (حداکثر {absolute_timeout} ثانیه)")
                     while waited < absolute_timeout:
                         await asyncio.sleep(check_interval)
                         waited += check_interval
@@ -360,7 +361,7 @@ class PlaywrightDownloader:
                             quiet_elapsed = 0
                             if not has_first_download:
                                 has_first_download = True
-                                logger.info(f"   ✅ اولین فایل برای پست {post_id} دانلود شد! ادامه می‌دهیم...")
+                                logger.info(f"   ✅ اولین فایل برای پست {post_id} دانلود شد! زمان سکوت ریست شد.")
                             else:
                                 logger.debug(f"   ⏳ {waited}s – {current_count} فایل دریافت شد (فعالیت جدید)")
                         else:
