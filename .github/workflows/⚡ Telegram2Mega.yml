@@ -310,32 +310,53 @@ jobs:
       # ════════════════════════════════════════════
       # پاکسازی آرتیفکت‌های قدیمی (فقط آخرین نسخه)
       # ════════════════════════════════════════════
-      - name: 🧹 Clean old artifacts (keep only latest)
+      - name: 🧹 Clean old artifacts (delete all previous versions)
         if: ${{ always() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # ─── پاکسازی آرتیفکت‌های گزارش دانلود ───
           ARTIFACT_NAME="download-report-${{ github.event.inputs.channel }}"
-          echo "🔍 جستجوی آرتیفکت‌های قدیمی با نام: $ARTIFACT_NAME"
+          echo "🔍 جستجوی آرتیفکت‌های قدیمی گزارش با نام: $ARTIFACT_NAME"
           
-          # دریافت لیست همه آرتیفکت‌ها با این نام
           ARTIFACTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$ARTIFACT_NAME&per_page=100")
           
-          # استخراج ID آرتیفکت‌های قدیمی (همه به جز آخرین)
-          OLD_IDS=$(echo "$ARTIFACTS" | jq -r '.artifacts | sort_by(.created_at) | reverse | .[1:][] | .id')
+          ALL_IDS=$(echo "$ARTIFACTS" | jq -r '.artifacts[].id')
           
-          if [ -n "$OLD_IDS" ]; then
-            echo "🗑️ حذف آرتیفکت‌های قدیمی..."
-            for id in $OLD_IDS; do
+          if [ -n "$ALL_IDS" ]; then
+            echo "🗑️ حذف همه آرتیفکت‌های قدیمی گزارش..."
+            for id in $ALL_IDS; do
               echo "   حذف آرتیفکت با ID: $id"
               curl -X DELETE -H "Authorization: token $GH_TOKEN" \
                 "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id" \
                 -s -o /dev/null
             done
-            echo "✅ آرتیفکت‌های قدیمی حذف شدند."
+            echo "✅ همه آرتیفکت‌های قدیمی گزارش حذف شدند."
           else
-            echo "ℹ️ هیچ آرتیفکت قدیمی‌ای برای حذف وجود ندارد."
+            echo "ℹ️ هیچ آرتیفکت قدیمی گزارش برای حذف وجود ندارد."
+          fi
+
+          # ─── پاکسازی آرتیفکت‌های وضعیت ادامه (Resume) ───
+          ARTIFACT_NAME="resume-state-${{ github.event.inputs.channel }}"
+          echo "🔍 جستجوی آرتیفکت‌های قدیمی وضعیت ادامه با نام: $ARTIFACT_NAME"
+          
+          ARTIFACTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$ARTIFACT_NAME&per_page=100")
+          
+          ALL_IDS=$(echo "$ARTIFACTS" | jq -r '.artifacts[].id')
+          
+          if [ -n "$ALL_IDS" ]; then
+            echo "🗑️ حذف همه آرتیفکت‌های قدیمی وضعیت ادامه..."
+            for id in $ALL_IDS; do
+              echo "   حذف آرتیفکت با ID: $id"
+              curl -X DELETE -H "Authorization: token $GH_TOKEN" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id" \
+                -s -o /dev/null
+            done
+            echo "✅ همه آرتیفکت‌های قدیمی وضعیت ادامه حذف شدند."
+          else
+            echo "ℹ️ هیچ آرتیفکت قدیمی وضعیت ادامه برای حذف وجود ندارد."
           fi
       # ════════════════════════════════════════════
       # آپلود گذارش به artifact
