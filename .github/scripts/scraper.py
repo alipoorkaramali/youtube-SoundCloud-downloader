@@ -659,6 +659,15 @@ class TelegramChannelScraper:
         if not entered:
             await context.close()
             return [], None, None
+
+        # ─── منتظر بارگذاری پیام‌های کانال ──────────────────────────
+        self.logger.info("⏳ منتظر بارگذاری پیام‌های کانال...")
+        try:
+            await page.wait_for_selector('div[data-message-id]', timeout=15000)
+            self.logger.info("✅ پیام‌ها بارگذاری شدند.")
+        except Exception as e:
+            self.logger.warning(f"⚠️ timeout در انتظار پیام‌ها: {e}. ادامه با اسکرول...")
+
         await self._save_screenshot(page, "initial")
 
         # ═══════════════ پرش به ابتدا یا انتهای صفحه بر اساس جهت اسکرول ═══════════════
@@ -987,10 +996,17 @@ class TelegramChannelScraper:
                 if await loc.count() == 0:
                     continue
                 await loc.click(timeout=8000, force=True)
-                await human_sleep(5, 0.4)
-                if await page.locator('div.message, div[data-message-id]').count() > 0:
+                # به جای sleep، منتظر بارگذاری پیام‌ها باشیم
+                try:
+                    await page.wait_for_selector('div[data-message-id]', timeout=10000)
                     self.logger.info("✅ کانال با موفقیت باز شد (سلکتور %s).", sel)
                     return True
+                except Exception:
+                    # اگر پیام‌ها نیامد، با sleep کوتاه امتحان کنیم
+                    await human_sleep(3, 0.3)
+                    if await page.locator('div.message, div[data-message-id]').count() > 0:
+                        self.logger.info("✅ کانال با موفقیت باز شد (سلکتور %s).", sel)
+                        return True
             except Exception as e:
                 self.logger.debug("سلکتور %s ناموفق: %s", sel, e)
 
