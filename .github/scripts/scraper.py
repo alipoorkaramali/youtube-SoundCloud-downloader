@@ -148,6 +148,40 @@ class TelegramChannelScraper:
         if self.scroll_direction not in ['up', 'down']:
             self.logger.warning(f"⚠️ مقدار نامعتبر برای scroll_direction: {self.scroll_direction}. استفاده از 'up'.")
             self.scroll_direction = 'up'
+
+    def _load_resume_state(self) -> dict:
+        """بارگذاری وضعیت ذخیره‌شده از فایل resume_state.json (اگر وجود داشته باشد)"""
+        import json
+        resume_file = self.base_dir / "resume_state.json"
+        if not resume_file.exists():
+            self.logger.info("ℹ️ هیچ وضعیت قبلی یافت نشد (فایل resume_state.json وجود ندارد).")
+            return {}
+        
+        try:
+            with open(resume_file, 'r', encoding='utf-8') as f:
+                state = json.load(f)
+            self.logger.info(f"✅ وضعیت قبلی بارگذاری شد: آخرین پست = {state.get('last_post_id', 'N/A')}, تعداد دانلودشده = {len(state.get('downloaded_posts', []))}")
+            return state
+        except Exception as e:
+            self.logger.warning(f"⚠️ خطا در خواندن resume_state.json: {e}")
+            return {}
+
+    def _save_resume_state(self, last_post_id: str, all_items: List[Dict]):
+        """ذخیره وضعیت فعلی (آخرین پست و لیست همه پست‌های دانلودشده)"""
+        import json
+        resume_file = self.base_dir / "resume_state.json"
+        state = {}
+        if resume_file.exists():
+            try:
+                with open(resume_file, 'r', encoding='utf-8') as f:
+                    state = json.load(f)
+            except:
+                pass
+        state['last_post_id'] = last_post_id
+        state['downloaded_posts'] = [item['id'] for item in all_items]
+        with open(resume_file, 'w', encoding='utf-8') as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+        self.logger.info(f"📝 وضعیت ذخیره شد: آخرین پست {last_post_id}")
     # ═══════════════════════════════════════════════════════════════
     # نکته: دانلود رسانه‌ها حالا به صورت incremental (در هر batch) انجام می‌شود
     # این کار باعث می‌شود در صورت قطع شدن اسکریپت، رسانه‌های قبلی حفظ شوند.
@@ -346,7 +380,37 @@ class TelegramChannelScraper:
             self.logger.info(f"🚀 شروع اسکریپر با لینک: {self.start_link} (limit={self.limit})")
         else:
             self.logger.info(f"🚀 شروع اسکریپر مستقل برای @{self.channel} (limit={self.limit})")
-
+        # ─── بارگذاری وضعیت قبلی (اگر resume فعال باشد) ───
+        if getattr(self.config, 'resume', False):
+            state = self._load_resume_state()
+            if state:
+                last_post_id = state.get('last_post_id')
+                downloaded_posts = state.get('downloaded_posts', [])
+                if last_post_id:
+                    try:
+                        last_id_int = int(last_post_id)
+                        if self.scroll_direction == 'up':
+                            next_id = last_id_int - 1  # پست قدیمی‌تر
+                        else:
+                            next_id = last_id_int + 1  # پست جدیدتر
+                        if next_id <= 0:
+                            self.logger.warning("⚠️ شناسه محاسبه‌شده منفی است، از ابتدا شروع می‌شود.")
+                            self.start_link = None
+                            self.target_msg_id = None
+                        else:
+                            self.start_link = f"https://t.me/{self.channel}/{next_id}"
+                            self.target_msg_id = str(next_id)
+                            self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
+                    except ValueError:
+                        self.logger.warning(f"⚠️ شناسه نامعتبر در resume_state: {last_post_id}. شروع از ابتدا.")
+                        self.start_link = None
+                        self.target_msg_id = None
+                else:
+                    self.logger.info("ℹ️ resume_state خالی است، از ابتدا شروع می‌شود.")
+            else:
+                self.logger.info("ℹ️ resume فعال است اما وضعیتی وجود ندارد، از ابتدا شروع می‌شود.")
+        else:
+            self.logger.info("ℹ️ resume غیرفعال است، از ابتدا شروع می‌شود.")
         # ─── اگر حالت retry فعال باشد ──────────────────────────
         retry_failed = getattr(self.config, 'retry_failed', False)
         if retry_failed:
@@ -490,18 +554,7 @@ class TelegramChannelScraper:
                 uploaded = await self._upload_and_cleanup()
                 if uploaded:
                     # به‌روزرسانی resume_state برای ادامه از این نقطه
-                    import json
-                    resume_file = self.base_dir / "resume_state.json"
-                    if resume_file.exists():
-                        with open(resume_file, 'r') as f:
-                            state = json.load(f)
-                    else:
-                        state = {}
-                    state['last_post_id'] = str(newly_added[-1]['id'])
-                    state['downloaded_posts'] = [p['id'] for p in items]
-                    with open(resume_file, 'w') as f:
-                        json.dump(state, f, indent=2)
-                    self.logger.info(f"📝 وضعیت ذخیره شد: آخرین پست {state['last_post_id']}")
+                    self._save_resume_state(str(newly_added[-1]['id']), items)
                 else:
                     self.logger.warning("⚠️ آپلود ناموفق بود، ادامه با فایل‌های محلی...")
 
@@ -544,6 +597,9 @@ class TelegramChannelScraper:
         else:
             self.logger.info("📁 حالت عادی: فقط رسانه‌ها دانلود شدند و برای آپلود آماده هستند.")
             # در حالت عادی هیچ خروجی اضافی تولید نمی‌شود
+        # ─── ذخیره وضعیت نهایی (اگر آیتمی وجود داشته باشد) ───
+        if items:
+            self._save_resume_state(str(items[-1]['id']), items)
         # ─── تولید گزارش نهایی ──────────────────────────────
         await self._generate_download_report(items, media_map, all_failed_posts)
         if context:
