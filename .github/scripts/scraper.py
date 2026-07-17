@@ -665,6 +665,9 @@ class TelegramChannelScraper:
         try:
             await page.wait_for_selector('div[data-message-id]', timeout=15000)
             self.logger.info("✅ پیام‌ها بارگذاری شدند.")
+            # ─── تأخیر کوتاه برای رندر کامل ──────────────────────
+            await asyncio.sleep(4)
+            self.logger.info("⏳ منتظر رندر کامل پیام‌ها...")
         except Exception as e:
             self.logger.warning(f"⚠️ timeout در انتظار پیام‌ها: {e}. ادامه با اسکرول...")
 
@@ -999,11 +1002,12 @@ class TelegramChannelScraper:
                 # به جای sleep، منتظر بارگذاری پیام‌ها باشیم
                 try:
                     await page.wait_for_selector('div[data-message-id]', timeout=10000)
+                    # ─── تأخیر کوتاه برای رندر ──────────────────────
+                    await asyncio.sleep(1.5)
                     self.logger.info("✅ کانال با موفقیت باز شد (سلکتور %s).", sel)
                     return True
                 except Exception:
-                    # اگر پیام‌ها نیامد، با sleep کوتاه امتحان کنیم
-                    await human_sleep(3, 0.3)
+                    await asyncio.sleep(3)
                     if await page.locator('div.message, div[data-message-id]').count() > 0:
                         self.logger.info("✅ کانال با موفقیت باز شد (سلکتور %s).", sel)
                         return True
