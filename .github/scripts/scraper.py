@@ -668,7 +668,7 @@ class TelegramChannelScraper:
                 else:
                     self.logger.warning("⚠️ آپلود ناموفق بود، ادامه با فایل‌های محلی...")
 
-            # به‌روزرسانی start_link با آخرین پست جدید
+            # ─── به‌روزرسانی start_link به پست بعد از آخرین پست جدید ───
             last_item = newly_added[-1]
             last_id_str = str(last_item['id']).strip()
             try:
@@ -679,11 +679,28 @@ class TelegramChannelScraper:
             except:
                 last_id = last_id_str
 
-            new_start_link = f"https://t.me/{self.channel}/{last_id}"
-            self.start_link = new_start_link
-            self.target_msg_id = str(last_id)
-            self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")   #ریست شمارنده
-
+            # ─── محاسبه شناسه بعدی بر اساس جهت اسکرول ──────────────
+            try:
+                last_id_int = int(last_id)
+                if self.scroll_direction == 'up':
+                    next_id_for_start = last_id_int - 1  # پست قدیمی‌تر
+                else:
+                    next_id_for_start = last_id_int + 1  # پست جدیدتر
+                
+                if next_id_for_start > 0:
+                    new_start_link = f"https://t.me/{self.channel}/{next_id_for_start}"
+                    self.start_link = new_start_link
+                    self.target_msg_id = str(next_id_for_start)
+                    self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {next_id_for_start})")
+                else:
+                    self.logger.warning("⚠️ شناسه بعدی منفی است، شروع از ابتدا در دور بعدی")
+                    self.start_link = None
+                    self.target_msg_id = None
+            except Exception as e:
+                self.logger.warning(f"⚠️ خطا در محاسبه start_link برای دور بعدی: {e}")
+                self.start_link = None
+                self.target_msg_id = None
+                
         # ─── بعد از اتمام تمام دورها ─────────────────────────────
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
