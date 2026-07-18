@@ -253,7 +253,6 @@ class TelegramChannelScraper:
         except Exception as e:
             self.logger.debug(f"خطا در رسم صلیب: {e}")
 
-    # ═══════════════════ اسکرول هوشمند با افزایش تدریجی ═══════════════════
     async def _smart_scroll(self, page, direction: str, step: int = SCROLL_STEP_BASE, max_attempts: int = 3) -> bool:
         """
         اسکرول هوشمند با سه پله افزایشی.
@@ -276,6 +275,12 @@ class TelegramChannelScraper:
             await page.evaluate(f"window.scrollBy(0, {amount})")
             await human_sleep(1.2, 0.3)
 
+            # ─── اسکرول معکوس کوچک برای تحریک بارگذاری ──────────────
+            if i == 0:
+                self.logger.debug("   اسکرول معکوس ۳۰۰px برای تحریک بارگذاری...")
+                await page.evaluate("window.scrollBy(0, -300)")
+                await human_sleep(0.5, 0.2)
+
             new_height = await page.evaluate("document.documentElement.scrollHeight")
             if new_height != old_height:
                 self.logger.info(f"✅ ارتفاع صفحه تغییر کرد: {old_height} → {new_height}")
@@ -283,7 +288,7 @@ class TelegramChannelScraper:
 
         self.logger.info(f"⚠️ ارتفاع صفحه پس از {max_attempts} اسکرول تغییر نکرد.")
         return False
-    # ═══════════════════ اسکرول نرم برای پیدا کردن پست در صفحه فعلی ═══════════════════
+        # ═══════════════════ اسکرول نرم برای پیدا کردن پست در صفحه فعلی ═══════════════════
     async def _find_post_with_slow_scroll(self, page, seen_ids: set = None) -> Tuple[bool, str]:
         """
         اسکرول نرم در صفحه فعلی برای پیدا کردن اولین پست دارای تاریخ یا کپشن.
@@ -738,6 +743,11 @@ class TelegramChannelScraper:
 
         await self._save_screenshot(page, "initial")
 
+        # ─── صبر اضافی شرطی برای بارگذاری اولیه ──────────────────────
+        if not self.start_link and self.scroll_direction == 'up':
+            self.logger.info("⏳ ۳ ثانیه صبر اضافی برای بارگذاری اولیه...")
+            await asyncio.sleep(3)
+
         # ═══════════════ پرش به ابتدا یا انتهای صفحه بر اساس جهت اسکرول ═══════════════
         if not self.start_link and not self._manual_scroll_done:
             if self.scroll_direction == 'up':
@@ -784,6 +794,34 @@ class TelegramChannelScraper:
         original_scroll_y_fetch = await page.evaluate("window.scrollY")
         scroll_stack_fetch = []  # برای ثبت اسکرول‌های اضافی
 
+        # ─── استخراج مقاوم: حداکثر ۳ تلاش برای پیدا کردن پیام‌ها ──────
+        messages = []
+        max_extraction_attempts = 3
+        for attempt in range(max_extraction_attempts):
+            if attempt > 0:
+                self.logger.info(f"🔄 تلاش مجدد استخراج {attempt+1}/{max_extraction_attempts}...")
+                await self._smart_scroll(page, 'down', step=600, max_attempts=2)
+                await human_sleep(1.5, 0.3)
+                # اگر باز هم پیامی نبود، از wait_for_selector استفاده کن
+                try:
+                    await page.wait_for_selector('div[data-message-id]', timeout=3000)
+                except Exception:
+                    pass
+            
+            messages = await page.locator('div[data-message-id]').all()
+            if messages:
+                self.logger.info(f"✅ {len(messages)} پیام در تلاش {attempt+1} پیدا شد.")
+                break
+            else:
+                self.logger.warning(f"⚠️ در تلاش {attempt+1} پیامی یافت نشد.")
+        
+        # اگر بعد از ۳ تلاش هیچ پیامی نبود، یک بار هم با سلکتور جایگزین امتحان کن
+        if not messages:
+            self.logger.info("🔄 تلاش با سلکتورهای جایگزین...")
+            messages = await page.locator('div.message, div[class*="message"], [data-peer-id]').all()
+            if messages:
+                self.logger.info(f"✅ {len(messages)} پیام با سلکتور جایگزین پیدا شد.")
+
         start_collecting = False
         if self.start_link and self.target_msg_id:
             self.logger.info(f"🎯 پیدا کردن پیام هدف {self.target_msg_id}...")
@@ -799,14 +837,16 @@ class TelegramChannelScraper:
                     self.logger.warning(f"⚠️ پیام هدف {self.target_msg_id} پیدا نشد.")
             except Exception as e:
                 self.logger.warning(f"⚠️ خطا در انتقال پیام هدف: {e}")
-
+        
         # استفاده از limit پاس شده (اگر وجود داشته باشد)
         effective_limit = limit if limit is not None else self.limit
+        # ─── حلقه اصلی استخراج ─────────────────────────────────────────
         while len(items) < effective_limit and scroll_attempts < MAX_SCROLL_ATTEMPTS:
             try:
+                # ─── دریافت مجدد پیام‌ها برای اطمینان از به‌روز بودن ───
                 messages = await page.locator('div[data-message-id]').all()
                 
-                # ─── اگر پیامی وجود ندارد، یک بار با تأخیر بیشتر تلاش کن ───
+                # اگر پیامی وجود ندارد، یک بار با تأخیر و اسکرول تلاش کن
                 if not messages and scroll_attempts == 0:
                     self.logger.info("⏳ پیامی یافت نشد، ۲ ثانیه صبر می‌کنم و دوباره تلاش می‌کنم...")
                     await asyncio.sleep(2)
@@ -814,7 +854,6 @@ class TelegramChannelScraper:
                     if messages:
                         self.logger.info(f"✅ {len(messages)} پیام پس از تأخیر پیدا شد.")
                 
-                # ─── اگر باز هم خالی بود، یک اسکرول کوچک انجام بده ───
                 if not messages and scroll_attempts == 0:
                     self.logger.info("🔄 هنوز پیامی نیست، یک اسکرول کوچک به پایین...")
                     await page.evaluate("window.scrollBy(0, 300)")
@@ -823,26 +862,13 @@ class TelegramChannelScraper:
                     if messages:
                         self.logger.info(f"✅ {len(messages)} پیام پس از اسکرول پیدا شد.")
                 
-                # ─── اگر باز هم خالی بود، از wait_for_selector استفاده کن ───
-                if not messages and scroll_attempts == 0:
-                    try:
-                        self.logger.info("⏳ منتظر ظاهر شدن پیام‌ها با wait_for_selector...")
-                        await page.wait_for_selector('div[data-message-id]', timeout=3000)
-                        messages = await page.locator('div[data-message-id]').all()
-                        if messages:
-                            self.logger.info(f"✅ {len(messages)} پیام پس از wait_for_selector پیدا شد.")
-                    except Exception:
-                        self.logger.warning("⚠️ حتی با wait_for_selector پیامی پیدا نشد.")
-
                 # ─── تعیین ترتیب پیمایش بر اساس جهت ──────────────────────
                 if self.start_link:
-                    # در حالت start_link، از نقطه شروع به سمت direction حرکت می‌کنیم
                     if self.scroll_direction == 'up':
                         msg_iter = reversed(messages)
                     else:
                         msg_iter = messages
                 else:
-                    # حالت عادی: اگر direction == 'up' از جدید به قدیم، اگر 'down' از قدیم به جدید
                     if self.scroll_direction == 'up':
                         msg_iter = reversed(messages)
                     else:
@@ -853,7 +879,6 @@ class TelegramChannelScraper:
                         msg_id = await msg.get_attribute('data-message-id')
                         if msg_id:
                             try:
-                                # پاک‌سازی قوی شناسه
                                 msg_id = str(int(float(msg_id)))
                             except:
                                 pass
@@ -876,7 +901,6 @@ class TelegramChannelScraper:
                         # ─── استخراج هوشمند متن پست ──────────────────────
                         text = ""
                         try:
-                            # روش‌های مختلف استخراج متن
                             content_selectors = [
                                 'div.message-content',
                                 'div.text-content',
@@ -892,28 +916,16 @@ class TelegramChannelScraper:
                                         break
 
                             if not text or len(text) < 5:
-                                try:
-                                    text = (await msg.inner_text()).strip()[:1000]
-                                except Exception:
-                                    pass
-
+                                text = (await msg.inner_text()).strip()[:1000]
                             if not text or len(text) < 5:
-                                try:
-                                    text = (await msg.evaluate("el => el.textContent || ''")).strip()[:1000]
-                                except Exception:
-                                    pass
-
+                                text = (await msg.evaluate("el => el.textContent || ''")).strip()[:1000]
                             if not text or len(text) < 5:
-                                try:
-                                    text = (await page.evaluate(f"""
-                                        () => {{
-                                            const el = document.querySelector('[data-message-id="{msg_id}"]');
-                                            return el ? el.innerText || el.textContent || '' : '';
-                                        }}
-                                    """)).strip()[:1000]
-                                except Exception:
-                                    pass
-
+                                text = (await page.evaluate(f"""
+                                    () => {{
+                                        const el = document.querySelector('[data-message-id="{msg_id}"]');
+                                        return el ? el.innerText || el.textContent || '' : '';
+                                    }}
+                                """)).strip()[:1000]
                             if text:
                                 text = re.sub(r'\s+', ' ', text).strip()[:1000]
 
@@ -972,9 +984,10 @@ class TelegramChannelScraper:
             if self.start_link and not start_collecting:
                 self.logger.info("🔄 هنوز به پیام هدف نرسیدیم، اسکرول اضافی...")
                 extra_amount = -SCROLL_STEP_BASE * 2 if self.scroll_direction == 'up' else SCROLL_STEP_BASE * 2
-                scroll_stack_fetch.append(extra_amount)   # ← ثبت اسکرول
+                scroll_stack_fetch.append(extra_amount)
                 await page.evaluate(f"window.scrollBy(0, {extra_amount})")
                 await human_sleep(1.5, 0.3)
+
         # ─── برگشت به نقطه‌ی اولیه ──────────────────────────────
         for amount in reversed(scroll_stack_fetch):
             await page.evaluate(f"window.scrollBy(0, {-amount})")
@@ -985,7 +998,6 @@ class TelegramChannelScraper:
             self.logger.info(f"   ↩️ برگشت به موقعیت اولیه (fetch): {original_scroll_y_fetch}px")
         items = items[:effective_limit]
         self.logger.info(f"📊 {len(items)} پست جمع‌آوری شد.")
-
         await self._save_screenshot(page, "final")
         await self._capture_post_screenshots(page, items)
 
