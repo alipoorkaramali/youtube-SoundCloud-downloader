@@ -603,21 +603,17 @@ class TelegramChannelScraper:
 
             # اگر هیچ پست جدیدی اضافه نشد، یعنی کار تمام است
             if not newly_added:
-                # ─── تلاش با اسکرول نرم قبل از حدس ID ──────────────────
-                if not hasattr(self, '_fallback_ids') or not self._fallback_ids:
-                    self.logger.info("🔍 هیچ پست جدیدی پیدا نشد. تلاش با اسکرول نرم...")
-                    # پیدا کردن پست‌های جدید با اسکرول نرم
-                    found, found_id = await self._find_post_with_slow_scroll(page, seen_ids={item['id'] for item in items})
-                    if found:
-                        self.logger.info(f"✅ پست جدید با اسکرول نرم پیدا شد: {found_id}")
-                        self.start_link = f"https://t.me/{self.channel}/{found_id}"
-                        self.target_msg_id = found_id
-                        # ادامه حلقه while با شناسه جدید
-                        continue
-                
                 # ─── اگر fallback_ids داریم و هنوز fallback باقی مانده ───
                 if hasattr(self, '_fallback_ids') and self._fallback_ids:
-                    # ... (کد قبلی fallback)
+                    self._fallback_index += 1
+                    if self._fallback_index < len(self._fallback_ids):
+                        next_fallback = self._fallback_ids[self._fallback_index]
+                        self.start_link = f"https://t.me/{self.channel}/{next_fallback}"
+                        self.target_msg_id = next_fallback
+                        self.logger.info(f"🔄 تلاش با fallback بعدی: {next_fallback}")
+                        continue
+                    else:
+                        self.logger.info("✅ تمام گزینه‌های fallback بررسی شدند.")
                 
                 # ─── حدس شناسه‌های قبلی (به‌عنوان آخرین راه) ──────────────────
                 # اگر fallback_ids تمام شد یا وجود نداشت، اما still داریم و last_post_id موجود است
@@ -672,7 +668,7 @@ class TelegramChannelScraper:
                 else:
                     self.logger.warning("⚠️ آپلود ناموفق بود، ادامه با فایل‌های محلی...")
 
-            # ─── به‌روزرسانی start_link به پست بعد از آخرین پست جدید ───
+            # به‌روزرسانی start_link با آخرین پست جدید
             last_item = newly_added[-1]
             last_id_str = str(last_item['id']).strip()
             try:
@@ -683,28 +679,11 @@ class TelegramChannelScraper:
             except:
                 last_id = last_id_str
 
-            # ─── محاسبه شناسه بعدی بر اساس جهت اسکرول ──────────────
-            try:
-                last_id_int = int(last_id)
-                if self.scroll_direction == 'up':
-                    next_id_for_start = last_id_int - 1  # پست قدیمی‌تر
-                else:
-                    next_id_for_start = last_id_int + 1  # پست جدیدتر
-                
-                if next_id_for_start > 0:
-                    new_start_link = f"https://t.me/{self.channel}/{next_id_for_start}"
-                    self.start_link = new_start_link
-                    self.target_msg_id = str(next_id_for_start)
-                    self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {next_id_for_start})")
-                else:
-                    self.logger.warning("⚠️ شناسه بعدی منفی است، شروع از ابتدا در دور بعدی")
-                    self.start_link = None
-                    self.target_msg_id = None
-            except Exception as e:
-                self.logger.warning(f"⚠️ خطا در محاسبه start_link برای دور بعدی: {e}")
-                self.start_link = None
-                self.target_msg_id = None
-                
+            new_start_link = f"https://t.me/{self.channel}/{last_id}"
+            self.start_link = new_start_link
+            self.target_msg_id = str(last_id)
+            self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")   #ریست شمارنده
+
         # ─── بعد از اتمام تمام دورها ─────────────────────────────
         if not items:
             self.logger.warning("هیچ پستی دریافت نشد.")
@@ -922,7 +901,7 @@ class TelegramChannelScraper:
 
         # ─── متغیر start_collecting ─────────────────────────────────────
         start_collecting = not bool(self.start_link)  # اگر start_link نداشته باشیم، از اول شروع می‌کنیم
-        target_reached = False  # ← جدید: برای تشخیص لحظه رسیدن به پست هدف
+
         for attempt in range(6):  # حداکثر ۶ تلاش کلی
             if attempt > 0:
                 self.logger.info(f"🔄 تلاش استخراج کلی {attempt+1}/6")
@@ -978,7 +957,6 @@ class TelegramChannelScraper:
                     if self.start_link and not start_collecting:
                         if msg_id == self.target_msg_id:
                             start_collecting = True
-                            target_reached = True
                             self.logger.info(f"🎯 پیام هدف پیدا شد: {msg_id}")
                         else:
                             continue
@@ -1019,34 +997,15 @@ class TelegramChannelScraper:
             if len(items) >= effective_limit:
                 break
 
-            # ─── اگر فقط به پست هدف رسیدیم و پست جدیدی نگرفتیم ───
-            if self.start_link and target_reached and len(items) == 0:
-                self.logger.info(f"🔍 فقط به پست هدف رسیدیم (ID: {self.target_msg_id}). شروع اسکرول هوشمند...")
-                
-                # اسکرول بزرگ اولیه در جهت دلخواه (با ضریب ۱.۵)
-                await self._smart_scroll(page, self.scroll_direction, step=SCROLL_STEP_BASE * 1.5, max_attempts=2)
-                await human_sleep(2.0, 0.5)
-                
-                # اسکرول نرم برای پیدا کردن پست معتبر
-                found, found_id = await self._find_post_with_slow_scroll(page, seen_ids=seen_ids)
-                
-                if found:
-                    self.logger.info(f"✅ پست جدید پیدا شد: {found_id}")
-                    # به‌روزرسانی start_link و target_msg_id برای دور بعدی
-                    self.start_link = f"https://t.me/{self.channel}/{found_id}"
-                    self.target_msg_id = found_id
-                    continue  # دوباره attempt رو اجرا کن
-                else:
-                    self.logger.warning("⚠️ با اسکرول نرم هم پست جدیدی پیدا نشد.")
-
-            # ─── اسکرول معمولی برای دور بعدی ────────────────────────────────────
+            # ─── اسکرول برای دور بعدی ────────────────────────────────────
             self.logger.info(f"🔄 اسکرول به {self.scroll_direction} برای دور بعدی...")
             scrolled = await self._smart_scroll(page, self.scroll_direction, step=SCROLL_STEP_BASE, max_attempts=3)
             if not scrolled:
                 scroll_attempts += 1
                 if scroll_attempts >= 3:
                     self.logger.info("📌 به نظر می‌رسد به انتها رسیدیم. خاتمه استخراج.")
-                    break            
+                    break
+
         self.logger.info(f"📊 در مجموع {len(items)} پست جمع‌آوری شد.")
         items = items[:effective_limit]
 
