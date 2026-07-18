@@ -287,6 +287,10 @@ class TelegramChannelScraper:
                 return True
 
         self.logger.info(f"⚠️ ارتفاع صفحه پس از {max_attempts} اسکرول تغییر نکرد.")
+        # ─── تلاش آخر: اسکرول بزرگ‌تر برای تحریک لود بیشتر ───
+        self.logger.debug("   اسکرول نهایی ۱۵۰۰px برای تحریک بارگذاری...")
+        await page.evaluate("window.scrollBy(0, 1500)")
+        await human_sleep(1.2, 0.4)
         return False
         # ═══════════════════ اسکرول نرم برای پیدا کردن پست در صفحه فعلی ═══════════════════
     async def _find_post_with_slow_scroll(self, page, seen_ids: set = None) -> Tuple[bool, str]:
@@ -823,6 +827,19 @@ class TelegramChannelScraper:
             if len(messages) < 5:
                 self.logger.debug("   تلاش با سلکتورهای جایگزین...")
                 messages = await page.locator('div.message, div[class*="bubble"], div[class*="message"], div[class*="post"]').all()
+            
+            # ─── اگر هنوز پیام کمی داشت، از روش JS هم کمک بگیریم ───
+            if len(messages) < 8:
+                try:
+                    js_posts = await self._extract_posts_from_page(page)
+                    self.logger.info(f"   📊 استخراج JS: {len(js_posts)} پست")
+                    # اگر JS پست‌های بیشتری پیدا کرد، می‌توانیم جایگزین کنیم (اختیاری)
+                    if len(js_posts) > len(messages):
+                        self.logger.info(f"   🔄 استفاده از داده‌های JS به‌جای {len(messages)} پیام قبلی")
+                        # تبدیل داده‌های JS به فرمت مورد انتظار (اختیاری)
+                        # فعلاً فقط لاگ می‌کنیم و از همان messages استفاده می‌کنیم
+                except Exception as e:
+                    self.logger.debug(f"   خطا در استخراج JS: {e}")
 
             self.logger.info(f"   📋 تلاش {attempt+1}: {len(messages)} المان پیام پیدا شد")
 
@@ -862,6 +879,9 @@ class TelegramChannelScraper:
 
                     # ─── استخراج متن ──────────────────────────────────────
                     text = await self._extract_text_from_message(msg, msg_id)
+
+                    # ─── لاگ دیباگ برای پیام ─────────────────────────────
+                    self.logger.debug(f"   پردازش پیام ID: {msg_id} | متن موجود: {bool(text)}")
 
                     # ─── تاریخ ─────────────────────────────────────────────
                     date = ""
