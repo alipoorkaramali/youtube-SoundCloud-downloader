@@ -430,7 +430,7 @@ class TelegramChannelScraper:
                             fallback_ids.append(str(downloaded_ids[i]))
                     except Exception as e:
                         self.logger.warning(f"⚠️ خطا در ساخت لیست fallback: {e}")
-                self.logger.info(f"🐞 fallback_ids: {fallback_ids} (تعداد: {len(fallback_ids)})")
+                self.logger.info(f"🐞 fallback_ids: {fallback_ids[:10]} ... (تعداد: {len(fallback_ids)})")
                 # ذخیره لیست fallback برای استفاده در حلقه اصلی
                 self._fallback_ids = fallback_ids
                 self._fallback_index = 0  # برای پیگیری اندیس فعلی
@@ -446,20 +446,12 @@ class TelegramChannelScraper:
                         # ─── انتخاب شناسه شروع ──────────────────────────
                         # اگر fallback_ids دارد، از اولین fallback استفاده کن
                         if fallback_ids:
-                            # ─── اطمینان از اینکه fallback_ids[0] != last_post_id ───
-                            if fallback_ids[0] == str(last_post_id):
-                                self.logger.warning(f"⚠️ fallback_ids[0] برابر با last_post_id است! نادیده گرفته می‌شود.")
-                                start_id = str(next_id) if next_id > 0 else None
-                                if start_id:
-                                    self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
-                                else:
-                                    self.logger.warning("⚠️ شناسه محاسبه‌شده منفی است، از ابتدا شروع می‌شود.")
-                                    start_id = None
-                            else:
-                                start_id = fallback_ids[0]
-                                self.logger.info(f"🔄 شروع با fallback: {start_id} (به دلیل وجود پست‌های قدیمی‌تر)")
+                            start_id = fallback_ids[0]
+                            self.logger.info(f"🔄 شروع با fallback: {start_id} (به دلیل وجود پست‌های قدیمی‌تر)")
                         else:
                             # ─── حالت Resume عادی (بدون نیاز به fallback) ───
+                            # fallback_ids خالی است، یعنی همه‌ی پست‌های قدیمی‌تر دانلود شده‌اند.
+                            # بنابراین از next_id استفاده می‌کنیم.
                             start_id = str(next_id) if next_id > 0 else None
                             if start_id:
                                 self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
