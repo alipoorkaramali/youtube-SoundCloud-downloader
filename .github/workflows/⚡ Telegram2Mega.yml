@@ -215,7 +215,44 @@ jobs:
           else
             echo "ℹ️ پوشه خالی یا نامعتبر است، پاکسازی انجام نشد."
           fi
-
+      # ════════════════════════════════════════════════════════════════════
+      # دانلود گزارش قبلی از آرتیفکت (برای Resume)
+      # ════════════════════════════════════════════════════════════════════
+      - name: 📥 Download previous download report (for resume)
+        if: ${{ github.event.inputs.resume == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OUTPUT_DIR="Download/telegram_downloads/${{ github.event.inputs.channel }}"
+          mkdir -p "$OUTPUT_DIR"
+          
+          ARTIFACT_NAME="download-report-${{ github.event.inputs.channel }}"
+          echo "🔍 جستجوی آرتیفکت گزارش با نام: $ARTIFACT_NAME"
+          
+          # پیدا کردن آخرین آرتیفکت گزارش (بر اساس تاریخ ایجاد، نزولی)
+          ARTIFACT_ID=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$ARTIFACT_NAME&per_page=5" \
+            | jq -r '.artifacts | sort_by(.created_at) | reverse | .[0].id')
+          
+          if [ "$ARTIFACT_ID" != "null" ] && [ -n "$ARTIFACT_ID" ]; then
+            echo "✅ آرتیفکت گزارش قبلی پیدا شد (ID: $ARTIFACT_ID)"
+            
+            # دانلود و استخراج فایل گزارش
+            curl -L -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" \
+              -o /tmp/report.zip
+            unzip -j /tmp/report.zip -d "$OUTPUT_DIR"
+            
+            if [ -f "$OUTPUT_DIR/download_report.txt" ]; then
+              echo "✅ گزارش قبلی با موفقیت بازیابی شد"
+              echo "📄 ۵ خط اول گزارش:"
+              head -10 "$OUTPUT_DIR/download_report.txt"
+            else
+              echo "⚠️ فایل گزارش در آرتیفکت یافت نشد"
+            fi
+          else
+            echo "ℹ️ هیچ گزارش قبلی در آرتیفکت یافت نشد، از ابتدا شروع می‌شود."
+          fi
       # ════════════════════════════════════════════
       # نصب و پیکربندی rclone
       # ════════════════════════════════════════════
@@ -358,6 +395,7 @@ jobs:
           else
             echo "ℹ️ هیچ آرتیفکت قدیمی وضعیت ادامه برای حذف وجود ندارد."
           fi
+      
       # ════════════════════════════════════════════
       # آپلود گذارش به artifact
       # ════════════════════════════════════════════
