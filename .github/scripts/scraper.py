@@ -542,12 +542,16 @@ class TelegramChannelScraper:
                     })
                     self.logger.warning(f"❌ پست {post_id} ناموفق بود.")
             
-            # ─── تولید گزارش نهایی retry ──────────────────────
-            await self._generate_download_report(retry_items, retry_media_map, retry_failed_posts)
-            if context:
-                await context.close()
-            self.logger.info("🏁 تلاش مجدد تمام شد.")
-            return  # خروج از تابع (اجرای عادی ادامه پیدا نمی‌کند)
+            # ─── بعد از اتمام حلقه، گزارش نهایی را تولید کن ──────
+            # (این خط را از اینجا بردارید و به بعد از حلقه ببرید)
+        
+        # ─── تولید گزارش نهایی retry ──────────────────────────────
+        # (اینجا بعد از حلقه for قرار می‌گیرد)
+        await self._generate_download_report(retry_items, retry_media_map, retry_failed_posts)
+        if context:
+            await context.close()
+        self.logger.info("🏁 تلاش مجدد تمام شد.")
+        return  # خروج از تابع
         # ─── متغیرهای کلی ─────────────────────────────
         max_retries = 3
         retry_count = 0
