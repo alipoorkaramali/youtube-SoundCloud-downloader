@@ -366,7 +366,22 @@ class TelegramChannelScraper:
                 return posts;
             }
         """)
-
+    #=======================================================================================
+    async def _extract_text_from_message(self, msg, msg_id: str) -> str:
+        """استخراج هوشمند متن پیام"""
+        try:
+            for sel in ['.message-text', '.text-content', 'div[class*="text"]', 'div[class*="body"]']:
+                content = msg.locator(sel).first
+                if await content.count() > 0:
+                    text = (await content.inner_text()).strip()
+                    if len(text) > 5:
+                        return re.sub(r'\s+', ' ', text)[:1000]
+            
+            # فال‌بک
+            text = (await msg.inner_text()).strip()[:1000]
+            return re.sub(r'\s+', ' ', text)
+        except:
+            return ""
     # ═══════════════════ متد اصلی با Timeout ═══════════════════
     async def run(self):
         base_timeout = getattr(self.config, 'timeout_seconds', OVERALL_TIMEOUT)
@@ -743,10 +758,10 @@ class TelegramChannelScraper:
 
         await self._save_screenshot(page, "initial")
 
-        # ─── صبر اضافی شرطی برای بارگذاری اولیه ──────────────────────
+        # ─── صبر اضافی برای بارگذاری کامل ────────────────────────────
         if not self.start_link and self.scroll_direction == 'up':
-            self.logger.info("⏳ ۳ ثانیه صبر اضافی برای بارگذاری اولیه...")
-            await asyncio.sleep(3)
+            self.logger.info("⏳ ۴ ثانیه صبر اضافی برای بارگذاری کامل...")
+            await asyncio.sleep(4)
 
         # ═══════════════ پرش به ابتدا یا انتهای صفحه بر اساس جهت اسکرول ═══════════════
         if not self.start_link and not self._manual_scroll_done:
@@ -786,218 +801,107 @@ class TelegramChannelScraper:
         else:
             self.logger.info("ℹ️ در حالت start_link، پرش به پایین/بالا انجام نمی‌شود.")
 
-        # ─── جمع‌آوری پست‌ها ────────────────────────────────────────────────
+        # ─── استخراج مقاوم ────────────────────────────────────────────────────
         items = []
         seen_ids = set()
         scroll_attempts = 0
-        # ─── ذخیره موقعیت اولیه برای برگشت ──────────────────────
-        original_scroll_y_fetch = await page.evaluate("window.scrollY")
-        scroll_stack_fetch = []  # برای ثبت اسکرول‌های اضافی
-
-        # ─── استخراج مقاوم: حداکثر ۳ تلاش برای پیدا کردن پیام‌ها ──────
-        messages = []
-        max_extraction_attempts = 3
-        for attempt in range(max_extraction_attempts):
-            if attempt > 0:
-                self.logger.info(f"🔄 تلاش مجدد استخراج {attempt+1}/{max_extraction_attempts}...")
-                await self._smart_scroll(page, 'down', step=600, max_attempts=2)
-                await human_sleep(1.5, 0.3)
-                # اگر باز هم پیامی نبود، از wait_for_selector استفاده کن
-                try:
-                    await page.wait_for_selector('div[data-message-id]', timeout=3000)
-                except Exception:
-                    pass
-            
-            messages = await page.locator('div[data-message-id]').all()
-            if messages:
-                self.logger.info(f"✅ {len(messages)} پیام در تلاش {attempt+1} پیدا شد.")
-                break
-            else:
-                self.logger.warning(f"⚠️ در تلاش {attempt+1} پیامی یافت نشد.")
-        
-        # اگر بعد از ۳ تلاش هیچ پیامی نبود، یک بار هم با سلکتور جایگزین امتحان کن
-        if not messages:
-            self.logger.info("🔄 تلاش با سلکتورهای جایگزین...")
-            messages = await page.locator('div.message, div[class*="message"], [data-peer-id]').all()
-            if messages:
-                self.logger.info(f"✅ {len(messages)} پیام با سلکتور جایگزین پیدا شد.")
-
-        start_collecting = False
-        if self.start_link and self.target_msg_id:
-            self.logger.info(f"🎯 پیدا کردن پیام هدف {self.target_msg_id}...")
-            try:
-                target_locator = page.locator(f'[data-message-id="{self.target_msg_id}"]').first
-                if await target_locator.count() > 0:
-                    await target_locator.scroll_into_view_if_needed()
-                    offset = -150 if self.scroll_direction == 'up' else 150
-                    await page.evaluate(f"window.scrollBy(0, {offset})")
-                    await human_sleep(1, 0.3)
-                    self.logger.info("✅ پیام هدف به مرکز صفحه منتقل شد.")
-                else:
-                    self.logger.warning(f"⚠️ پیام هدف {self.target_msg_id} پیدا نشد.")
-            except Exception as e:
-                self.logger.warning(f"⚠️ خطا در انتقال پیام هدف: {e}")
-        
-        # استفاده از limit پاس شده (اگر وجود داشته باشد)
         effective_limit = limit if limit is not None else self.limit
-        # ─── حلقه اصلی استخراج ─────────────────────────────────────────
-        while len(items) < effective_limit and scroll_attempts < MAX_SCROLL_ATTEMPTS:
-            try:
-                # ─── دریافت مجدد پیام‌ها برای اطمینان از به‌روز بودن ───
-                messages = await page.locator('div[data-message-id]').all()
-                
-                # اگر پیامی وجود ندارد، یک بار با تأخیر و اسکرول تلاش کن
-                if not messages and scroll_attempts == 0:
-                    self.logger.info("⏳ پیامی یافت نشد، ۲ ثانیه صبر می‌کنم و دوباره تلاش می‌کنم...")
-                    await asyncio.sleep(2)
-                    messages = await page.locator('div[data-message-id]').all()
-                    if messages:
-                        self.logger.info(f"✅ {len(messages)} پیام پس از تأخیر پیدا شد.")
-                
-                if not messages and scroll_attempts == 0:
-                    self.logger.info("🔄 هنوز پیامی نیست، یک اسکرول کوچک به پایین...")
-                    await page.evaluate("window.scrollBy(0, 300)")
-                    await asyncio.sleep(1)
-                    messages = await page.locator('div[data-message-id]').all()
-                    if messages:
-                        self.logger.info(f"✅ {len(messages)} پیام پس از اسکرول پیدا شد.")
-                
-                # ─── تعیین ترتیب پیمایش بر اساس جهت ──────────────────────
-                if self.start_link:
-                    if self.scroll_direction == 'up':
-                        msg_iter = reversed(messages)
-                    else:
-                        msg_iter = messages
-                else:
-                    if self.scroll_direction == 'up':
-                        msg_iter = reversed(messages)
-                    else:
-                        msg_iter = messages
 
-                for msg in msg_iter:
-                    try:
-                        msg_id = await msg.get_attribute('data-message-id')
-                        if msg_id:
-                            try:
-                                msg_id = str(int(float(msg_id)))
-                            except:
-                                pass
-                        if not msg_id or msg_id in seen_ids:
-                            continue
-                        # ─── فیلتر بر اساس target_ids ──────────────────
-                        if target_ids and msg_id not in target_ids:
-                            continue
-                        if self.start_link and not start_collecting:
-                            if msg_id == self.target_msg_id:
-                                start_collecting = True
-                                self.logger.info(f"🎯 به پیام هدف رسیدیم (ID: {msg_id})، شروع جمع‌آوری...")
-                                seen_ids.add(msg_id)
-                            else:
-                                continue
+        self.logger.info(f"🔍 شروع استخراج مقاوم — حد: {effective_limit} پست")
 
-                        if not start_collecting:
-                            continue
+        # ─── متغیر start_collecting ─────────────────────────────────────
+        start_collecting = not bool(self.start_link)  # اگر start_link نداشته باشیم، از اول شروع می‌کنیم
 
-                        # ─── استخراج هوشمند متن پست ──────────────────────
-                        text = ""
-                        try:
-                            content_selectors = [
-                                'div.message-content',
-                                'div.text-content',
-                                'div[class*="message-text"]',
-                                'div[class*="text"]',
-                                'div[class*="body"]'
-                            ]
-                            for sel in content_selectors:
-                                content = msg.locator(sel).first
-                                if await content.count() > 0:
-                                    text = (await content.inner_text()).strip()[:1000]
-                                    if text and len(text) > 3:
-                                        break
+        for attempt in range(6):  # حداکثر ۶ تلاش کلی
+            if attempt > 0:
+                self.logger.info(f"🔄 تلاش استخراج کلی {attempt+1}/6")
+                await self._smart_scroll(page, self.scroll_direction, step=800, max_attempts=2)
+                await human_sleep(2.0, 0.5)
 
-                            if not text or len(text) < 5:
-                                text = (await msg.inner_text()).strip()[:1000]
-                            if not text or len(text) < 5:
-                                text = (await msg.evaluate("el => el.textContent || ''")).strip()[:1000]
-                            if not text or len(text) < 5:
-                                text = (await page.evaluate(f"""
-                                    () => {{
-                                        const el = document.querySelector('[data-message-id="{msg_id}"]');
-                                        return el ? el.innerText || el.textContent || '' : '';
-                                    }}
-                                """)).strip()[:1000]
-                            if text:
-                                text = re.sub(r'\s+', ' ', text).strip()[:1000]
+            # ─── دریافت پیام‌ها با روش‌های مختلف ──────────────────────────
+            messages = await page.locator('div[data-message-id]').all()
+            if len(messages) < 5:
+                self.logger.debug("   تلاش با سلکتورهای جایگزین...")
+                messages = await page.locator('div.message, div[class*="bubble"], div[class*="message"], div[class*="post"]').all()
 
-                            if not text or len(text) < 2:
-                                self.logger.debug(f"⚠️ متن پست {msg_id} خالی یا بسیار کوتاه است.")
+            self.logger.info(f"   📋 تلاش {attempt+1}: {len(messages)} المان پیام پیدا شد")
 
-                        except Exception as e:
-                            self.logger.warning(f"❌ خطا در استخراج متن پست {msg_id}: {e}")
-                            text = ""
+            if not messages:
+                continue
 
-                        # ─── تاریخ ──────────────────────────────────────────
-                        date_el = msg.locator('time, .message-date, .date, span[class*="date"]').first
-                        date = ""
-                        try:
-                            if await date_el.count() > 0:
-                                date = await date_el.inner_text() or await date_el.get_attribute('datetime') or ""
-                        except Exception:
-                            pass
+            # ─── تعیین ترتیب ─────────────────────────────────────────────
+            # اگر start_link داریم یا جهت 'up' است، از جدید به قدیم برویم
+            if self.start_link or self.scroll_direction == 'up':
+                msg_iter = reversed(messages)
+            else:
+                msg_iter = messages
 
-                        items.append({
-                            'id': msg_id,
-                            'text': text,
-                            'date': date,
-                            'url': f"https://t.me/{self.channel}/{msg_id}"
-                        })
-                        seen_ids.add(msg_id)
-
-                        if len(items) >= effective_limit:
-                            break
-                    except Exception as e:
-                        self.logger.debug(f"خطا در پردازش پیام: {e}")
+            for msg in msg_iter:
+                try:
+                    msg_id = await msg.get_attribute('data-message-id')
+                    if msg_id:
+                        # پاک‌سازی شناسه
+                        msg_id = str(int(float(msg_id)))
+                    if not msg_id or msg_id in seen_ids:
                         continue
-            except Exception as e:
-                self.logger.error(f"❌ خطا در استخراج پست‌ها: {e}")
+
+                    # ─── فیلتر target_ids ──────────────────────────────────
+                    if target_ids and msg_id not in target_ids:
+                        continue
+
+                    # ─── اگر start_link داریم، صبر کن تا به پیام هدف برسیم ──
+                    if self.start_link and not start_collecting:
+                        if msg_id == self.target_msg_id:
+                            start_collecting = True
+                            self.logger.info(f"🎯 پیام هدف پیدا شد: {msg_id}")
+                        else:
+                            continue
+
+                    if not start_collecting:
+                        continue
+
+                    # ─── استخراج متن ──────────────────────────────────────
+                    text = await self._extract_text_from_message(msg, msg_id)
+
+                    # ─── تاریخ ─────────────────────────────────────────────
+                    date = ""
+                    try:
+                        date_el = msg.locator('time, .date, .message-date, [datetime]').first
+                        if await date_el.count() > 0:
+                            date = await date_el.inner_text() or ""
+                    except:
+                        pass
+
+                    items.append({
+                        'id': msg_id,
+                        'text': text,
+                        'date': date,
+                        'url': f"https://t.me/{self.channel}/{msg_id}"
+                    })
+                    seen_ids.add(msg_id)
+
+                    if len(items) >= effective_limit:
+                        break
+
+                except Exception as e:
+                    self.logger.debug(f"خطا در پردازش پیام: {e}")
+                    continue
 
             if len(items) >= effective_limit:
                 break
 
-            # ─── اسکرول هوشمند با جهت ──────────────────────────────────
-            old_height = await page.evaluate("document.documentElement.scrollHeight")
+            # ─── اسکرول برای دور بعدی ────────────────────────────────────
+            self.logger.info(f"🔄 اسکرول به {self.scroll_direction} برای دور بعدی...")
             scrolled = await self._smart_scroll(page, self.scroll_direction, step=SCROLL_STEP_BASE, max_attempts=3)
-            new_height = await page.evaluate("document.documentElement.scrollHeight")
-
-            if new_height == old_height:
-                # بررسی آیا به انتهای صفحه رسیده‌ایم
-                at_top = await page.evaluate("window.scrollY <= 100")
-                at_bottom = await page.evaluate("window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 100")
-                if (self.scroll_direction == 'up' and at_top) or (self.scroll_direction == 'down' and at_bottom):
-                    self.logger.info("📌 به انتهای صفحه رسیدیم. اسکرول متوقف می‌شود.")
-                    break
+            if not scrolled:
                 scroll_attempts += 1
-            else:
-                scroll_attempts = 0
+                if scroll_attempts >= 3:
+                    self.logger.info("📌 به نظر می‌رسد به انتها رسیدیم. خاتمه استخراج.")
+                    break
 
-            # ─── در حالت start_link، اگر هنوز به نقطه شروع نرسیده‌ایم ───
-            if self.start_link and not start_collecting:
-                self.logger.info("🔄 هنوز به پیام هدف نرسیدیم، اسکرول اضافی...")
-                extra_amount = -SCROLL_STEP_BASE * 2 if self.scroll_direction == 'up' else SCROLL_STEP_BASE * 2
-                scroll_stack_fetch.append(extra_amount)
-                await page.evaluate(f"window.scrollBy(0, {extra_amount})")
-                await human_sleep(1.5, 0.3)
-
-        # ─── برگشت به نقطه‌ی اولیه ──────────────────────────────
-        for amount in reversed(scroll_stack_fetch):
-            await page.evaluate(f"window.scrollBy(0, {-amount})")
-            await human_sleep(0.3, 0.1)
-        current_y = await page.evaluate("window.scrollY")
-        if abs(current_y - original_scroll_y_fetch) > 30:
-            await page.evaluate(f"window.scrollTo(0, {original_scroll_y_fetch})")
-            self.logger.info(f"   ↩️ برگشت به موقعیت اولیه (fetch): {original_scroll_y_fetch}px")
+        self.logger.info(f"📊 در مجموع {len(items)} پست جمع‌آوری شد.")
         items = items[:effective_limit]
-        self.logger.info(f"📊 {len(items)} پست جمع‌آوری شد.")
+
         await self._save_screenshot(page, "final")
         await self._capture_post_screenshots(page, items)
 
