@@ -410,6 +410,28 @@ class TelegramChannelScraper:
             if state:
                 last_post_id = state.get('last_post_id')
                 downloaded_posts = state.get('downloaded_posts', [])
+                
+                # ─── ساخت لیست fallback (پست‌های قبلی که دانلود شده‌اند) ───
+                fallback_ids = []
+                if downloaded_posts:
+                    try:
+                        # مرتب‌سازی عددی
+                        downloaded_ids = sorted([int(id) for id in downloaded_posts if id.isdigit()])
+                        # پیدا کردن ایندکس last_post_id
+                        try:
+                            last_index = downloaded_ids.index(int(last_post_id))
+                        except ValueError:
+                            last_index = len(downloaded_ids) - 1
+                        # پست‌های قبل از last_index (قدیمی‌ترها) – به ترتیب نزولی
+                        for i in range(last_index - 1, -1, -1):
+                            fallback_ids.append(str(downloaded_ids[i]))
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ خطا در ساخت لیست fallback: {e}")
+                
+                # ذخیره لیست fallback برای استفاده در حلقه اصلی
+                self._fallback_ids = fallback_ids
+                self._fallback_index = 0  # برای پیگیری اندیس فعلی
+                
                 if last_post_id:
                     try:
                         last_id_int = int(last_post_id)
@@ -417,14 +439,24 @@ class TelegramChannelScraper:
                             next_id = last_id_int - 1  # پست قدیمی‌تر
                         else:
                             next_id = last_id_int + 1  # پست جدیدتر
-                        if next_id <= 0:
+                        
+                        # ─── انتخاب شناسه شروع ──────────────────────────
+                        # اگر fallback_ids دارد، از اولین fallback استفاده کن
+                        if fallback_ids:
+                            start_id = fallback_ids[0]
+                            self.logger.info(f"🔄 شروع با fallback: {start_id} (به دلیل وجود پست‌های قدیمی‌تر)")
+                        else:
+                            start_id = str(next_id) if next_id > 0 else None
+                            if start_id:
+                                self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
+                        
+                        if start_id and int(start_id) > 0:
+                            self.start_link = f"https://t.me/{self.channel}/{start_id}"
+                            self.target_msg_id = start_id
+                        else:
                             self.logger.warning("⚠️ شناسه محاسبه‌شده منفی است، از ابتدا شروع می‌شود.")
                             self.start_link = None
                             self.target_msg_id = None
-                        else:
-                            self.start_link = f"https://t.me/{self.channel}/{next_id}"
-                            self.target_msg_id = str(next_id)
-                            self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
                     except ValueError:
                         self.logger.warning(f"⚠️ شناسه نامعتبر در resume_state: {last_post_id}. شروع از ابتدا.")
                         self.start_link = None
@@ -435,6 +467,7 @@ class TelegramChannelScraper:
                 self.logger.info("ℹ️ resume فعال است اما وضعیتی وجود ندارد، از ابتدا شروع می‌شود.")
         else:
             self.logger.info("ℹ️ resume غیرفعال است، از ابتدا شروع می‌شود.")
+            
         # ─── اگر حالت retry فعال باشد ──────────────────────────
         retry_failed = getattr(self.config, 'retry_failed', False)
         if retry_failed:
@@ -547,11 +580,27 @@ class TelegramChannelScraper:
                 if item['id'] not in {i['id'] for i in items}:
                     items.append(item)
                     newly_added.append(item)
-
+            # ─── اگر fallback فعال بود و پست جدیدی پیدا شد، آن را غیرفعال کن ───
+            if newly_added and hasattr(self, '_fallback_ids'):
+                self._fallback_ids = []  # پاکسازی تا دیگر تلاش نشود
+                self.logger.debug("✅ fallback غیرفعال شد (پست جدید پیدا شد).")
             self.logger.info(f"📥 {len(newly_added)} پست جدید جمع‌آوری شد (مجموع: {len(items)}/{self.limit})")
 
             # اگر هیچ پست جدیدی اضافه نشد، یعنی کار تمام است
             if not newly_added:
+                # ─── اگر fallback_ids داریم و هنوز fallback باقی مانده ───
+                if hasattr(self, '_fallback_ids') and self._fallback_ids:
+                    self._fallback_index += 1
+                    if self._fallback_index < len(self._fallback_ids):
+                        next_fallback = self._fallback_ids[self._fallback_index]
+                        self.start_link = f"https://t.me/{self.channel}/{next_fallback}"
+                        self.target_msg_id = next_fallback
+                        self.logger.info(f"🔄 تلاش با fallback بعدی: {next_fallback}")
+                        # ادامه حلقه با شناسه جدید (بدون break)
+                        continue
+                    else:
+                        self.logger.info("✅ تمام گزینه‌های fallback بررسی شدند.")
+                
                 self.logger.info("✅ به نظر می‌رسد تمام پست‌های در دسترس جمع‌آوری شدند.")
                 if self.debug_mode:
                     await self._save_screenshot(page, "end_of_channel")
