@@ -788,21 +788,46 @@ class TelegramChannelScraper:
             )
             self.logger.info("✅ پیام‌ها با محتوا بارگذاری شدند.")
             
-            # اگر direction 'up' است، ابتدا به پایین صفحه برو تا جدیدترین‌ها لود شوند
+            # ─── اگر direction 'up' است، به جدیدترین پست‌ها برو ──────────
             if self.scroll_direction == 'up' and not self.start_link:
-                self.logger.info("⬇️ پرش به پایین صفحه برای بارگذاری جدیدترین پست‌ها...")
-                await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-                await asyncio.sleep(3)  # افزایش تأخیر
-                self.logger.info("✅ به پایین صفحه رفتیم.")
+                self.logger.info("⬇️ تلاش برای رفتن به جدیدترین پست‌ها...")
                 
-                # ─── منتظر بارگذاری پیام‌های جدید ──────────────────
+                # ─── اولویت ۱: جستجوی دکمه فلش ──────────────────────────
+                clicked = False
+                scroll_button_selectors = [
+                    'button[title="Go to bottom"]',
+                    'div[class*="scroll-to-bottom"]',
+                    'div[class*="ScrollButton"]',
+                    '[aria-label="Scroll to bottom"]',
+                    'button:has(svg[class*="arrow-down"])',
+                ]
+                
+                for sel in scroll_button_selectors:
+                    try:
+                        btn = page.locator(sel).first
+                        if await btn.count() > 0:
+                            await btn.click(timeout=5000)
+                            self.logger.info("   ✅ روی دکمه فلش کلیک شد. منتظر بارگذاری جدیدترین پست‌ها...")
+                            clicked = True
+                            await human_sleep(3.5, 0.4)
+                            break
+                    except Exception:
+                        continue
+                
+                # ─── اگر دکمه فلش پیدا نشد، پرش دستی ──────────────────────
+                if not clicked:
+                    self.logger.info("   ℹ️ دکمه فلش پیدا نشد. پرش دستی به پایین صفحه...")
+                    await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+                    await asyncio.sleep(3)
+                    self.logger.info("✅ پرش دستی انجام شد.")
+                
+                # ─── منتظر بارگذاری پیام‌های جدید ──────────────────────────
                 self.logger.info("⏳ منتظر بارگذاری پیام‌های جدید در پایین صفحه...")
                 try:
                     await page.wait_for_function(
                         """() => {
                             const messages = document.querySelectorAll('div[data-message-id]');
                             if (messages.length === 0) return false;
-                            // بررسی کنید که حداقل یک پیام در نیمه پایینی صفحه باشد
                             const viewportHeight = window.innerHeight;
                             for (const msg of messages) {
                                 const rect = msg.getBoundingClientRect();
@@ -816,11 +841,12 @@ class TelegramChannelScraper:
                         timeout=10000
                     )
                     self.logger.info("✅ پیام‌های جدید در پایین صفحه بارگذاری شدند.")
+                    self._manual_scroll_done = True
                 except Exception as e:
                     self.logger.warning(f"⚠️ timeout در انتظار پیام‌های جدید: {e}")
-                
-                self._manual_scroll_done = True  # ← تنظیم flag
-            
+                    # اگر پرش دستی انجام شده و timeout خورده، _manual_scroll_done را False نگه می‌داریم
+                    self._manual_scroll_done = False
+                    self.logger.info("🔄 تلاش مجدد برای پیدا کردن دکمه فلش در بخش بعدی...")            
             await asyncio.sleep(3)  # افزایش تأخیر برای رندر کامل (مشابه دیباگ)
             self.logger.info("⏳ منتظر رندر کامل پیام‌ها...")
             
