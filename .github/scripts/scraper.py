@@ -404,6 +404,7 @@ class TelegramChannelScraper:
             self.logger.info(f"🚀 شروع اسکریپر با لینک: {self.start_link} (limit={self.limit})")
         else:
             self.logger.info(f"🚀 شروع اسکریپر مستقل برای @{self.channel} (limit={self.limit})")
+        last_post_id = None  # ← مقداردهی اولیه برای جلوگیری از UnboundLocalError
         # ─── بارگذاری وضعیت قبلی (اگر resume فعال باشد) ───
         if getattr(self.config, 'resume', False):
             state = self._load_resume_state()
@@ -540,18 +541,15 @@ class TelegramChannelScraper:
                         'reason': 'دانلود نشد (بدون فایل یا خطا)',
                         'url': f"https://t.me/{self.channel}/{post_id}"
                     })
-                    self.logger.warning(f"❌ پست {post_id} ناموفق بود.")
-            
-            # ─── بعد از اتمام حلقه، گزارش نهایی را تولید کن ──────
-            # (این خط را از اینجا بردارید و به بعد از حلقه ببرید)
+                    self.logger.warning(f"❌ پست {post_id} ناموفق بود.")            
+            # ─── تولید گزارش نهایی retry ──────────────────────────────
+            await self._generate_download_report(retry_items, retry_media_map, retry_failed_posts)
+            if context:
+                await context.close()
+            self.logger.info("🏁 تلاش مجدد تمام شد.")
+            return  # خروج از تابع (اجرای عادی ادامه پیدا نمی‌کند)
         
-        # ─── تولید گزارش نهایی retry ──────────────────────────────
-        # (اینجا بعد از حلقه for قرار می‌گیرد)
-        await self._generate_download_report(retry_items, retry_media_map, retry_failed_posts)
-        if context:
-            await context.close()
-        self.logger.info("🏁 تلاش مجدد تمام شد.")
-        return  # خروج از تابع
+        # ─── ادامه کد عادی (زمانی که retry_failed == False) ──────────
         # ─── متغیرهای کلی ─────────────────────────────
         max_retries = 3
         retry_count = 0
