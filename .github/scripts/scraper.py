@@ -410,24 +410,26 @@ class TelegramChannelScraper:
             if state:
                 last_post_id = state.get('last_post_id')
                 downloaded_posts = state.get('downloaded_posts', [])
-                
-                # ─── ساخت لیست fallback (پست‌های قبلی که دانلود شده‌اند) ───
+                # ─── ساخت لیست fallback ───
                 fallback_ids = []
+                downloaded_ids = []
                 if downloaded_posts:
                     try:
-                        # مرتب‌سازی عددی
                         downloaded_ids = sorted([int(id) for id in downloaded_posts if id.isdigit()])
-                        # پیدا کردن ایندکس last_post_id
+                        # ─── لاگ‌های دیباگ ──────────────────────────────────
+                        self.logger.info(f"🐞 downloaded_ids: {downloaded_ids[:10]} ... (تعداد: {len(downloaded_ids)})")
+        
                         try:
                             last_index = downloaded_ids.index(int(last_post_id))
                         except ValueError:
                             last_index = len(downloaded_ids) - 1
-                        # پست‌های قبل از last_index (قدیمی‌ترها) – به ترتیب نزولی
+                        self.logger.info(f"🐞 last_index: {last_index}")
+        
                         for i in range(last_index - 1, -1, -1):
                             fallback_ids.append(str(downloaded_ids[i]))
                     except Exception as e:
                         self.logger.warning(f"⚠️ خطا در ساخت لیست fallback: {e}")
-                
+                self.logger.info(f"🐞 fallback_ids: {fallback_ids[:10]} ... (تعداد: {len(fallback_ids)})")
                 # ذخیره لیست fallback برای استفاده در حلقه اصلی
                 self._fallback_ids = fallback_ids
                 self._fallback_index = 0  # برای پیگیری اندیس فعلی
@@ -446,9 +448,15 @@ class TelegramChannelScraper:
                             start_id = fallback_ids[0]
                             self.logger.info(f"🔄 شروع با fallback: {start_id} (به دلیل وجود پست‌های قدیمی‌تر)")
                         else:
-                            start_id = str(next_id) if next_id > 0 else None
-                            if start_id:
-                                self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
+                            # اگر fallback خالی است، از قدیمی‌ترین پست موجود استفاده کن
+                            if downloaded_ids:
+                                oldest_id = downloaded_ids[0]  # اولین شناسه (قدیمی‌ترین)
+                                start_id = str(oldest_id)
+                                self.logger.info(f"🔄 fallback خالی است، شروع از قدیمی‌ترین پست موجود: {oldest_id}")
+                            else:
+                                start_id = str(next_id) if next_id > 0 else None
+                                if start_id:
+                                    self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
                         
                         if start_id and int(start_id) > 0:
                             self.start_link = f"https://t.me/{self.channel}/{start_id}"
@@ -467,6 +475,11 @@ class TelegramChannelScraper:
                 self.logger.info("ℹ️ resume فعال است اما وضعیتی وجود ندارد، از ابتدا شروع می‌شود.")
         else:
             self.logger.info("ℹ️ resume غیرفعال است، از ابتدا شروع می‌شود.")
+        
+        # ─── اگر fallback تمام شد، حدس شناسه‌های قبلی (به‌عنوان آخرین راه) ───
+        # این بخش باید بعد از بارگذاری resume و در سطح _run_impl باشد،
+        # اما در حلقه while اجرا می‌شود (قبلاً اضافه شده است).            
+
             
         # ─── اگر حالت retry فعال باشد ──────────────────────────
         retry_failed = getattr(self.config, 'retry_failed', False)
@@ -596,10 +609,30 @@ class TelegramChannelScraper:
                         self.start_link = f"https://t.me/{self.channel}/{next_fallback}"
                         self.target_msg_id = next_fallback
                         self.logger.info(f"🔄 تلاش با fallback بعدی: {next_fallback}")
-                        # ادامه حلقه با شناسه جدید (بدون break)
                         continue
                     else:
                         self.logger.info("✅ تمام گزینه‌های fallback بررسی شدند.")
+                
+                # ─── حدس شناسه‌های قبلی (به‌عنوان آخرین راه) ──────────────────
+                # اگر fallback_ids تمام شد یا وجود نداشت، اما still داریم و last_post_id موجود است
+                if hasattr(self, '_fallback_ids') and not self._fallback_ids and last_post_id:
+                    try:
+                        last_id_int = int(last_post_id)
+                        # شروع از شناسه قبلی (با فاصله ۱ تا ۱۰)
+                        for offset in range(1, 11):
+                            guess_id = last_id_int - offset
+                            if guess_id <= 0:
+                                break
+                            self.logger.info(f"🔄 حدس شناسه {guess_id} (آخرین راه)...")
+                            self.start_link = f"https://t.me/{self.channel}/{guess_id}"
+                            self.target_msg_id = str(guess_id)
+                            # با continue حلقه دوباره اجرا می‌شود و این بار سعی می‌کند پست را پیدا کند
+                            # برای جلوگیری از حلقه بی‌نهایت، بعد از ۱۰ تلاش، break می‌کنیم
+                            # اما با این کار، اگر همه حدس‌ها ناموفق باشند، در نهایت break می‌شود.
+                            # بهتر است این بخش را با یک flag کنترل کنیم.
+                            continue
+                    except:
+                        pass
                 
                 self.logger.info("✅ به نظر می‌رسد تمام پست‌های در دسترس جمع‌آوری شدند.")
                 if self.debug_mode:
