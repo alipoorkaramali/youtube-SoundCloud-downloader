@@ -711,8 +711,27 @@ class TelegramChannelScraper:
                 
                 self._manual_scroll_done = True  # ← تنظیم flag
             
-            await asyncio.sleep(2)  # تأخیر نهایی برای رندر
+            await asyncio.sleep(3)  # افزایش تأخیر برای رندر کامل (مشابه دیباگ)
             self.logger.info("⏳ منتظر رندر کامل پیام‌ها...")
+            
+            # ─── اطمینان از وجود حداقل یک پیام با محتوا قبل از شروع ───
+            self.logger.info("🔍 بررسی مجدد وجود پیام‌های با محتوا در صفحه...")
+            try:
+                await page.wait_for_function(
+                    """() => {
+                        const messages = document.querySelectorAll('div[data-message-id]');
+                        if (messages.length === 0) return false;
+                        for (const msg of messages) {
+                            const text = msg.innerText?.trim() || '';
+                            if (text.length > 5) return true;
+                        }
+                        return false;
+                    }""",
+                    timeout=5000
+                )
+                self.logger.info("✅ پیام‌های با محتوا در صفحه وجود دارند.")
+            except Exception:
+                self.logger.warning("⚠️ پیامی با محتوا در صفحه یافت نشد، ادامه با اسکرول...")
             
         except Exception as e:
             self.logger.warning(f"⚠️ timeout در انتظار پیام‌ها: {e}. ادامه با اسکرول...")
@@ -786,6 +805,34 @@ class TelegramChannelScraper:
         while len(items) < effective_limit and scroll_attempts < MAX_SCROLL_ATTEMPTS:
             try:
                 messages = await page.locator('div[data-message-id]').all()
+                
+                # ─── اگر پیامی وجود ندارد، یک بار با تأخیر بیشتر تلاش کن ───
+                if not messages and scroll_attempts == 0:
+                    self.logger.info("⏳ پیامی یافت نشد، ۲ ثانیه صبر می‌کنم و دوباره تلاش می‌کنم...")
+                    await asyncio.sleep(2)
+                    messages = await page.locator('div[data-message-id]').all()
+                    if messages:
+                        self.logger.info(f"✅ {len(messages)} پیام پس از تأخیر پیدا شد.")
+                
+                # ─── اگر باز هم خالی بود، یک اسکرول کوچک انجام بده ───
+                if not messages and scroll_attempts == 0:
+                    self.logger.info("🔄 هنوز پیامی نیست، یک اسکرول کوچک به پایین...")
+                    await page.evaluate("window.scrollBy(0, 300)")
+                    await asyncio.sleep(1)
+                    messages = await page.locator('div[data-message-id]').all()
+                    if messages:
+                        self.logger.info(f"✅ {len(messages)} پیام پس از اسکرول پیدا شد.")
+                
+                # ─── اگر باز هم خالی بود، از wait_for_selector استفاده کن ───
+                if not messages and scroll_attempts == 0:
+                    try:
+                        self.logger.info("⏳ منتظر ظاهر شدن پیام‌ها با wait_for_selector...")
+                        await page.wait_for_selector('div[data-message-id]', timeout=3000)
+                        messages = await page.locator('div[data-message-id]').all()
+                        if messages:
+                            self.logger.info(f"✅ {len(messages)} پیام پس از wait_for_selector پیدا شد.")
+                    except Exception:
+                        self.logger.warning("⚠️ حتی با wait_for_selector پیامی پیدا نشد.")
 
                 # ─── تعیین ترتیب پیمایش بر اساس جهت ──────────────────────
                 if self.start_link:
