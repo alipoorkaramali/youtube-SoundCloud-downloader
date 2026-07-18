@@ -449,15 +449,15 @@ class TelegramChannelScraper:
                             start_id = fallback_ids[0]
                             self.logger.info(f"🔄 شروع با fallback: {start_id} (به دلیل وجود پست‌های قدیمی‌تر)")
                         else:
-                            # اگر fallback خالی است، از قدیمی‌ترین پست موجود استفاده کن
-                            if downloaded_ids:
-                                oldest_id = downloaded_ids[0]  # اولین شناسه (قدیمی‌ترین)
-                                start_id = str(oldest_id)
-                                self.logger.info(f"🔄 fallback خالی است، شروع از قدیمی‌ترین پست موجود: {oldest_id}")
+                            # ─── حالت Resume عادی (بدون نیاز به fallback) ───
+                            # fallback_ids خالی است، یعنی همه‌ی پست‌های قدیمی‌تر دانلود شده‌اند.
+                            # بنابراین از next_id استفاده می‌کنیم.
+                            start_id = str(next_id) if next_id > 0 else None
+                            if start_id:
+                                self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
                             else:
-                                start_id = str(next_id) if next_id > 0 else None
-                                if start_id:
-                                    self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
+                                self.logger.warning("⚠️ شناسه محاسبه‌شده منفی است، از ابتدا شروع می‌شود.")
+                                start_id = None
                         
                         if start_id and int(start_id) > 0:
                             self.start_link = f"https://t.me/{self.channel}/{start_id}"
