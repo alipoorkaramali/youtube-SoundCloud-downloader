@@ -552,7 +552,9 @@ class TelegramChannelScraper:
 
             # اگر هیچ پست جدیدی اضافه نشد، یعنی کار تمام است
             if not newly_added:
-                self.logger.info("✅ پست جدیدی یافت نشد. احتمالاً به انتهای کانال رسیده‌ایم. اسکریپت متوقف می‌شود.")
+                self.logger.info("✅ به نظر می‌رسد تمام پست‌های در دسترس جمع‌آوری شدند.")
+                if self.debug_mode:
+                    await self._save_screenshot(page, "end_of_channel")
                 break
 
             # 🔥 دانلود فوری رسانه‌های پست‌های جدید
@@ -828,18 +830,16 @@ class TelegramChannelScraper:
                 self.logger.debug("   تلاش با سلکتورهای جایگزین...")
                 messages = await page.locator('div.message, div[class*="bubble"], div[class*="message"], div[class*="post"]').all()
             
-            # ─── اگر هنوز پیام کمی داشت، از روش JS هم کمک بگیریم ───
-            if len(messages) < 8:
+            # ─── اگر پیام کمی بود، از روش JavaScript هم استفاده کن ───
+            if len(messages) < 10:
                 try:
                     js_posts = await self._extract_posts_from_page(page)
-                    self.logger.info(f"   📊 استخراج JS: {len(js_posts)} پست")
-                    # اگر JS پست‌های بیشتری پیدا کرد، می‌توانیم جایگزین کنیم (اختیاری)
-                    if len(js_posts) > len(messages):
-                        self.logger.info(f"   🔄 استفاده از داده‌های JS به‌جای {len(messages)} پیام قبلی")
-                        # تبدیل داده‌های JS به فرمت مورد انتظار (اختیاری)
-                        # فعلاً فقط لاگ می‌کنیم و از همان messages استفاده می‌کنیم
+                    self.logger.info(f"   📊 استخراج مستقیم JS: {len(js_posts)} پست")
+                    if js_posts and len(js_posts) > len(messages):
+                        self.logger.info("   ✅ JS نتایج بهتری داد")
+                        # می‌توانی اینجا items را از js_posts پر کنی (اختیاری پیشرفته)
                 except Exception as e:
-                    self.logger.debug(f"   خطا در استخراج JS: {e}")
+                    self.logger.debug(f"خطا در استخراج JS: {e}")
 
             self.logger.info(f"   📋 تلاش {attempt+1}: {len(messages)} المان پیام پیدا شد")
 
@@ -857,8 +857,11 @@ class TelegramChannelScraper:
                 try:
                     msg_id = await msg.get_attribute('data-message-id')
                     if msg_id:
-                        # پاک‌سازی شناسه
                         msg_id = str(int(float(msg_id)))
+                    
+                    # ─── لاگ دیباگ برای پیام ─────────────────────────────
+                    self.logger.debug(f"   → پردازش پیام {msg_id} | طول متن: {len(text) if 'text' in locals() else 0}")
+                    
                     if not msg_id or msg_id in seen_ids:
                         continue
 
