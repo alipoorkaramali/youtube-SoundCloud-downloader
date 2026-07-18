@@ -792,7 +792,7 @@ class TelegramChannelScraper:
             if self.scroll_direction == 'up' and not self.start_link:
                 self.logger.info("⬇️ تلاش برای رفتن به جدیدترین پست‌ها...")
                 
-                # ─── اولویت ۱: جستجوی دکمه فلش ──────────────────────────
+                # ─── جستجوی دکمه فلش (فقط یک بار) ──────────────────────────
                 clicked = False
                 scroll_button_selectors = [
                     'button[title="Go to bottom"]',
@@ -814,39 +814,36 @@ class TelegramChannelScraper:
                     except Exception:
                         continue
                 
-                # ─── اگر دکمه فلش پیدا نشد، پرش دستی ──────────────────────
+                # ─── اگر دکمه فلش پیدا نشد، فقط لاگ کن و ادامه بده ──────────
                 if not clicked:
-                    self.logger.info("   ℹ️ دکمه فلش پیدا نشد. پرش دستی به پایین صفحه...")
-                    await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-                    await asyncio.sleep(3)
-                    self.logger.info("✅ پرش دستی انجام شد.")
-                
-                # ─── منتظر بارگذاری پیام‌های جدید ──────────────────────────
-                self.logger.info("⏳ منتظر بارگذاری پیام‌های جدید در پایین صفحه...")
-                try:
-                    await page.wait_for_function(
-                        """() => {
-                            const messages = document.querySelectorAll('div[data-message-id]');
-                            if (messages.length === 0) return false;
-                            const viewportHeight = window.innerHeight;
-                            for (const msg of messages) {
-                                const rect = msg.getBoundingClientRect();
-                                if (rect.top > viewportHeight * 0.3 && rect.top < viewportHeight * 0.9) {
-                                    const text = msg.innerText?.trim() || '';
-                                    if (text.length > 10) return true;
+                    self.logger.info("   ℹ️ دکمه فلش پیدا نشد. ادامه با وضعیت فعلی (مانند نسخه دیباگ).")
+                    # بدون پرش دستی، فقط لاگ
+                else:
+                    # ─── منتظر بارگذاری پیام‌های جدید ──────────────────────────
+                    self.logger.info("⏳ منتظر بارگذاری پیام‌های جدید در پایین صفحه...")
+                    try:
+                        await page.wait_for_function(
+                            """() => {
+                                const messages = document.querySelectorAll('div[data-message-id]');
+                                if (messages.length === 0) return false;
+                                const viewportHeight = window.innerHeight;
+                                for (const msg of messages) {
+                                    const rect = msg.getBoundingClientRect();
+                                    if (rect.top > viewportHeight * 0.3 && rect.top < viewportHeight * 0.9) {
+                                        const text = msg.innerText?.trim() || '';
+                                        if (text.length > 10) return true;
+                                    }
                                 }
-                            }
-                            return false;
-                        }""",
-                        timeout=10000
-                    )
-                    self.logger.info("✅ پیام‌های جدید در پایین صفحه بارگذاری شدند.")
-                    self._manual_scroll_done = True
-                except Exception as e:
-                    self.logger.warning(f"⚠️ timeout در انتظار پیام‌های جدید: {e}")
-                    # اگر پرش دستی انجام شده و timeout خورده، _manual_scroll_done را False نگه می‌داریم
-                    self._manual_scroll_done = False
-                    self.logger.info("🔄 تلاش مجدد برای پیدا کردن دکمه فلش در بخش بعدی...")            
+                                return false;
+                            }""",
+                            timeout=10000
+                        )
+                        self.logger.info("✅ پیام‌های جدید در پایین صفحه بارگذاری شدند.")
+                        self._manual_scroll_done = True
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ timeout در انتظار پیام‌های جدید: {e}")
+                        # اگر timeout خورد، باز هم _manual_scroll_done = True می‌کنیم تا دوباره تلاش نشود
+                        self._manual_scroll_done = True           
             await asyncio.sleep(3)  # افزایش تأخیر برای رندر کامل (مشابه دیباگ)
             self.logger.info("⏳ منتظر رندر کامل پیام‌ها...")
             
@@ -917,7 +914,7 @@ class TelegramChannelScraper:
         else:
             self.logger.info("ℹ️ در حالت start_link، پرش به پایین/بالا انجام نمی‌شود.")
 
-        # ─── استخراج مقاوم ────────────────────────────────────────────────────
+        # ─── استخراج مقاوم (حداکثر ۳ تلاش با تأخیر هوشمند) ──────────────────
         items = []
         seen_ids = set()
         scroll_attempts = 0
@@ -928,11 +925,14 @@ class TelegramChannelScraper:
         # ─── متغیر start_collecting ─────────────────────────────────────
         start_collecting = not bool(self.start_link)  # اگر start_link نداشته باشیم، از اول شروع می‌کنیم
 
-        for attempt in range(6):  # حداکثر ۶ تلاش کلی
+        for attempt in range(3):  # فقط ۳ تلاش (به جای ۶)
             if attempt > 0:
-                self.logger.info(f"🔄 تلاش استخراج کلی {attempt+1}/6")
-                await self._smart_scroll(page, self.scroll_direction, step=800, max_attempts=2)
-                await human_sleep(2.0, 0.5)
+                self.logger.info(f"🔄 تلاش استخراج {attempt+1}/3 (با تأخیر برای بارگذاری)...")
+                # فقط یک بار اسکرول با step=800
+                await self._smart_scroll(page, self.scroll_direction, step=800, max_attempts=1)
+                # به‌جای تلاش مجدد، یک تأخیر محترمانه برای بارگذاری
+                self.logger.info("⏳ صبر ۳ ثانیه برای بارگذاری محتوای جدید...")
+                await human_sleep(3.0, 0.5)
 
             # ─── دریافت پیام‌ها با روش‌های مختلف ──────────────────────────
             messages = await page.locator('div[data-message-id]').all()
@@ -947,14 +947,21 @@ class TelegramChannelScraper:
                     self.logger.info(f"   📊 استخراج مستقیم JS: {len(js_posts)} پست")
                     if js_posts and len(js_posts) > len(messages):
                         self.logger.info("   ✅ JS نتایج بهتری داد")
-                        # می‌توانی اینجا items را از js_posts پر کنی (اختیاری پیشرفته)
                 except Exception as e:
                     self.logger.debug(f"خطا در استخراج JS: {e}")
 
             self.logger.info(f"   📋 تلاش {attempt+1}: {len(messages)} المان پیام پیدا شد")
 
             if not messages:
-                continue
+                # اگر پیامی وجود نداشت، یک بار دیگر صبر کن (بدون اسکرول مجدد)
+                if attempt < 2:
+                    self.logger.info("⏳ پیامی وجود ندارد، ۲ ثانیه صبر می‌کنم...")
+                    await human_sleep(2.0, 0.3)
+                    messages = await page.locator('div[data-message-id]').all()
+                    if messages:
+                        self.logger.info(f"   ✅ پس از صبر، {len(messages)} پیام پیدا شد")
+                if not messages:
+                    continue
 
             # ─── تعیین ترتیب ─────────────────────────────────────────────
             # اگر start_link داریم یا جهت 'up' است، از جدید به قدیم برویم
@@ -970,7 +977,7 @@ class TelegramChannelScraper:
                         msg_id = str(int(float(msg_id)))
                     
                     # ─── لاگ دیباگ برای پیام ─────────────────────────────
-                    self.logger.debug(f"   → پردازش پیام {msg_id} | طول متن: {len(text) if 'text' in locals() else 0}")
+                    self.logger.debug(f"   → پردازش پیام {msg_id}")
                     
                     if not msg_id or msg_id in seen_ids:
                         continue
@@ -992,9 +999,6 @@ class TelegramChannelScraper:
 
                     # ─── استخراج متن ──────────────────────────────────────
                     text = await self._extract_text_from_message(msg, msg_id)
-
-                    # ─── لاگ دیباگ برای پیام ─────────────────────────────
-                    self.logger.debug(f"   پردازش پیام ID: {msg_id} | متن موجود: {bool(text)}")
 
                     # ─── تاریخ ─────────────────────────────────────────────
                     date = ""
@@ -1023,18 +1027,16 @@ class TelegramChannelScraper:
             if len(items) >= effective_limit:
                 break
 
-            # ─── اسکرول برای دور بعدی ────────────────────────────────────
-            self.logger.info(f"🔄 اسکرول به {self.scroll_direction} برای دور بعدی...")
-            scrolled = await self._smart_scroll(page, self.scroll_direction, step=SCROLL_STEP_BASE, max_attempts=3)
-            if not scrolled:
-                scroll_attempts += 1
-                if scroll_attempts >= 3:
-                    self.logger.info("📌 به نظر می‌رسد به انتها رسیدیم. خاتمه استخراج.")
-                    break
+            # ─── فقط در صورتی اسکرول کنیم که پیامی پیدا نشد ──────────────
+            if len(items) == 0 and attempt < 2:
+                self.logger.info(f"🔄 اسکرول به {self.scroll_direction} برای تلاش بعدی...")
+                scrolled = await self._smart_scroll(page, self.scroll_direction, step=SCROLL_STEP_BASE, max_attempts=1)
+                if not scrolled:
+                    self.logger.info("ℹ️ اسکرول تغییری ایجاد نکرد. صبر برای بارگذاری...")
+                    await human_sleep(3.0, 0.5)
 
         self.logger.info(f"📊 در مجموع {len(items)} پست جمع‌آوری شد.")
         items = items[:effective_limit]
-
         await self._save_screenshot(page, "final")
         await self._capture_post_screenshots(page, items)
 
