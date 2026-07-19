@@ -533,32 +533,13 @@ class TelegramChannelScraper:
         
         # ─── ادامه کد عادی (زمانی که retry_failed == False) ──────────
         # ─── متغیرهای کلی ─────────────────────────────
-        max_retries = 3
-        retry_count = 0
         items = []
         media_map = {}
         all_failed_posts = []
         context = None
         page = None
 
-        while len(items) < self.limit and retry_count <= max_retries:
-            if retry_count > 0:
-                # تلاش مجدد با حدس شناسه
-                if items:
-                    last_id_str = items[-1]['id']
-                    if last_id_str.isdigit():
-                        last_id = int(last_id_str)
-                        step = -1 if self.scroll_direction == 'up' else 1
-                        guess_id = last_id + step
-                        if guess_id <= 0:
-                            break
-                        self.logger.info(f"🔄 تلاش مجدد {retry_count}: حدس شناسه {guess_id}")
-                        self.start_link = f"https://t.me/{self.channel}/{guess_id}"
-                        self.target_msg_id = str(guess_id)
-                    else:
-                        self.logger.warning(f"⚠️ شناسه غیرعددی ({last_id_str})، از retry صرف‌نظر می‌شود.")
-                        break
-
+        while len(items) < self.limit:
             # ─── اطمینان از مرورگر ──────────────────────
             context, page = await self._ensure_browser(context, page)
 
@@ -596,27 +577,6 @@ class TelegramChannelScraper:
                         continue
                     else:
                         self.logger.info("✅ تمام گزینه‌های fallback بررسی شدند.")
-                
-                # ─── حدس شناسه‌های قبلی (به‌عنوان آخرین راه) ──────────────────
-                # اگر fallback_ids تمام شد یا وجود نداشت، اما still داریم و last_post_id موجود است
-                if hasattr(self, '_fallback_ids') and not self._fallback_ids and last_post_id:
-                    try:
-                        last_id_int = int(last_post_id)
-                        # شروع از شناسه قبلی (با فاصله ۱ تا ۱۰)
-                        for offset in range(1, 11):
-                            guess_id = last_id_int - offset
-                            if guess_id <= 0:
-                                break
-                            self.logger.info(f"🔄 حدس شناسه {guess_id} (آخرین راه)...")
-                            self.start_link = f"https://t.me/{self.channel}/{guess_id}"
-                            self.target_msg_id = str(guess_id)
-                            # با continue حلقه دوباره اجرا می‌شود و این بار سعی می‌کند پست را پیدا کند
-                            # برای جلوگیری از حلقه بی‌نهایت، بعد از ۱۰ تلاش، break می‌کنیم
-                            # اما با این کار، اگر همه حدس‌ها ناموفق باشند، در نهایت break می‌شود.
-                            # بهتر است این بخش را با یک flag کنترل کنیم.
-                            continue
-                    except:
-                        pass
                 
                 self.logger.info("✅ به نظر می‌رسد تمام پست‌های در دسترس جمع‌آوری شدند.")
                 if self.debug_mode:
