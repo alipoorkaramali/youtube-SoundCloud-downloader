@@ -584,10 +584,16 @@ class TelegramChannelScraper:
                 break
 
             # 🔥 دانلود فوری رسانه‌های پست‌های جدید
+            # 🔥 دانلود فوری رسانه‌های پست‌های جدید
             self.logger.info(f"⬇️ شروع دانلود رسانه برای {len(newly_added)} پست جدید...")
             try:
+                # ✅ مرتب‌سازی پست‌های جدید بر اساس شناسه (عددی)
+                newly_added_sorted = sorted(newly_added, key=lambda x: int(x['id']))
+    
                 batch_media_map, downloaded_batch, batch_failed = await self._download_media(
-                    newly_added, page, context
+                    newly_added_sorted,  # ✅ اینجا اصلاح شد
+                    page,
+                    context
                 )
                 all_failed_posts.extend(batch_failed)
                 media_map.update(batch_media_map)
@@ -597,6 +603,8 @@ class TelegramChannelScraper:
                 await human_sleep(3.0, 1.0)
             except Exception as e:
                 self.logger.error(f"❌ خطا در دانلود این batch: {e}")
+                # اگر خطا رخ داد، همچنان متغیر را تعریف کن تا از خطا در ادامه جلوگیری شود
+                newly_added_sorted = newly_added
 
             # ─── چک کردن حجم و آپلود در صورت نیاز ──────────────────
             total_size = sum(f.stat().st_size for f in self.media_dir.rglob('*') if f.is_file())
@@ -605,13 +613,14 @@ class TelegramChannelScraper:
                 self.logger.info(f"📦 حجم پوشه media به {size_mb:.1f} MB رسید. شروع آپلود...")
                 uploaded = await self._upload_and_cleanup()
                 if uploaded:
-                    # به‌روزرسانی resume_state برای ادامه از این نقطه
-                    self._save_resume_state(str(newly_added[-1]['id']), items)
+                    # ✅ استفاده از newly_added_sorted
+                    self._save_resume_state(str(newly_added_sorted[-1]['id']), items)
                 else:
                     self.logger.warning("⚠️ آپلود ناموفق بود، ادامه با فایل‌های محلی...")
 
             # به‌روزرسانی start_link با آخرین پست جدید
-            last_item = newly_added[-1]
+            # ✅ استفاده از newly_added_sorted
+            last_item = newly_added_sorted[-1]
             last_id_str = str(last_item['id']).strip()
             try:
                 if '.' in last_id_str:
