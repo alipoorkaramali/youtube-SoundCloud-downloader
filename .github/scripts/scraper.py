@@ -435,47 +435,28 @@ class TelegramChannelScraper:
                 self._fallback_ids = fallback_ids
                 self._fallback_index = 0  # برای پیگیری اندیس فعلی
                 
+        # ─── بارگذاری وضعیت قبلی (اگر resume فعال باشد) ───
+        if getattr(self.config, 'resume', False):
+            state = self._load_resume_state()
+            if state:
+                last_post_id = state.get('last_post_id')
                 if last_post_id:
-                    try:
-                        last_id_int = int(last_post_id)
-                        if self.scroll_direction == 'up':
-                            next_id = last_id_int - 1  # پست قدیمی‌تر
-                        else:
-                            next_id = last_id_int + 1  # پست جدیدتر
-                        
-                        # ─── انتخاب شناسه شروع ──────────────────────────
-                        # اگر fallback_ids دارد، از اولین fallback استفاده کن
-                        if fallback_ids:
-                            start_id = fallback_ids[0]
-                            self.logger.info(f"🔄 شروع با fallback: {start_id} (به دلیل وجود پست‌های قدیمی‌تر)")
-                        else:
-                            # ─── حالت Resume عادی (بدون نیاز به fallback) ───
-                            # fallback_ids خالی است، یعنی همه‌ی پست‌های قدیمی‌تر دانلود شده‌اند.
-                            # بنابراین از next_id استفاده می‌کنیم.
-                            start_id = str(next_id) if next_id > 0 else None
-                            if start_id:
-                                self.logger.info(f"🔄 ادامه از پست بعد از {last_post_id} → شناسه {next_id}")
-                            else:
-                                self.logger.warning("⚠️ شناسه محاسبه‌شده منفی است، از ابتدا شروع می‌شود.")
-                                start_id = None
-                        
-                        if start_id and int(start_id) > 0:
-                            self.start_link = f"https://t.me/{self.channel}/{start_id}"
-                            self.target_msg_id = start_id
-                        else:
-                            self.logger.warning("⚠️ شناسه محاسبه‌شده منفی است، از ابتدا شروع می‌شود.")
-                            self.start_link = None
-                            self.target_msg_id = None
-                    except ValueError:
-                        self.logger.warning(f"⚠️ شناسه نامعتبر در resume_state: {last_post_id}. شروع از ابتدا.")
-                        self.start_link = None
-                        self.target_msg_id = None
+                    # استفاده از خود آخرین پست به عنوان نقطه شروع (بدون حدس شناسه)
+                    self.start_link = f"https://t.me/{self.channel}/{last_post_id}"
+                    self.target_msg_id = str(last_post_id)
+                    self.logger.info(f"🔄 ادامه از آخرین پست دانلودشده: {last_post_id}")
                 else:
                     self.logger.info("ℹ️ resume_state خالی است، از ابتدا شروع می‌شود.")
+                    self.start_link = None
+                    self.target_msg_id = None
             else:
                 self.logger.info("ℹ️ resume فعال است اما وضعیتی وجود ندارد، از ابتدا شروع می‌شود.")
+                self.start_link = None
+                self.target_msg_id = None
         else:
             self.logger.info("ℹ️ resume غیرفعال است، از ابتدا شروع می‌شود.")
+            self.start_link = None
+            self.target_msg_id = None
         
         # ─── اگر fallback تمام شد، حدس شناسه‌های قبلی (به‌عنوان آخرین راه) ───
         # این بخش باید بعد از بارگذاری resume و در سطح _run_impl باشد،
