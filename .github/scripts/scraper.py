@@ -115,6 +115,7 @@ class TelegramChannelScraper:
         self._manual_scroll_done = False
         # ─── متغیرهای مدیریت زمان ────────────────────────────────────
         self.last_download_success = False
+        self._reply_posts = []
 
         # ═══════════════════════════════════════════════════════════════
         # مرحله ۲: راه‌اندازی logger (بعد از متغیرهای اولیه)
@@ -953,10 +954,25 @@ class TelegramChannelScraper:
 
             for msg in msg_iter:
                 try:
+                    # بعد از گرفتن msg_id
                     msg_id = await msg.get_attribute('data-message-id')
                     if msg_id:
                         msg_id = str(int(float(msg_id)))
-                    
+
+                    # بررسی پست ریپلای شده
+                    is_reply = await msg.locator('.EmbeddedMessage').count() > 0
+                    if is_reply:
+                        self.logger.info(f"🔁 پست {msg_id} یک ریپلای است (نادیده گرفته شد)")
+                        # ذخیره در لیست ریپلای‌ها برای گزارش
+                        if not hasattr(self, '_reply_posts'):
+                            self._reply_posts = []
+                        self._reply_posts.append({
+                            'id': msg_id,
+                            'text': '',  # در صورت نیاز می‌توانید متن را استخراج کنید
+                            'date': '',
+                            'url': f"https://t.me/{self.channel}/{msg_id}"
+                        })
+                        continue  # رد شدن از ادامه پردازش این پیام
                     # ─── لاگ دیباگ برای پیام ─────────────────────────────
                     self.logger.debug(f"   → پردازش پیام {msg_id}")
                     
@@ -1466,7 +1482,7 @@ class TelegramChannelScraper:
                             previous_failed[match.group(1)] = True
             except Exception as e:
                 self.logger.warning(f"⚠️ خطا در خواندن گزارش قبلی: {e}")
-        
+                
         # ─── ساخت دیکشنری برای دسترسی سریع به کپشن هر پست ───
         post_text = {item['id']: item.get('text', '') for item in items}
         
@@ -1552,7 +1568,16 @@ class TelegramChannelScraper:
             else:
                 f.write("  (هیچ پست ناموفقی وجود ندارد)\n")
             f.write("\n")
-            
+            # ─── پست‌های ریپلای شده ──────────────────────────────────
+            if hasattr(self, '_reply_posts') and self._reply_posts:
+                f.write("🔁 پست‌های ریپلای شده (نادیده گرفته شدند):\n")
+                f.write("-" * 40 + "\n")
+                for i, item in enumerate(self._reply_posts, 1):
+                    url = item.get('url', f"https://t.me/{self.channel}/{item['id']}")
+                    f.write(f"  {i}. پست {item['id']} - {url}\n")
+                    if item.get('text'):
+                        f.write(f"      📝 کپشن: {item['text'][:50]}...\n")
+                f.write("\n")
             # ─── پست‌های پردازش نشده (اختیاری) ──────────────────
             # پیدا کردن پست‌هایی که در هیچ لیستی نیستند
             all_known = set(all_successful) | set(all_failed.keys())
