@@ -117,6 +117,7 @@ class TelegramChannelScraper:
         self.last_download_success = False
         self._reply_posts = []
         self._missing_posts = []
+        self._missing_post_ids = []
 
         # ═══════════════════════════════════════════════════════════════
         # مرحله ۲: راه‌اندازی logger (بعد از متغیرهای اولیه)
@@ -578,47 +579,8 @@ class TelegramChannelScraper:
                     # اگر فاصله بیشتر از ۱ بود، یعنی پست‌هایی جا افتاده‌اند
                     if next_id - current_id > 1:
                         for missing_id in range(current_id + 1, next_id):
-                            self.logger.warning(f"🔍 پست گم‌شده شناسایی شد: {missing_id} - تلاش برای واکشی مستقیم...")
-                            try:
-                                # ذخیره لینک فعلی
-                                old_link = self.start_link
-                                old_target = self.target_msg_id
-                    
-                                # تنظیم لینک مستقیم برای پست گم‌شده
-                                self.start_link = f"https://t.me/{self.channel}/{missing_id}"
-                                self.target_msg_id = str(missing_id)
-                    
-                                # واکشی فقط همان پست
-                                fetched_items, _, _ = await self._fetch_posts_from_telegram(
-                                    existing_seen_ids={item['id'] for item in items},
-                                    keep_browser_open=True,
-                                    existing_context=context,
-                                    existing_page=page,
-                                    limit=1,
-                                    target_ids=[str(missing_id)]
-                                )
-                    
-                                # برگرداندن لینک قبلی
-                                self.start_link = old_link
-                                self.target_msg_id = old_target
-                    
-                                if fetched_items:
-                                    for item in fetched_items:
-                                        if item['id'] not in {i['id'] for i in items}:
-                                            items.append(item)
-                                            complete_list.append(item)
-                                            self.logger.info(f"✅ پست گم‌شده {missing_id} با موفقیت واکشی شد")
-                                else:
-                                    self.logger.warning(f"⚠️ پست {missing_id} وجود ندارد (یا حذف شده)")
-                                    if not hasattr(self, '_missing_posts'):
-                                        self._missing_posts = []
-                                    self._missing_posts.append({
-                                        'id': missing_id,
-                                        'reason': 'پست وجود ندارد (احتمالاً حذف شده)',
-                                        'url': f"https://t.me/{self.channel}/{missing_id}"
-                                    })
-                            except Exception as e:
-                                self.logger.debug(f"خطا در واکشی پست {missing_id}: {e}")
+                            self.logger.warning(f"🔍 پست گم‌شده شناسایی شد: {missing_id} (ذخیره برای واکشی بعدی)")
+                            self._missing_post_ids.append(str(missing_id))  # ← ذخیره شناسه
     
                 # اضافه کردن آخرین پست به لیست کامل
                 if newly_added_sorted:
@@ -698,11 +660,76 @@ class TelegramChannelScraper:
             self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")   #ریست شمارنده
 
         # ─── بعد از اتمام تمام دورها ─────────────────────────────
-        if not items:
-            self.logger.warning("هیچ پستی دریافت نشد.")
-            if context:
-                await context.close()
-            return
+        # ─── واکشی پست‌های گم‌شده در پایان ──────────────────────────
+        if hasattr(self, '_missing_post_ids') and self._missing_post_ids:
+            self.logger.info(f"🔍 شروع واکشی {len(self._missing_post_ids)} پست گم‌شده در پایان کار...")
+            fetched_missing_items = []
+    
+            for missing_id in self._missing_post_ids:
+                # بررسی اینکه آیا پست قبلاً در items وجود دارد
+                if missing_id in {i['id'] for i in items}:
+                    continue
+        
+                self.logger.info(f"   🔍 تلاش برای واکشی پست گم‌شده: {missing_id}")
+                try:
+                    # ذخیره لینک فعلی
+                    old_link = self.start_link
+                    old_target = self.target_msg_id
+            
+                    # تنظیم لینک مستقیم
+                    self.start_link = f"https://t.me/{self.channel}/{missing_id}"
+                    self.target_msg_id = str(missing_id)
+            
+                    # واکشی فقط همان پست
+                    fetched_items, _, _ = await self._fetch_posts_from_telegram(
+                        existing_seen_ids={item['id'] for item in items},
+                        keep_browser_open=True,
+                        existing_context=context,
+                        existing_page=page,
+                        limit=1,
+                        target_ids=[str(missing_id)]
+                    )
+            
+                    # برگرداندن لینک قبلی
+                    self.start_link = old_link
+                    self.target_msg_id = old_target
+            
+                    if fetched_items:
+                        for item in fetched_items:
+                            if item['id'] not in {i['id'] for i in items}:
+                                items.append(item)
+                                fetched_missing_items.append(item)
+                                self.logger.info(f"   ✅ پست گم‌شده {missing_id} با موفقیت واکشی شد")
+                    else:
+                        self.logger.warning(f"   ⚠️ پست {missing_id} وجود ندارد (یا حذف شده)")
+                        if not hasattr(self, '_missing_posts'):
+                            self._missing_posts = []
+                        self._missing_posts.append({
+                            'id': missing_id,
+                            'reason': 'پست وجود ندارد (احتمالاً حذف شده)',
+                            'url': f"https://t.me/{self.channel}/{missing_id}"
+                        })
+                except Exception as e:
+                    self.logger.debug(f"   خطا در واکشی پست {missing_id}: {e}")
+    
+            # ─── دانلود پست‌های واکشی‌شده ──────────────────────────────
+            if fetched_missing_items:
+                self.logger.info(f"⬇️ شروع دانلود {len(fetched_missing_items)} پست واکشی‌شده...")
+                try:
+                    # مرتب‌سازی پست‌های واکشی‌شده
+                    fetched_sorted = sorted(fetched_missing_items, key=lambda x: int(x['id']))
+                    # دانلود با همان page و context
+                    missing_media_map, missing_downloaded, missing_failed = await self._download_media(
+                        fetched_sorted, page, context
+                    )
+                    all_failed_posts.extend(missing_failed)
+                    media_map.update(missing_media_map)
+                    self.logger.info(f"✅ {missing_downloaded} فایل رسانه از پست‌های واکشی‌شده دانلود شد.")
+                except Exception as e:
+                    self.logger.error(f"❌ خطا در دانلود پست‌های واکشی‌شده: {e}")
+    
+            # پاکسازی لیست
+            self._missing_post_ids = []
 
         self.logger.info(f"🎉 جمع‌آوری تمام شد. مجموع {len(items)} پست.")
 
