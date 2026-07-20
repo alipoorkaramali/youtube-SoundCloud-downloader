@@ -116,6 +116,7 @@ class TelegramChannelScraper:
         # ─── متغیرهای مدیریت زمان ────────────────────────────────────
         self.last_download_success = False
         self._reply_posts = []
+        self._missing_posts = []
 
         # ═══════════════════════════════════════════════════════════════
         # مرحله ۲: راه‌اندازی logger (بعد از متغیرهای اولیه)
@@ -563,7 +564,70 @@ class TelegramChannelScraper:
                 self._fallback_ids = []  # پاکسازی تا دیگر تلاش نشود
                 self.logger.debug("✅ fallback غیرفعال شد (پست جدید پیدا شد).")
             self.logger.info(f"📥 {len(newly_added)} پست جدید جمع‌آوری شد (مجموع: {len(items)}/{self.limit})")
-
+            # ─── پر کردن شکاف‌های شناسه در newly_added ──────────────────
+            if newly_added:
+                # مرتب‌سازی برای تشخیص شکاف‌ها
+                newly_added_sorted = sorted(newly_added, key=lambda x: int(x['id']))
+                complete_list = []
+    
+                for i in range(len(newly_added_sorted) - 1):
+                    current_id = int(newly_added_sorted[i]['id'])
+                    next_id = int(newly_added_sorted[i+1]['id'])
+                    complete_list.append(newly_added_sorted[i])
+        
+                    # اگر فاصله بیشتر از ۱ بود، یعنی پست‌هایی جا افتاده‌اند
+                    if next_id - current_id > 1:
+                        for missing_id in range(current_id + 1, next_id):
+                            self.logger.warning(f"🔍 پست گم‌شده شناسایی شد: {missing_id} - تلاش برای واکشی مستقیم...")
+                            try:
+                                # ذخیره لینک فعلی
+                                old_link = self.start_link
+                                old_target = self.target_msg_id
+                    
+                                # تنظیم لینک مستقیم برای پست گم‌شده
+                                self.start_link = f"https://t.me/{self.channel}/{missing_id}"
+                                self.target_msg_id = str(missing_id)
+                    
+                                # واکشی فقط همان پست
+                                fetched_items, _, _ = await self._fetch_posts_from_telegram(
+                                    existing_seen_ids={item['id'] for item in items},
+                                    keep_browser_open=True,
+                                    existing_context=context,
+                                    existing_page=page,
+                                    limit=1,
+                                    target_ids=[str(missing_id)]
+                                )
+                    
+                                # برگرداندن لینک قبلی
+                                self.start_link = old_link
+                                self.target_msg_id = old_target
+                    
+                                if fetched_items:
+                                    for item in fetched_items:
+                                        if item['id'] not in {i['id'] for i in items}:
+                                            items.append(item)
+                                            complete_list.append(item)
+                                            self.logger.info(f"✅ پست گم‌شده {missing_id} با موفقیت واکشی شد")
+                                else:
+                                    self.logger.warning(f"⚠️ پست {missing_id} وجود ندارد (یا حذف شده)")
+                                    if not hasattr(self, '_missing_posts'):
+                                        self._missing_posts = []
+                                    self._missing_posts.append({
+                                        'id': missing_id,
+                                        'reason': 'پست وجود ندارد (احتمالاً حذف شده)',
+                                        'url': f"https://t.me/{self.channel}/{missing_id}"
+                                    })
+                            except Exception as e:
+                                self.logger.debug(f"خطا در واکشی پست {missing_id}: {e}")
+    
+                # اضافه کردن آخرین پست به لیست کامل
+                if newly_added_sorted:
+                    complete_list.append(newly_added_sorted[-1])
+    
+                # به‌روزرسانی newly_added_sorted با لیست کامل
+                newly_added_sorted = complete_list
+            else:
+                newly_added_sorted = []  # اگر newly_added خالی است
             # اگر هیچ پست جدیدی اضافه نشد، یعنی کار تمام است
             if not newly_added:
                 # ─── اگر fallback_ids داریم و هنوز fallback باقی مانده ───
@@ -587,11 +651,9 @@ class TelegramChannelScraper:
             # 🔥 دانلود فوری رسانه‌های پست‌های جدید
             self.logger.info(f"⬇️ شروع دانلود رسانه برای {len(newly_added)} پست جدید...")
             try:
-                # ✅ مرتب‌سازی پست‌های جدید بر اساس شناسه (عددی)
-                newly_added_sorted = sorted(newly_added, key=lambda x: int(x['id']))
-    
+                # دیگر نیازی به مرتب‌سازی مجدد نیست چون از قبل sorted است
                 batch_media_map, downloaded_batch, batch_failed = await self._download_media(
-                    newly_added_sorted,  # ✅ اینجا اصلاح شد
+                    newly_added_sorted,  # ← استفاده از لیست کامل‌شده
                     page,
                     context
                 )
@@ -1621,6 +1683,14 @@ class TelegramChannelScraper:
                     f.write(f"  {i}. پست {item['id']} - {url}\n")
                     if item.get('text'):
                         f.write(f"      📝 کپشن: {item['text'][:50]}...\n")
+                f.write("\n")
+            # ─── پست‌های ناموجود (حذف شده) ──────────────────────────────────
+            if hasattr(self, '_missing_posts') and self._missing_posts:
+                f.write("🚫 پست‌های ناموجود (حذف شده یا وجود ندارند):\n")
+                f.write("-" * 40 + "\n")
+                for i, item in enumerate(self._missing_posts, 1):
+                    url = item.get('url', f"https://t.me/{self.channel}/{item['id']}")
+                    f.write(f"  {i}. پست {item['id']} - {url}\n")
                 f.write("\n")
             # ─── پست‌های پردازش نشده (اختیاری) ──────────────────
             # پیدا کردن پست‌هایی که در هیچ لیستی نیستند
