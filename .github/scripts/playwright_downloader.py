@@ -125,97 +125,61 @@ class PlaywrightDownloader:
         if post_id in js_posts:
             logger.info(f"   ✅ پست {post_id} در DOM وجود دارد (با JS)")
             message_locator = page.locator(f'[data-message-id="{post_id}"]').first
-    
-            # محاسبه موقعیت دقیق پست در صفحه
-            position = await page.evaluate(f"""
-                () => {{
-                    const el = document.querySelector('[data-message-id="{post_id}"]');
-                    if (!el) return null;
-                    const rect = el.getBoundingClientRect();
-                    return {{
-                        top: rect.top + window.scrollY,
-                        bottom: rect.bottom + window.scrollY,
-                        height: rect.height
-                    }};
-                }}
-            """)
-    
-            if position:
-                logger.info(f"   📍 موقعیت پست: top={position['top']:.0f}px, height={position['height']:.0f}px")
-                # اسکرول مستقیم به موقعیت پست (با اندکی فاصله برای دید بهتر)
-                target_y = position['top'] - 200
-                await page.evaluate(f"window.scrollTo(0, {target_y})")
+            try:
+                await message_locator.scroll_into_view_if_needed(timeout=5000)
                 await human_sleep(0.5, 0.2)
-        
-                # بررسی نمایان شدن
                 if await message_locator.is_visible(timeout=3000):
                     success = True
                     logger.info(f"   ✅ پست {post_id} نمایان شد")
                 else:
-                    # اگر نمایان نشد، یک اسکرول کوچک دیگر امتحان کن
-                    logger.info(f"   ⚠️ پست نمایان نشد، اسکرول ۱۰۰px دیگر...")
-                    await page.evaluate(f"window.scrollTo(0, {target_y + 300})")
-                    await human_sleep(0.3, 0.1)
-                    if await message_locator.is_visible(timeout=2000):
+                    logger.info(f"   ⚠️ پست در DOM است ولی نمایان نیست، اسکرول کمکی...")
+                    await page.evaluate("window.scrollBy(0, -300)")
+                    await human_sleep(0.5, 0.2)
+                    if await message_locator.is_visible(timeout=3000):
                         success = True
-                        logger.info(f"   ✅ پست {post_id} پس از اسکرول اضافی نمایان شد")
-            else:
-                logger.warning(f"   ⚠️ موقعیت پست قابل محاسبه نیست")
+                        logger.info(f"   ✅ پست {post_id} پس از اسکرول نمایان شد")
+            except Exception as e:
+                logger.warning(f"   ⚠️ خطا در اسکرول به پست: {type(e).__name__}")
 
         # ۲. اگر با JS پیدا نشد، از روش اسکرول استفاده کن (به عنوان fallback)
         if not success:
             logger.info(f"   🔄 شروع اسکرول برای پیدا کردن پست {post_id} (fallback)")
-            # در fallback، message_locator از قبل تعریف نشده است (چون پست در DOM نبود)
-            # پس یک locator جدید بسازیم
+            max_attempts = 7
             message_locator = page.locator(f'[data-message-id="{post_id}"]').first
-            max_attempts = 5  # کاهش تعداد تلاش‌ها
-            # found_in_dom = False
-    
+
             for attempt in range(1, max_attempts + 1):
                 logger.info(f"   🔄 تلاش {attempt}/{max_attempts} برای پیدا کردن پست {post_id}")
-        
-                # ۱. بررسی مستقیم وجود و visibility
                 try:
-                    count = await message_locator.count()
-                    is_visible = await message_locator.is_visible(timeout=3000)
-                    logger.info(f"      📊 count={count}, visible={is_visible} (تلاش {attempt})")
-                    if count > 0 and is_visible:
+                    await page.wait_for_selector(f'[data-message-id="{post_id}"]',
+                                                 state='attached', timeout=8000)
+                    logger.info(f"      ✅ المنت در DOM پیدا شد (تلاش {attempt})")
+                except Exception as e:
+                    logger.warning(f"      ❌ المنت در DOM پیدا نشد (timeout): {type(e).__name__}")
+                    if attempt < max_attempts:
+                        scroll_amount = -800 if attempt <= 3 else 1200 if attempt <= 5 else -600
+                        logger.info(f"      📜 اسکرول به اندازه {scroll_amount}px")
+                        scroll_stack.append(scroll_amount)
+                        await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                        await human_sleep(1.5, 0.5)
+                    continue
+
+                try:
+                    await message_locator.scroll_into_view_if_needed(timeout=10000)
+                    await human_sleep(0.5, 0.2)
+                    if await message_locator.is_visible(timeout=3000):
                         success = True
                         logger.info(f"   ✅ پست {post_id} پیدا و نمایان شد (تلاش {attempt})")
                         break
-                    elif count > 0 and not is_visible:
-                        # پست در DOM هست ولی نمایان نیست، اسکرول به موقعیت آن
-                        position = await page.evaluate(f"""
-                            () => {{
-                                const el = document.querySelector('[data-message-id="{post_id}"]');
-                                if (!el) return null;
-                                const rect = el.getBoundingClientRect();
-                                return {{
-                                    top: rect.top + window.scrollY,
-                                    bottom: rect.bottom + window.scrollY,
-                                    height: rect.height
-                                }};
-                            }}
-                        """)
-                        if position:
-                            target_y = position['top'] - 200
-                            await page.evaluate(f"window.scrollTo(0, {target_y})")
-                            await human_sleep(0.5, 0.2)
-                            if await message_locator.is_visible(timeout=2000):
-                                success = True
-                                logger.info(f"   ✅ پست {post_id} با اسکرول مستقیم نمایان شد (تلاش {attempt})")
-                                break
                 except Exception as e:
-                    logger.warning(f"      ⚠️ خطا در بررسی: {type(e).__name__}")
-        
-                # ۲. اگر پست در DOM نبود یا نمایان نشد، اسکرول معمولی
+                    logger.warning(f"      ⚠️ خطا: {type(e).__name__}")
+
                 if attempt < max_attempts:
-                    scroll_amount = -600 if attempt <= 2 else 900 if attempt <= 4 else -400
+                    scroll_amount = -800 if attempt <= 2 else 1200 if attempt <= 4 else -600
                     logger.info(f"      📜 اسکرول کمکی به اندازه {scroll_amount}px")
                     scroll_stack.append(scroll_amount)
                     await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                    await human_sleep(1.0, 0.3)
-                    
+                    await human_sleep(1.5, 0.5)
+
         # ۳. اگر موفق نشد، خطا بده و برگرد
         if not success:
             current_y = await page.evaluate("window.scrollY")
@@ -265,19 +229,19 @@ class PlaywrightDownloader:
             click_target = message_locator
             logger.info("   🎯 هدف: کل حباب پیام")
 
-        # شمارش تقریبی مدیا (حالا مستقل از شرط)
-        visible_count = 1
-        try:
-            media_elements = message_locator.locator(
-                'div.media-photo, div.media-video, img[src], video, div[class*="media"]'
-            )
-            all_media = await media_elements.count()
-            visible_count = sum(1 for i in range(all_media)
-                                if await media_elements.nth(i).is_visible(timeout=2000))
-        except Exception:
-            pass
+        # شمارش تقریبی مدیا
+            visible_count = 1
+            try:
+                media_elements = message_locator.locator(
+                    'div.media-photo, div.media-video, img[src], video, div[class*="media"]'
+                )
+                all_media = await media_elements.count()
+                visible_count = sum(1 for i in range(all_media)
+                                    if await media_elements.nth(i).is_visible(timeout=2000))
+            except Exception:
+                pass
 
-        logger.info(f"   🖼️ تعداد تقریبی مدیا: {visible_count} | شروع دانلود...")
+            logger.info(f"   🖼️ تعداد تقریبی مدیا: {visible_count} | شروع دانلود...")
 
         downloaded_files = []
         self._save_debug_on_failure = False   # ← این خط جدید
