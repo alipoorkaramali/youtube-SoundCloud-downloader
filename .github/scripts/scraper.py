@@ -876,30 +876,61 @@ class TelegramChannelScraper:
         # ─── متغیر start_collecting ─────────────────────────────────────
         start_collecting = not bool(self.start_link)  # اگر start_link نداشته باشیم، از اول شروع می‌کنیم
 
-        for attempt in range(3):  # فقط ۳ تلاش (به جای ۶)
+        for attempt in range(5):  # ← افزایش به ۵ تلاش
             if attempt > 0:
-                self.logger.info(f"🔄 تلاش استخراج {attempt+1}/3 (با تأخیر برای بارگذاری)...")
-                # فقط یک بار اسکرول با step=800
-                await self._smart_scroll(page, self.scroll_direction, step=800, max_attempts=1)
-                # به‌جای تلاش مجدد، یک تأخیر محترمانه برای بارگذاری
-                self.logger.info("⏳ صبر ۳ ثانیه برای بارگذاری محتوای جدید...")
-                await human_sleep(3.0, 0.5)
+                self.logger.info(f"🔄 تلاش استخراج {attempt+1}/5 (با تأخیر برای بارگذاری)...")
+                # اسکرول با گام کوچک‌تر و تعداد تلاش بیشتر
+                await self._smart_scroll(page, self.scroll_direction, step=600, max_attempts=2)
+                # اسکرول معکوس مختصر برای تحریک بارگذاری (در تلاش‌های زوج)
+                if attempt % 2 == 0:
+                    self.logger.debug("   🔄 اسکرول معکوس ۲۰۰px برای تحریک بارگذاری...")
+                    await page.evaluate("window.scrollBy(0, 200)")
+                    await human_sleep(0.8, 0.2)
+                # تأخیر بیشتر برای بارگذاری کامل
+                self.logger.info("⏳ صبر ۴ ثانیه برای بارگذاری محتوای جدید...")
+                await human_sleep(4.0, 0.5)
 
             # ─── دریافت پیام‌ها با روش‌های مختلف ──────────────────────────
-            messages = await page.locator('div[data-message-id]').all()
-            if len(messages) < 5:
-                self.logger.debug("   تلاش با سلکتورهای جایگزین...")
-                messages = await page.locator('div.message, div[class*="bubble"], div[class*="message"], div[class*="post"]').all()
-            
-            # ─── اگر پیام کمی بود، از روش JavaScript هم استفاده کن ───
-            if len(messages) < 10:
+            # ─── روش اصلی: استخراج با JavaScript (همه پست‌های موجود در DOM) ───
+            messages = []
+            try:
+                js_posts = await self._extract_posts_from_page(page)
+                messages = js_posts  # ← JS همیشه استفاده می‌شود
+                self.logger.info(f"   📊 استخراج با JS: {len(messages)} پست")
+            except Exception as e:
+                self.logger.debug(f"   ⚠️ خطا در استخراج JS: {e}، استفاده از locator...")
+                # Fallback به locator در صورت خطا
+                messages = await page.locator('div[data-message-id]').all()
+                if len(messages) < 5:
+                    messages = await page.locator('div.message, div[class*="bubble"], div[class*="message"], div[class*="post"]').all()
+
+            # اگر JS موفق بود ولی تعدادش کم است، از locator هم استفاده کن (تکمیل)
+            if messages and len(messages) < 20:
                 try:
-                    js_posts = await self._extract_posts_from_page(page)
-                    self.logger.info(f"   📊 استخراج مستقیم JS: {len(js_posts)} پست")
-                    if js_posts and len(js_posts) > len(messages):
-                        self.logger.info("   ✅ JS نتایج بهتری داد")
+                    locator_msgs = await page.locator('div[data-message-id]').all()
+                    if len(locator_msgs) > len(messages):
+                        self.logger.info(f"   📊 locator پست‌های بیشتری پیدا کرد: {len(locator_msgs)}")
+                        # ترکیب دو لیست (بدون تکرار)
+                        existing_ids = {msg['id'] for msg in messages}
+                        for msg in locator_msgs:
+                            msg_id = await msg.get_attribute('data-message-id')
+                            if msg_id and msg_id not in existing_ids:
+                                text = await self._extract_text_from_message(msg, msg_id)
+                                date = ""
+                                try:
+                                    date_el = msg.locator('time, .date, .message-date, [datetime]').first
+                                    if await date_el.count() > 0:
+                                        date = await date_el.inner_text() or ""
+                                except:
+                                    pass
+                                messages.append({
+                                    'id': msg_id,
+                                    'text': text,
+                                    'date': date
+                                })
+                                existing_ids.add(msg_id)
                 except Exception as e:
-                    self.logger.debug(f"خطا در استخراج JS: {e}")
+                    self.logger.debug(f"   ⚠️ خطا در تکمیل با locator: {e}")
 
             self.logger.info(f"   📋 تلاش {attempt+1}: {len(messages)} المان پیام پیدا شد")
 
@@ -923,28 +954,49 @@ class TelegramChannelScraper:
 
             for msg in msg_iter:
                 try:
-                    # بعد از گرفتن msg_id
-                    msg_id = await msg.get_attribute('data-message-id')
-                    if msg_id:
-                        msg_id = str(int(float(msg_id)))
+                    # ─── تشخیص نوع msg (دیکشنری یا المان Playwright) ───
+                    if isinstance(msg, dict):
+                        # msg از _extract_posts_from_page آمده است
+                        msg_id = msg.get('id')
+                        text = msg.get('text', '')
+                        date = msg.get('date', '')
+                        # برای ریپلای، از المان اصلی استفاده نمی‌کنیم، پس فرض می‌کنیم ریپلای نیست
+                        is_reply = False
+                        # برای داده‌های JS، نیازی به استخراج مجدد نیست
+                        # ولی برای یکسان‌سازی، می‌توانیم از همان مقادیر استفاده کنیم
+                    else:
+                        # msg المان Playwright است
+                        msg_id = await msg.get_attribute('data-message-id')
+                        if msg_id:
+                            msg_id = str(int(float(msg_id)))
+            
+                        # بررسی پست ریپلای شده (فقط برای المان‌ها)
+                        is_reply = await msg.locator('.EmbeddedMessage').count() > 0
+                        if is_reply:
+                            self.logger.info(f"🔁 پست {msg_id} یک ریپلای است (نادیده گرفته شد)")
+                            if not hasattr(self, '_reply_posts'):
+                                self._reply_posts = []
+                            self._reply_posts.append({
+                                'id': msg_id,
+                                'text': '',
+                                'date': '',
+                                'url': f"https://t.me/{self.channel}/{msg_id}"
+                            })
+                            continue  # رد شدن از ادامه پردازش این پیام
+            
+                        # استخراج متن و تاریخ از المان
+                        text = await self._extract_text_from_message(msg, msg_id)
+                        date = ""
+                        try:
+                            date_el = msg.locator('time, .date, .message-date, [datetime]').first
+                            if await date_el.count() > 0:
+                                date = await date_el.inner_text() or ""
+                        except:
+                            pass
 
-                    # بررسی پست ریپلای شده
-                    is_reply = await msg.locator('.EmbeddedMessage').count() > 0
-                    if is_reply:
-                        self.logger.info(f"🔁 پست {msg_id} یک ریپلای است (نادیده گرفته شد)")
-                        # ذخیره در لیست ریپلای‌ها برای گزارش
-                        if not hasattr(self, '_reply_posts'):
-                            self._reply_posts = []
-                        self._reply_posts.append({
-                            'id': msg_id,
-                            'text': '',  # در صورت نیاز می‌توانید متن را استخراج کنید
-                            'date': '',
-                            'url': f"https://t.me/{self.channel}/{msg_id}"
-                        })
-                        continue  # رد شدن از ادامه پردازش این پیام
-                    # ─── لاگ دیباگ برای پیام ─────────────────────────────
+                    # ─── ادامه پردازش مشترک ──────────────────────────────
                     self.logger.debug(f"   → پردازش پیام {msg_id}")
-                    
+        
                     if not msg_id or msg_id in seen_ids:
                         continue
 
@@ -963,17 +1015,8 @@ class TelegramChannelScraper:
                     if not start_collecting:
                         continue
 
-                    # ─── استخراج متن ──────────────────────────────────────
-                    text = await self._extract_text_from_message(msg, msg_id)
-
-                    # ─── تاریخ ─────────────────────────────────────────────
-                    date = ""
-                    try:
-                        date_el = msg.locator('time, .date, .message-date, [datetime]').first
-                        if await date_el.count() > 0:
-                            date = await date_el.inner_text() or ""
-                    except:
-                        pass
+                    # ─── اگر msg دیکشنری است، قبلاً text و date را داریم ──
+                    # ولی اگر المان است، قبلاً استخراج شده، پس نیازی به کار اضافی نیست
 
                     items.append({
                         'id': msg_id,
@@ -989,17 +1032,49 @@ class TelegramChannelScraper:
                 except Exception as e:
                     self.logger.debug(f"خطا در پردازش پیام: {e}")
                     continue
-
             if len(items) >= effective_limit:
-                break
+                 break
 
             # ─── فقط در صورتی اسکرول کنیم که پیامی پیدا نشد ──────────────
-            if len(items) == 0 and attempt < 2:
+            if len(items) == 0 and attempt < 4:  # ← افزایش تعداد دفعات
                 self.logger.info(f"🔄 اسکرول به {self.scroll_direction} برای تلاش بعدی...")
-                scrolled = await self._smart_scroll(page, self.scroll_direction, step=SCROLL_STEP_BASE, max_attempts=1)
+                # اسکرول با گام‌های مختلف
+                if attempt % 2 == 0:
+                    scrolled = await self._smart_scroll(page, self.scroll_direction, step=800, max_attempts=2)
+                else:
+                    scrolled = await self._smart_scroll(page, self.scroll_direction, step=1200, max_attempts=1)
                 if not scrolled:
-                    self.logger.info("ℹ️ اسکرول تغییری ایجاد نکرد. صبر برای بارگذاری...")
-                    await human_sleep(3.0, 0.5)
+                    self.logger.info("ℹ️ اسکرول تغییری ایجاد نکرد. تلاش با اسکرول نرم...")
+                    # استفاده از اسکرول نرم برای پیدا کردن پست‌های پنهان
+                    found, found_id = await self._find_post_with_slow_scroll(page, seen_ids)
+                    if found:
+                        self.logger.info(f"   ✅ پست جدید با اسکرول نرم پیدا شد: {found_id}")
+                        # اضافه کردن پست به items (با استخراج متن و تاریخ)
+                        try:
+                            msg = page.locator(f'[data-message-id="{found_id}"]').first
+                            text = await self._extract_text_from_message(msg, found_id)
+                            date = ""
+                            try:
+                                date_el = msg.locator('time, .date, .message-date, [datetime]').first
+                                if await date_el.count() > 0:
+                                    date = await date_el.inner_text() or ""
+                            except:
+                                pass
+    
+                            # ✅ اینجا باید باشد (داخل try اصلی)
+                            items.append({
+                                'id': found_id,
+                                'text': text,
+                                'date': date,
+                                'url': f"https://t.me/{self.channel}/{found_id}"
+                            })
+                            seen_ids.add(found_id)
+                            self.logger.info(f"   ✅ پست {found_id} به لیست اضافه شد (اسکرول نرم)")
+                        except Exception as e:
+                            self.logger.debug(f"   ⚠️ خطا در اضافه کردن پست از اسکرول نرم: {e}")         
+                    else:
+                        self.logger.info("ℹ️ اسکرول نرم نیز پستی پیدا نکرد. صبر برای بارگذاری...")
+                        await human_sleep(3.0, 0.5)
 
         self.logger.info(f"📊 در مجموع {len(items)} پست جمع‌آوری شد.")
         items = items[:effective_limit]
