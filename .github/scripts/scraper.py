@@ -660,8 +660,8 @@ class TelegramChannelScraper:
             self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")   #ریست شمارنده
 
         # ─── بعد از اتمام تمام دورها ─────────────────────────────
-        # ─── واکشی پست‌های گم‌شده در پایان ──────────────────────────
-        if hasattr(self, '_missing_post_ids') and self._missing_post_ids:
+        # ─── واکشی پست‌های گم‌شده در پایان (فقط در صورت پر شدن limit) ──
+        if len(items) == self.limit and hasattr(self, '_missing_post_ids') and self._missing_post_ids:
             self.logger.info(f"🔍 شروع واکشی {len(self._missing_post_ids)} پست گم‌شده در پایان کار...")
             fetched_missing_items = []
     
@@ -728,9 +728,15 @@ class TelegramChannelScraper:
                 except Exception as e:
                     self.logger.error(f"❌ خطا در دانلود پست‌های واکشی‌شده: {e}")
     
-            # پاکسازی لیست
+            # پاکسازی لیست (بعد از واکشی)
             self._missing_post_ids = []
+        else:
+            # اگر به limit نرسیدیم، فقط لاگ بگیر و لیست رو پاک کن
+            if hasattr(self, '_missing_post_ids') and self._missing_post_ids:
+                self.logger.info(f"ℹ️ به limit نرسیدیم ({len(items)}/{self.limit})، واکشی پست‌های گم‌شده انجام نشد.")
+                self._missing_post_ids = []  # پاکسازی برای جلوگیری از تداخل
 
+        # ─── ادامه کد (همیشه اجرا میشه) ──────────────────────────────
         self.logger.info(f"🎉 جمع‌آوری تمام شد. مجموع {len(items)} پست.")
 
         # تولید خروجی نهایی (فقط در حالت دیباگ)
@@ -747,14 +753,16 @@ class TelegramChannelScraper:
         else:
             self.logger.info("📁 حالت عادی: فقط رسانه‌ها دانلود شدند و برای آپلود آماده هستند.")
             # در حالت عادی هیچ خروجی اضافی تولید نمی‌شود
+
         # ─── ذخیره وضعیت نهایی (اگر آیتمی وجود داشته باشد) ───
         if items:
             self._save_resume_state(str(items[-1]['id']), items)
+
         # ─── تولید گزارش نهایی ──────────────────────────────
         await self._generate_download_report(items, media_map, all_failed_posts)
+
         if context:
-            await context.close()
-    async def _ensure_browser(self, context, page):
+            await context.close()    async def _ensure_browser(self, context, page):
         """اطمینان از باز بودن مرورگر."""
         if context is None:
             from playwright.async_api import async_playwright
