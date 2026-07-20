@@ -94,95 +94,103 @@ class PlaywrightDownloader:
                 })
                 
         return media_map, self.failed_posts
-                               
+
     async def _process_post(self, page: Page, post_id: str,
                             media_map: Dict[str, List[str]]) -> None:
         logger.info(f"📍 شروع دانلود پست {post_id}")
         logger.info(f"   🔄 زمان سکوت برای این پست از صفر شروع می‌شود.")
         self._debug_cross_files = []
 
-        # ──────────────── نمایش پست (اسکرول هوشمند بدون خروج از کانال) ────────────────
-        message_locator = page.locator(f'[data-message-id="{post_id}"]').first
-
-        success = False
-        max_attempts = 7
-        logger.info(f"   🔍 جستجوی پست {post_id} ...")
-        # ذخیره موقعیت اولیه صفحه برای برگشت بعدی
+        # ─── جستجوی پست با JavaScript (هماهنگ با اسکریپر) ──────────────────
+        logger.info(f"   🔍 جستجوی پست {post_id} با JavaScript...")
         original_scroll_y = await page.evaluate("window.scrollY")
-        scroll_stack = []  # لیست برای ثبت اسکرول‌های انجام‌شده
+        scroll_stack = []
         logger.info(f"   📌 موقعیت اولیه صفحه: {original_scroll_y}px")
 
-        for attempt in range(1, max_attempts + 1):
-            # لاگ شروع هر تلاش (با سطح INFO برای دیدن در خروجی معمولی)
-            logger.info(f"   🔄 تلاش {attempt}/{max_attempts} برای پیدا کردن پست {post_id}")
+        # ۱. ابتدا با JavaScript بررسی کن که آیا پست در DOM وجود دارد
+        js_posts = await page.evaluate("""
+            () => {
+                const ids = [];
+                document.querySelectorAll('[data-message-id]').forEach(el => {
+                    const id = el.getAttribute('data-message-id');
+                    if (id) ids.push(id);
+                });
+                return ids;
+            }
+        """)
 
-            # ۱. بررسی وجود المنت در DOM
+        success = False
+        message_locator = None
+
+        if post_id in js_posts:
+            logger.info(f"   ✅ پست {post_id} در DOM وجود دارد (با JS)")
+            message_locator = page.locator(f'[data-message-id="{post_id}"]').first
             try:
-                await page.wait_for_selector(f'[data-message-id="{post_id}"]',
-                                             state='attached', timeout=10000)
-                logger.info(f"      ✅ المنت در DOM پیدا شد (تلاش {attempt})")
+                await message_locator.scroll_into_view_if_needed(timeout=5000)
+                await human_sleep(0.5, 0.2)
+                if await message_locator.is_visible(timeout=3000):
+                    success = True
+                    logger.info(f"   ✅ پست {post_id} نمایان شد")
+                else:
+                    logger.info(f"   ⚠️ پست در DOM است ولی نمایان نیست، اسکرول کمکی...")
+                    await page.evaluate("window.scrollBy(0, -300)")
+                    await human_sleep(0.5, 0.2)
+                    if await message_locator.is_visible(timeout=3000):
+                        success = True
+                        logger.info(f"   ✅ پست {post_id} پس از اسکرول نمایان شد")
             except Exception as e:
-                logger.warning(f"      ❌ المنت در DOM پیدا نشد (timeout): {type(e).__name__}")
-                # اگر المنت نبود، اسکرول کرده و ادامه می‌دهیم
+                logger.warning(f"   ⚠️ خطا در اسکرول به پست: {type(e).__name__}")
+
+        # ۲. اگر با JS پیدا نشد، از روش اسکرول استفاده کن (به عنوان fallback)
+        if not success:
+            logger.info(f"   🔄 شروع اسکرول برای پیدا کردن پست {post_id} (fallback)")
+            max_attempts = 7
+            message_locator = page.locator(f'[data-message-id="{post_id}"]').first
+
+            for attempt in range(1, max_attempts + 1):
+                logger.info(f"   🔄 تلاش {attempt}/{max_attempts} برای پیدا کردن پست {post_id}")
+                try:
+                    await page.wait_for_selector(f'[data-message-id="{post_id}"]',
+                                                 state='attached', timeout=8000)
+                    logger.info(f"      ✅ المنت در DOM پیدا شد (تلاش {attempt})")
+                except Exception as e:
+                    logger.warning(f"      ❌ المنت در DOM پیدا نشد (timeout): {type(e).__name__}")
+                    if attempt < max_attempts:
+                        scroll_amount = -800 if attempt <= 3 else 1200 if attempt <= 5 else -600
+                        logger.info(f"      📜 اسکرول به اندازه {scroll_amount}px")
+                        scroll_stack.append(scroll_amount)
+                        await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                        await human_sleep(1.5, 0.5)
+                    continue
+
+                try:
+                    await message_locator.scroll_into_view_if_needed(timeout=10000)
+                    await human_sleep(0.5, 0.2)
+                    if await message_locator.is_visible(timeout=3000):
+                        success = True
+                        logger.info(f"   ✅ پست {post_id} پیدا و نمایان شد (تلاش {attempt})")
+                        break
+                except Exception as e:
+                    logger.warning(f"      ⚠️ خطا: {type(e).__name__}")
+
                 if attempt < max_attempts:
-                    scroll_amount = -800 if attempt <= 3 else 1200 if attempt <= 5 else -600
-                    logger.info(f"      📜 اسکرول به اندازه {scroll_amount}px (چون المنت در DOM نبود)")
+                    scroll_amount = -800 if attempt <= 2 else 1200 if attempt <= 4 else -600
+                    logger.info(f"      📜 اسکرول کمکی به اندازه {scroll_amount}px")
                     scroll_stack.append(scroll_amount)
                     await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                    await human_sleep(2.0, 0.5)
-                continue
+                    await human_sleep(1.5, 0.5)
 
-            # ۲. تلاش برای scroll_into_view
-            try:
-                await message_locator.scroll_into_view_if_needed(timeout=15000)
-                logger.info(f"      ✅ scroll_into_view موفق (تلاش {attempt})")
-            except Exception as e:
-                logger.warning(f"      ⚠️ scroll_into_view خطا: {type(e).__name__}")
-
-            await human_sleep(1.0 if attempt == 1 else 0.8, 0.3)
-
-            # ۳. بررسی visibility و count
-            try:
-                count = await message_locator.count()
-                is_visible = await message_locator.is_visible(timeout=5000)
-                logger.info(f"      📊 count={count}, visible={is_visible} (تلاش {attempt})")
-            except Exception as e:
-                logger.warning(f"      ⚠️ خطا در بررسی visibility: {type(e).__name__}")
-                count = 0
-                is_visible = False
-
-            if count > 0 and is_visible:
-                success = True
-                logger.info(f"   ✅ پست {post_id} پیدا و نمایان شد (تلاش {attempt})")
-                break
-
-            # ۴. اسکرول کمکی در صورت نیاز
-            if attempt < max_attempts:
-                if attempt <= 2:
-                    scroll_amount = -800
-                elif attempt <= 4:
-                    scroll_amount = 1200
-                else:
-                    scroll_amount = -600
-                logger.info(f"      📜 اسکرول کمکی به اندازه {scroll_amount}px (تلاش {attempt})")
-                scroll_stack.append(scroll_amount)
-                await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                await human_sleep(2.0, 0.5)
-
+        # ۳. اگر موفق نشد، خطا بده و برگرد
         if not success:
             current_y = await page.evaluate("window.scrollY")
-            logger.warning(f"⚠️ پست {post_id} بعد از {max_attempts} تلاش پیدا نشد.")
-            logger.info(f"   📍 موقعیت نهایی صفحه: {current_y}px (تغییر از اولیه: {current_y - original_scroll_y}px)")
+            logger.warning(f"⚠️ پست {post_id} بعد از تلاش‌ها پیدا نشد.")
+            logger.info(f"   📍 موقعیت نهایی صفحه: {current_y}px (تغییر: {current_y - original_scroll_y}px)")
             if scroll_stack:
                 logger.info(f"   📜 اسکرول‌های انجام‌شده: {scroll_stack}")
-            else:
-                logger.info("   📜 هیچ اسکرولی انجام نشد.")
-
-            # اسکرین‌شات از وضعیت نهایی
             try:
                 path = self.debug_dir / f"post_not_found_{post_id}.png"
                 await page.screenshot(path=path)
-                logger.info(f"   📸 اسکرین‌شات نهایی ذخیره شد: {path.name}")
+                logger.info(f"   📸 اسکرین‌شات نهایی: {path.name}")
             except:
                 pass
 
@@ -190,7 +198,7 @@ class PlaywrightDownloader:
             try:
                 for amount in reversed(scroll_stack):
                     await page.evaluate(f"window.scrollBy(0, {-amount})")
-                    await human_sleep(0.3, 0.1)
+                    await human_sleep(0.2, 0.1)
                 current_y = await page.evaluate("window.scrollY")
                 if abs(current_y - original_scroll_y) > 30:
                     await page.evaluate(f"window.scrollTo(0, {original_scroll_y})")
@@ -198,15 +206,16 @@ class PlaywrightDownloader:
             except Exception as e:
                 logger.warning(f"   ⚠️ خطا در برگشت اسکرول‌ها: {e}")
 
-            # ثبت پست ناموفق
             self.failed_posts.append({
                 'id': post_id,
                 'reason': 'پست پیدا نشد',
                 'url': f"https://t.me/{self.channel}/{post_id}"
             })
-            return            
+            return
+
+        # ─── ادامه فرایند دانلود (پست پیدا شده است) ──────────────────
         logger.info(f"   📍 پست {post_id} آماده شد.")
-        await human_sleep(1.5, 0.4)
+        await human_sleep(0.5, 0.2)
 
         # ──────────────── هدف دقیق برای راست‌کلیک ────────────────
         audio_locator = message_locator.locator(
@@ -221,18 +230,18 @@ class PlaywrightDownloader:
             logger.info("   🎯 هدف: کل حباب پیام")
 
         # شمارش تقریبی مدیا
-        visible_count = 1
-        try:
-            media_elements = message_locator.locator(
-                'div.media-photo, div.media-video, img[src], video, div[class*="media"]'
-            )
-            all_media = await media_elements.count()
-            visible_count = sum(1 for i in range(all_media)
-                                if await media_elements.nth(i).is_visible(timeout=2000))
-        except Exception:
-            pass
+            visible_count = 1
+            try:
+                media_elements = message_locator.locator(
+                    'div.media-photo, div.media-video, img[src], video, div[class*="media"]'
+                )
+                all_media = await media_elements.count()
+                visible_count = sum(1 for i in range(all_media)
+                                    if await media_elements.nth(i).is_visible(timeout=2000))
+            except Exception:
+                pass
 
-        logger.info(f"   🖼️ تعداد تقریبی مدیا: {visible_count} | شروع دانلود...")
+            logger.info(f"   🖼️ تعداد تقریبی مدیا: {visible_count} | شروع دانلود...")
 
         downloaded_files = []
         self._save_debug_on_failure = False   # ← این خط جدید
@@ -281,10 +290,10 @@ class PlaywrightDownloader:
         for scroll_attempt in range(3):
             if menu_success:
                 break
-            if scroll_attempt > 0:
-                logger.info(f"   📜 اسکرول کمکی ۳۰۰px به بالا (تلاش کلی {scroll_attempt+1})")
-                await page.evaluate("window.scrollBy(0, -300)")
-                await human_sleep(1.5, 0.3)
+            #if scroll_attempt > 0:
+                #logger.info(f"   📜 اسکرول کمکی ۳۰۰px به بالا (تلاش کلی {scroll_attempt+1})")
+                #await page.evaluate("window.scrollBy(0, -300)")
+                #await human_sleep(1.5, 0.3)
 
             try:
                 menu_appeared = False
