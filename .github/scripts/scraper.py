@@ -762,7 +762,9 @@ class TelegramChannelScraper:
         await self._generate_download_report(items, media_map, all_failed_posts)
 
         if context:
-            await context.close()    async def _ensure_browser(self, context, page):
+            await context.close() 
+        
+    async def _ensure_browser(self, context, page):
         """اطمینان از باز بودن مرورگر."""
         if context is None:
             from playwright.async_api import async_playwright
