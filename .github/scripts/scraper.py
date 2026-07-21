@@ -643,22 +643,32 @@ class TelegramChannelScraper:
                     self.logger.warning("⚠️ آپلود ناموفق بود، ادامه با فایل‌های محلی...")
 
             # به‌روزرسانی start_link با آخرین پست جدید
-            # ✅ استفاده از newly_added_sorted
-            last_item = newly_added_sorted[-1]
-            last_id_str = str(last_item['id']).strip()
-            try:
-                if '.' in last_id_str:
-                    last_id = int(float(last_id_str))
+                       # به‌روزرسانی start_link بر اساس جهت اسکرول
+            if newly_added_sorted:
+                # ★★★ انتخاب نقطه شروع بر اساس جهت اسکرول ★★★
+                if self.scroll_direction == 'up':
+                    # برای ادامه به سمت قدیمی‌تر، از قدیمی‌ترین پست جدید استفاده می‌کنیم
+                    last_item = newly_added_sorted[0]
                 else:
-                    last_id = int(last_id_str)
-            except:
-                last_id = last_id_str
+                    # برای ادامه به سمت جدیدتر، از جدیدترین پست جدید استفاده می‌کنیم
+                    last_item = newly_added_sorted[-1]
+                
+                last_id_str = str(last_item['id']).strip()
+                try:
+                    if '.' in last_id_str:
+                        last_id = int(float(last_id_str))
+                    else:
+                        last_id = int(last_id_str)
+                except:
+                    last_id = last_id_str
 
-            new_start_link = f"https://t.me/{self.channel}/{last_id}"
-            self.start_link = new_start_link
-            self.target_msg_id = str(last_id)
-            self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")   #ریست شمارنده
-
+                new_start_link = f"https://t.me/{self.channel}/{last_id}"
+                self.start_link = new_start_link
+                self.target_msg_id = str(last_id)
+                self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")
+            else:
+                self.logger.warning("⚠️ هیچ پست جدیدی برای تعیین نقطه شروع وجود ندارد.")
+                
         # ─── بعد از اتمام تمام دورها ─────────────────────────────
         # ─── واکشی پست‌های گم‌شده در پایان (فقط در صورت پر شدن limit) ──
         if len(items) == self.limit and hasattr(self, '_missing_post_ids') and self._missing_post_ids:
