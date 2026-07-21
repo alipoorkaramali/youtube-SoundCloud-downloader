@@ -546,12 +546,14 @@ class TelegramChannelScraper:
             context, page = await self._ensure_browser(context, page)
 
             # ─── جمع‌آوری پست‌های جدید ─────────────────
+            # ★★★ یک پست بیشتر درخواست می‌کنیم تا پست تکراری با seen_ids حذف شود ★★★
+            limit_to_fetch = self.limit - len(items) + 1
             new_items, context, page = await self._fetch_posts_from_telegram(
                 existing_seen_ids={item['id'] for item in items} if items else None,
                 keep_browser_open=True,
                 existing_context=context,
                 existing_page=page,
-                limit=self.limit - len(items)
+                limit=limit_to_fetch
             )
 
             # فیلتر کردن پست‌های جدید (حذف تکراری‌ها)
