@@ -1045,9 +1045,12 @@ class TelegramChannelScraper:
 
             # اگر start_link داریم یا جهت 'up' است، از جدید به قدیم برویم
             # ─── تعیین ترتیب ─────────────────────────────────────────────
-            if self.start_link or self.scroll_direction == 'up':
+            # ─── تعیین ترتیب بر اساس جهت اسکرول کاربر ──────────────────
+            if self.scroll_direction == 'up':
+                # از جدید به قدیم (برای پیدا کردن پست‌های قدیمی‌تر)
                 msg_iter = reversed(messages)
             else:
+                # از قدیم به جدید (برای پیدا کردن پست‌های جدیدتر)
                 msg_iter = messages
 
             new_posts_added = 0  # ★★★ شمارش پست‌های جدید اضافه‌شده در این تلاش
