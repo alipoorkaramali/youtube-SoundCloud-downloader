@@ -867,7 +867,6 @@ class TelegramChannelScraper:
                 # ─── اگر دکمه فلش پیدا نشد، فقط لاگ کن و ادامه بده ──────────
                 if not clicked:
                     self.logger.info("   ℹ️ دکمه فلش پیدا نشد. ادامه با وضعیت فعلی (مانند نسخه دیباگ).")
-                    # بدون پرش دستی، فقط لاگ
                 else:
                     # ─── منتظر بارگذاری پیام‌های جدید ──────────────────────────
                     self.logger.info("⏳ منتظر بارگذاری پیام‌های جدید در پایین صفحه...")
@@ -889,12 +888,14 @@ class TelegramChannelScraper:
                             timeout=10000
                         )
                         self.logger.info("✅ پیام‌های جدید در پایین صفحه بارگذاری شدند.")
-                        self._manual_scroll_done = True
                     except Exception as e:
                         self.logger.warning(f"⚠️ timeout در انتظار پیام‌های جدید: {e}")
-                        # اگر timeout خورد، باز هم _manual_scroll_done = True می‌کنیم تا دوباره تلاش نشود
-                        self._manual_scroll_done = True           
-            await asyncio.sleep(3)  # افزایش تأخیر برای رندر کامل (مشابه دیباگ)
+
+                # ★★★ فقط یک بار، صرف‌نظر از پیدا شدن دکمه ★★★
+                self._manual_scroll_done = True
+
+            # ─── منتظر رندر کامل ──────────────────────────────
+            await asyncio.sleep(3)
             self.logger.info("⏳ منتظر رندر کامل پیام‌ها...")
             
             # ─── اطمینان از وجود حداقل یک پیام با محتوا قبل از شروع ───
@@ -920,49 +921,10 @@ class TelegramChannelScraper:
             self.logger.warning(f"⚠️ timeout در انتظار پیام‌ها: {e}. ادامه با اسکرول...")
 
         await self._save_screenshot(page, "initial")
-
         # ─── صبر اضافی برای بارگذاری کامل ────────────────────────────
         if not self.start_link and self.scroll_direction == 'up':
             self.logger.info("⏳ ۴ ثانیه صبر اضافی برای بارگذاری کامل...")
             await asyncio.sleep(4)
-
-        # ═══════════════ پرش به ابتدا یا انتهای صفحه بر اساس جهت اسکرول ═══════════════
-        if not self.start_link and not self._manual_scroll_done:
-            if self.scroll_direction == 'up':
-                self.logger.info("⬇️ تلاش برای پرش به جدیدترین پست‌ها...")
-                clicked = False
-                scroll_button_selectors = [
-                    'button[title="Go to bottom"]',
-                    'div[class*="scroll-to-bottom"]',
-                    'div[class*="ScrollButton"]',
-                    '[aria-label="Scroll to bottom"]',
-                    'button:has(svg[class*="arrow-down"])',
-                ]
-                for sel in scroll_button_selectors:
-                    try:
-                        btn = page.locator(sel).first
-                        if await btn.count() > 0:
-                            await btn.click(timeout=5000)
-                            self.logger.info("   ✅ روی دکمه فلش کلیک شد. منتظر بارگذاری جدیدترین پست‌ها...")
-                            clicked = True
-                            await human_sleep(3.5, 0.4)
-                            break
-                    except Exception:
-                        continue
-                if not clicked:
-                    self.logger.info("   ℹ️ دکمه پرش به پایین پیدا نشد. ادامه با وضعیت فعلی.")
-            else:  # scroll_direction == 'down'
-                self.logger.info("⬆️ تلاش برای رفتن به بالای صفحه (قدیمی‌ترین پست‌ها)...")
-                await page.evaluate("window.scrollTo(0, 0)")
-                await human_sleep(2, 0.3)
-                for _ in range(3):
-                    await page.evaluate("window.scrollBy(0, -2000)")
-                    await human_sleep(1, 0.2)
-                self.logger.info("   ✅ به بالای صفحه رفتیم.")
-        elif self._manual_scroll_done:
-            self.logger.info("ℹ️ پرش دستی انجام شده، از جستجوی دکمه صرف‌نظر می‌شود.")
-        else:
-            self.logger.info("ℹ️ در حالت start_link، پرش به پایین/بالا انجام نمی‌شود.")
 
         # ─── استخراج مقاوم (حداکثر ۳ تلاش با تأخیر هوشمند) ──────────────────
         items = []
