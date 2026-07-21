@@ -936,20 +936,56 @@ class TelegramChannelScraper:
 
         # ─── متغیر start_collecting ─────────────────────────────────────
         start_collecting = not bool(self.start_link)  # اگر start_link نداشته باشیم، از اول شروع می‌کنیم
-
-        for attempt in range(5):  # ← افزایش به ۵ تلاش
+        
+        for attempt in range(5):  # حداکثر ۵ تلاش
             if attempt > 0:
                 self.logger.info(f"🔄 تلاش استخراج {attempt+1}/5 (با تأخیر برای بارگذاری)...")
-                # اسکرول با گام کوچک‌تر و تعداد تلاش بیشتر
-                await self._smart_scroll(page, self.scroll_direction, step=600, max_attempts=2)
-                # اسکرول معکوس مختصر برای تحریک بارگذاری (در تلاش‌های زوج)
-                if attempt % 2 == 0:
-                    self.logger.debug("   🔄 اسکرول معکوس ۲۰۰px برای تحریک بارگذاری...")
-                    await page.evaluate("window.scrollBy(0, 200)")
-                    await human_sleep(0.8, 0.2)
-                # تأخیر بیشتر برای بارگذاری کامل
-                self.logger.info("⏳ صبر ۴ ثانیه برای بارگذاری محتوای جدید...")
-                await human_sleep(4.0, 0.5)
+                
+                # ─── اسکرول هوشمند ──────────────────────────────────
+                scrolled = await self._smart_scroll(page, self.scroll_direction, step=600, max_attempts=2)
+                
+                # ─── اگر اسکرول نتیجه نداد، اسکرول برعکس را چند بار امتحان کن ──
+                if not scrolled:
+                    self.logger.info("🔄 اسکرول معمولی نتیجه نداد. تلاش با اسکرول برعکس (بالا و پایین)...")
+                    
+                    # دو بار اسکرول برعکس با فاصله زمانی بیشتر
+                    reverse_success = False
+                    for reverse_attempt in range(2):  # ۲ بار تلاش
+                        old_height = await page.evaluate("document.documentElement.scrollHeight")
+                        
+                        # اسکرول به بالا
+                        await page.evaluate("window.scrollBy(0, -500)")
+                        await human_sleep(1.0, 0.3)
+                        
+                        # اسکرول به پایین
+                        await page.evaluate("window.scrollBy(0, 700)")
+                        await human_sleep(1.0, 0.3)
+                        
+                        new_height = await page.evaluate("document.documentElement.scrollHeight")
+                        if new_height != old_height:
+                            self.logger.info(f"✅ اسکرول برعکس {reverse_attempt+1} موفق بود: {old_height} → {new_height}")
+                            reverse_success = True
+                            scrolled = True  # برای ادامه حلقه
+                            break
+                        else:
+                            self.logger.info(f"   ⏳ تلاش {reverse_attempt+1}: ارتفاع تغییر نکرد. صبر بیشتر برای بارگذاری...")
+                            await human_sleep(5.0, 0.5)  # صبر بیشتر بین تلاش‌ها
+                    
+                    if not reverse_success:
+                        self.logger.info("ℹ️ اسکرول برعکس در ۲ تلاش نتیجه‌ای نداشت. به انتهای کانال رسیده‌ایم.")
+                        break  # ← از حلقه اصلی خارج می‌شویم
+                
+                # ─── اگر اسکرول موفق بود، زمان بیشتری برای بارگذاری بده ──
+                if scrolled:
+                    # اسکرول معکوس مختصر (اختیاری)
+                    if attempt % 2 == 0:
+                        self.logger.debug("   🔄 اسکرول معکوس ۲۰۰px برای تحریک بارگذاری...")
+                        await page.evaluate("window.scrollBy(0, 200)")
+                        await human_sleep(1.0, 0.3)
+                    
+                    # ★★★ زمان صبر از ۴ به ۶ ثانیه افزایش یافته ★★★
+                    self.logger.info("⏳ صبر ۶ ثانیه برای بارگذاری محتوای جدید...")
+                    await human_sleep(6.0, 0.5)
 
             # ─── دریافت پیام‌ها با روش‌های مختلف ──────────────────────────
             # ─── روش اصلی: استخراج با JavaScript (همه پست‌های موجود در DOM) ───
@@ -1136,7 +1172,7 @@ class TelegramChannelScraper:
                     else:
                         self.logger.info("ℹ️ اسکرول نرم نیز پستی پیدا نکرد. صبر برای بارگذاری...")
                         await human_sleep(3.0, 0.5)
-
+                        
         self.logger.info(f"📊 در مجموع {len(items)} پست جمع‌آوری شد.")
         items = items[:effective_limit]
         await self._save_screenshot(page, "final")
