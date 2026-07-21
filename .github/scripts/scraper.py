@@ -928,7 +928,8 @@ class TelegramChannelScraper:
 
         # ─── استخراج مقاوم (حداکثر ۳ تلاش با تأخیر هوشمند) ──────────────────
         items = []
-        seen_ids = set()
+        seen_ids = set()          # شناسه‌های پست‌های اضافه‌شده به items
+        processed_ids = set()     # ★★★ شناسه‌های تمام پست‌های پردازش‌شده (حتی ریپلای‌ها)
         scroll_attempts = 0
         effective_limit = limit if limit is not None else self.limit
 
@@ -1042,12 +1043,14 @@ class TelegramChannelScraper:
                 if not messages:
                     continue
 
-            # ─── تعیین ترتیب ─────────────────────────────────────────────
             # اگر start_link داریم یا جهت 'up' است، از جدید به قدیم برویم
+            # ─── تعیین ترتیب ─────────────────────────────────────────────
             if self.start_link or self.scroll_direction == 'up':
                 msg_iter = reversed(messages)
             else:
                 msg_iter = messages
+
+            new_posts_added = 0  # ★★★ شمارش پست‌های جدید اضافه‌شده در این تلاش
 
             for msg in msg_iter:
                 try:
@@ -1055,17 +1058,33 @@ class TelegramChannelScraper:
                     if isinstance(msg, dict):
                         # msg از _extract_posts_from_page آمده است
                         msg_id = msg.get('id')
+                        
+                        # ★★★ اگر قبلاً پردازش شده، رد کن
+                        if msg_id in processed_ids:
+                            continue
+                        
+                        # ★★★ به processed_ids اضافه کن
+                        processed_ids.add(msg_id)
+                        
                         text = msg.get('text', '')
                         date = msg.get('date', '')
                         # برای ریپلای، از المان اصلی استفاده نمی‌کنیم، پس فرض می‌کنیم ریپلای نیست
                         is_reply = False
                         # برای داده‌های JS، نیازی به استخراج مجدد نیست
                         # ولی برای یکسان‌سازی، می‌توانیم از همان مقادیر استفاده کنیم
+                    
                     else:
                         # msg المان Playwright است
                         msg_id = await msg.get_attribute('data-message-id')
                         if msg_id:
                             msg_id = str(int(float(msg_id)))
+                        
+                        # ★★★ اگر قبلاً پردازش شده، رد کن
+                        if msg_id in processed_ids:
+                            continue
+                        
+                        # ★★★ بلافاصله به processed_ids اضافه کن (قبل از هر چیز دیگر)
+                        processed_ids.add(msg_id)
             
                         # بررسی پست ریپلای شده (فقط برای المان‌ها)
                         is_reply = await msg.locator('.EmbeddedMessage').count() > 0
@@ -1122,6 +1141,7 @@ class TelegramChannelScraper:
                         'url': f"https://t.me/{self.channel}/{msg_id}"
                     })
                     seen_ids.add(msg_id)
+                    new_posts_added += 1  # ★★★ افزایش شمارنده
 
                     if len(items) >= effective_limit:
                         break
@@ -1131,6 +1151,11 @@ class TelegramChannelScraper:
                     continue
             if len(items) >= effective_limit:
                  break
+
+            # ★★★ اگر در این تلاش هیچ پست جدیدی اضافه نشد، به انتها رسیده‌ایم
+            if new_posts_added == 0 and attempt > 0:
+                self.logger.info("ℹ️ در این تلاش پست جدیدی اضافه نشد. به انتهای کانال رسیده‌ایم.")
+                break
 
             # ─── فقط در صورتی اسکرول کنیم که پیامی پیدا نشد ──────────────
             if len(items) == 0 and attempt < 4:  # ← افزایش تعداد دفعات
