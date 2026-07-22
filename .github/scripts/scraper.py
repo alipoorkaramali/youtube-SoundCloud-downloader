@@ -965,7 +965,13 @@ class TelegramChannelScraper:
                     scrolled = False  # ← مقداردهی برای جلوگیری از خطا
                 else:
                     self.logger.info(f"🔄 تلاش استخراج {attempt+1}/5 (با تأخیر برای بارگذاری)...")
-                    scrolled = await self._smart_scroll(...)
+                    # ─── اسکرول هوشمند ──────────────────────────────────
+                    scrolled = await self._smart_scroll(
+                        page, 
+                        self.scroll_direction,   # ← اینجا direction را پاس بده
+                        step=600, 
+                        max_attempts=2
+                    )
      
                 if not scrolled:
                     if quick_check:
