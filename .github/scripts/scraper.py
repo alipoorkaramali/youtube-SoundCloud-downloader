@@ -546,8 +546,8 @@ class TelegramChannelScraper:
             context, page = await self._ensure_browser(context, page)
 
             # ─── جمع‌آوری پست‌های جدید ─────────────────
-            # ★★★ یک پست بیشتر درخواست می‌کنیم تا پست تکراری با seen_ids حذف شود ★★★
-            limit_to_fetch = self.limit - len(items) + 1
+            # ★★★ دو پست بیشتر درخواست می‌کنیم تا در دور آخر پست‌ها جا نیفتند ★★★
+            limit_to_fetch = self.limit - len(items) + 2
             new_items, context, page = await self._fetch_posts_from_telegram(
                 existing_seen_ids={item['id'] for item in items} if items else None,
                 keep_browser_open=True,
@@ -567,6 +567,10 @@ class TelegramChannelScraper:
                 self._fallback_ids = []  # پاکسازی تا دیگر تلاش نشود
                 self.logger.debug("✅ fallback غیرفعال شد (پست جدید پیدا شد).")
             self.logger.info(f"📥 {len(newly_added)} پست جدید جمع‌آوری شد (مجموع: {len(items)}/{self.limit})")
+
+            # ★★★ تشخیص اینکه آیا دور آخر است ★★★
+            is_last_round = (len(items) >= self.limit) or (len(newly_added) == 0)
+
             # ─── پر کردن شکاف‌های شناسه در newly_added ──────────────────
             if newly_added:
                 # مرتب‌سازی برای تشخیص شکاف‌ها
@@ -643,34 +647,31 @@ class TelegramChannelScraper:
                     self._save_resume_state(str(newly_added_sorted[-1]['id']), items)
                 else:
                     self.logger.warning("⚠️ آپلود ناموفق بود، ادامه با فایل‌های محلی...")
-
+ 
             # به‌روزرسانی start_link با آخرین پست جدید
-                       # به‌روزرسانی start_link بر اساس جهت اسکرول
-            if newly_added_sorted:
-                # ★★★ انتخاب نقطه شروع بر اساس جهت اسکرول ★★★
-                if self.scroll_direction == 'up':
-                    # برای ادامه به سمت قدیمی‌تر، از قدیمی‌ترین پست جدید استفاده می‌کنیم
-                    last_item = newly_added_sorted[0]
-                else:
-                    # برای ادامه به سمت جدیدتر، از جدیدترین پست جدید استفاده می‌کنیم
-                    last_item = newly_added_sorted[-1]
+                        # ─── به‌روزرسانی start_link فقط اگر دور آخر نباشیم ───
+            if not is_last_round and new_items:          # ← مهم: استفاده از new_items
+                all_fetched_sorted = sorted(new_items, key=lambda x: int(x['id']))
                 
-                last_id_str = str(last_item['id']).strip()
-                try:
-                    if '.' in last_id_str:
-                        last_id = int(float(last_id_str))
-                    else:
-                        last_id = int(last_id_str)
-                except:
-                    last_id = last_id_str
-
-                new_start_link = f"https://t.me/{self.channel}/{last_id}"
-                self.start_link = new_start_link
-                self.target_msg_id = str(last_id)
+                if self.scroll_direction == 'up':
+                    anchor_item = all_fetched_sorted[0]      # قدیمی‌ترین
+                else:
+                    anchor_item = all_fetched_sorted[-1]     # جدیدترین
+                
+                last_id = str(anchor_item['id']).strip()
+                self.start_link = f"https://t.me/{self.channel}/{last_id}"
+                self.target_msg_id = last_id
                 self.logger.info(f"🔄 نقطه شروع دور بعدی: {self.start_link} (id: {last_id})")
             else:
-                self.logger.warning("⚠️ هیچ پست جدیدی برای تعیین نقطه شروع وجود ندارد.")
-                
+                if is_last_round:
+                    self.logger.info("🏁 به limit رسیدیم یا پست جدیدی نبود → پایان کار")
+                else:
+                    self.logger.warning("⚠️ هیچ پست جدیدی برای تعیین نقطه شروع وجود ندارد.")
+                    
+        # ★★★ اگر تعداد پست‌ها از limit بیشتر شد، محدودش کن ★★★
+        if len(items) > self.limit:
+            items = items[:self.limit]
+            self.logger.info(f"✂️ تعداد پست‌ها به {self.limit} محدود شد (پست‌های اضافی حذف شدند).")            
         # ─── بعد از اتمام تمام دورها ─────────────────────────────
         # ─── واکشی پست‌های گم‌شده در پایان (فقط در صورت پر شدن limit) ──
         if len(items) == self.limit and hasattr(self, '_missing_post_ids') and self._missing_post_ids:
