@@ -826,7 +826,7 @@ class TelegramChannelScraper:
             return [], None, None
 
         if self.start_link:
-            entered = await self._navigate_to_start_link(page)
+            entered = await self._navigate_to_start_link(page, quick_check=quick_check)
         else:
             entered = await self._search_and_enter_channel(page)
 
@@ -957,48 +957,45 @@ class TelegramChannelScraper:
         # ─── متغیر start_collecting ─────────────────────────────────────
         start_collecting = not bool(self.start_link)  # اگر start_link نداشته باشیم، از اول شروع می‌کنیم
         
-        for attempt in range(max_attempts):  # حداکثر ۵ تلاش (یا ۲ در حالت سریع)
+        for attempt in range(max_attempts):
             if attempt > 0:
                 if quick_check:
                     self.logger.debug(f"   ⚡ حالت سریع: تلاش {attempt+1}/{max_attempts} با صبر کم...")
-                    await human_sleep(1.5, 0.3)   # صبر خیلی کمتر
-                    # در حالت سریع اسکرول سنگین انجام نمی‌دهیم
+                    await human_sleep(1.5, 0.3)
+                    scrolled = False  # ← مقداردهی برای جلوگیری از خطا
                 else:
                     self.logger.info(f"🔄 تلاش استخراج {attempt+1}/5 (با تأخیر برای بارگذاری)...")
-                    
-                    # ─── اسکرول هوشمند ──────────────────────────────────
-                    scrolled = await self._smart_scroll(page, self.scroll_direction, step=600, max_attempts=2)
-                    
+                    scrolled = await self._smart_scroll(...)
+     
                 if not scrolled:
+                    if quick_check:
+                        # در حالت سریع بدون اسکرول برعکس خارج می‌شویم
+                        break
+                    
+                    # ─── اسکرول برعکس (فقط در حالت عادی) ──────────────────
                     self.logger.info("🔄 اسکرول معمولی نتیجه نداد. تلاش با اسکرول برعکس (بالا و پایین)...")
                     
-                    # دو بار اسکرول برعکس با فاصله زمانی بیشتر
                     reverse_success = False
-                    for reverse_attempt in range(2):  # ۲ بار تلاش
+                    for reverse_attempt in range(2):
                         old_height = await page.evaluate("document.documentElement.scrollHeight")
-                        
-                        # اسکرول به بالا
                         await page.evaluate("window.scrollBy(0, -500)")
                         await human_sleep(1.0, 0.3)
-                        
-                        # اسکرول به پایین
                         await page.evaluate("window.scrollBy(0, 700)")
                         await human_sleep(1.0, 0.3)
-                        
                         new_height = await page.evaluate("document.documentElement.scrollHeight")
                         if new_height != old_height:
                             self.logger.info(f"✅ اسکرول برعکس {reverse_attempt+1} موفق بود: {old_height} → {new_height}")
                             reverse_success = True
-                            scrolled = True  # برای ادامه حلقه
+                            scrolled = True
                             break
                         else:
                             self.logger.info(f"   ⏳ تلاش {reverse_attempt+1}: ارتفاع تغییر نکرد. صبر بیشتر برای بارگذاری...")
-                            await human_sleep(5.0, 0.5)  # صبر بیشتر بین تلاش‌ها
+                            await human_sleep(5.0, 0.5)
                     
                     if not reverse_success:
                         self.logger.info("ℹ️ اسکرول برعکس در ۲ تلاش نتیجه‌ای نداشت. به انتهای کانال رسیده‌ایم.")
-                        break  # ← از حلقه اصلی خارج می‌شویم
-                
+                        break  #از حلقه اصلی خارج می‌شویم
+   
                 # ─── اگر اسکرول موفق بود، زمان بیشتری برای بارگذاری بده ──
                 if scrolled:
                     # اسکرول معکوس مختصر (اختیاری)
@@ -1182,9 +1179,9 @@ class TelegramChannelScraper:
             if new_posts_added == 0 and attempt > 0:
                 self.logger.info("ℹ️ در این تلاش پست جدیدی اضافه نشد. به انتهای کانال رسیده‌ایم.")
                 break
-
-            # ─── فقط در صورتی اسکرول کنیم که پیامی پیدا نشد ──────────────
-            if len(items) == 0 and attempt < 4:  # ← افزایش تعداد دفعات
+                
+             # ─── فقط در صورتی اسکرول کنیم که پیامی پیدا نشد (و در حالت سریع نباشیم) ──
+            if not quick_check and len(items) == 0 and attempt < 4:
                 self.logger.info(f"🔄 اسکرول به {self.scroll_direction} برای تلاش بعدی...")
                 # اسکرول با گام‌های مختلف
                 if attempt % 2 == 0:
@@ -1208,8 +1205,6 @@ class TelegramChannelScraper:
                                     date = await date_el.inner_text() or ""
                             except:
                                 pass
-    
-                            # ✅ اینجا باید باشد (داخل try اصلی)
                             items.append({
                                 'id': found_id,
                                 'text': text,
@@ -1219,7 +1214,7 @@ class TelegramChannelScraper:
                             seen_ids.add(found_id)
                             self.logger.info(f"   ✅ پست {found_id} به لیست اضافه شد (اسکرول نرم)")
                         except Exception as e:
-                            self.logger.debug(f"   ⚠️ خطا در اضافه کردن پست از اسکرول نرم: {e}")         
+                            self.logger.debug(f"   ⚠️ خطا در اضافه کردن پست از اسکرول نرم: {e}")
                     else:
                         self.logger.info("ℹ️ اسکرول نرم نیز پستی پیدا نکرد. صبر برای بارگذاری...")
                         await human_sleep(3.0, 0.5)
@@ -1228,7 +1223,8 @@ class TelegramChannelScraper:
         items = items[:effective_limit]
         if not quick_check:
             await self._save_screenshot(page, "final")
-        await self._capture_post_screenshots(page, items)
+        if not quick_check:
+            await self._capture_post_screenshots(page, items)
 
         if items:
             first_id = items[0]['id']
@@ -1499,18 +1495,15 @@ class TelegramChannelScraper:
             timeout_value = 8000 if quick_check else 20000
             try:
                 await page.wait_for_selector('div[data-message-id]', timeout=timeout_value)
+                self.logger.info("✅ پیام‌ها در صفحه بارگذاری شدند.")
+                await self._take_screenshot(page, "messages_loaded")
             except Exception:
                 if quick_check:
                     self.logger.info(f"⚡ پست {self.target_msg_id} سریعاً پیدا نشد → احتمالاً حذف شده")
                     return False   # زود برگرد
                 else:
                     self.logger.warning("⚠️ پیام‌ها با timeout بارگذاری نشدند. تلاش با روش‌های جایگزین...")
-                    # ادامه می‌دهیم تا مراحل بعدی اجرا شوند
-                self.logger.info("✅ پیام‌ها در صفحه بارگذاری شدند.")
-                await self._take_screenshot(page, "messages_loaded")
-            except Exception:
-                self.logger.warning("⚠️ پیام‌ها با timeout بارگذاری نشدند. تلاش با روش‌های جایگزین...")
-                # ادامه می‌دهیم تا مراحل بعدی (جستجوی جایگزین و اسکرول نرم) اجرا شوند
+                    # ادامه می‌دهیم تا مراحل بعدی (جستجوی جایگزین و اسکرول نرم) اجرا شوند
 
             # ─── مرحله ۲: جستجوی دقیق با data-message-id ──────────
             target_exists = await page.locator(f'[data-message-id="{self.target_msg_id}"]').count() > 0
@@ -1558,15 +1551,20 @@ class TelegramChannelScraper:
                 else:
                     self.logger.debug(f"   پیام {msg_id}: شامل '{self.target_msg_id}' نیست.")
             # ─── مرحله ۴: اسکرول نرم در همان صفحه ───────────────────
-            self.logger.warning(f"⚠️ پست هدف در صفحه پیدا نشد. شروع اسکرول نرم در همان صفحه...")
-            found, found_id = await self._find_post_with_slow_scroll(page, seen_ids=None)
-            if found:
-                self.target_msg_id = found_id
-                self.logger.info(f"✅ پست هدف با اسکرول نرم پیدا شد: {self.target_msg_id}")
-                return True
-            else:
-                self.logger.error("❌ حتی با اسکرول نرم هم پستی پیدا نشد.")
+            # ─── مرحله ۴: اسکرول نرم در همان صفحه (فقط در حالت عادی) ──
+            if quick_check:
+                self.logger.debug(f"⚡ حالت سریع: اسکرول نرم انجام نمی‌شود")
                 return False
+            else:
+                self.logger.warning(f"⚠️ پست هدف در صفحه پیدا نشد. شروع اسکرول نرم در همان صفحه...")
+                found, found_id = await self._find_post_with_slow_scroll(page, seen_ids=None)
+                if found:
+                    self.target_msg_id = found_id
+                    self.logger.info(f"✅ پست هدف با اسکرول نرم پیدا شد: {self.target_msg_id}")
+                    return True
+                else:
+                    self.logger.error("❌ حتی با اسکرول نرم هم پستی پیدا نشد.")
+                    return False
 
         for retry in range(2):
             if retry > 0:
