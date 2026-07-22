@@ -1430,14 +1430,6 @@ class TelegramChannelScraper:
             await human_sleep(5, 0.5)
             await self._take_screenshot(page, "search_results_loaded")
 
-            # ★★★ بررسی سریع وجود پست هدف در نتایج جستجو ★★★
-            target_exists = await page.locator(f'div[data-message-id="{self.target_msg_id}"]').count() > 0
-            if not target_exists:
-                self.logger.warning(f"⚠️ پست {self.target_msg_id} در نتایج جستجو پیدا نشد. احتمالاً وجود ندارد.")
-                return False
-            else:
-                self.logger.info(f"✅ پست {self.target_msg_id} در نتایج جستجو پیدا شد. ادامه...")
-
             clicked = False
             result_selectors = [
                 'div[data-message-id]',
