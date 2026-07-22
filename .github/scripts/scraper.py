@@ -571,9 +571,9 @@ class TelegramChannelScraper:
             # ★★★ تشخیص اینکه آیا دور آخر است ★★★
             is_last_round = (len(items) >= self.limit) or (len(newly_added) == 0)
 
-            # ─── پر کردن شکاف‌های شناسه در newly_added ──────────────────
+
+            # ─── تشخیص شکاف‌های واقعی با JS ──────────────────
             if newly_added:
-                # مرتب‌سازی برای تشخیص شکاف‌ها
                 newly_added_sorted = sorted(newly_added, key=lambda x: int(x['id']))
                 complete_list = []
     
@@ -582,21 +582,30 @@ class TelegramChannelScraper:
                     next_id = int(newly_added_sorted[i+1]['id'])
                     complete_list.append(newly_added_sorted[i])
         
-                    # اگر فاصله بیشتر از ۱ بود، یعنی پست‌هایی جا افتاده‌اند
-                    if next_id - current_id > 1:
+                    # ★★★ فقط شکاف‌های کوچک (کمتر از ۵) را بررسی می‌کنیم ★★★
+                    if next_id - current_id > 1 and next_id - current_id <= 5:
+                        self.logger.info(f"🔍 شکاف کوچک بین {current_id} و {next_id} شناسایی شد. بررسی با JS...")
+                        
+                        # ★★★ بررسی واقعی وجود هر پست با JS ★★★
                         for missing_id in range(current_id + 1, next_id):
-                            self.logger.warning(f"🔍 پست گم‌شده شناسایی شد: {missing_id} (ذخیره برای واکشی بعدی)")
-                            self._missing_post_ids.append(str(missing_id))  # ← ذخیره شناسه
+                            # با JS بررسی می‌کنیم که آیا این پست در DOM وجود دارد
+                            target_exists = await page.locator(f'div[data-message-id="{missing_id}"]').count() > 0
+                            if not target_exists:
+                                # اگر در DOM نیست، احتمالاً گم شده است
+                                self.logger.warning(f"🔍 پست {missing_id} در DOM وجود ندارد. ذخیره برای واکشی بعدی.")
+                                self._missing_post_ids.append(str(missing_id))
+                            else:
+                                self.logger.info(f"✅ پست {missing_id} در DOM وجود دارد. نیازی به واکشی نیست.")
+                    
+                    # ★★★ شکاف‌های بزرگ را نادیده می‌گیریم (احتمالاً پست وجود ندارد) ★★★
+                    elif next_id - current_id > 5:
+                        self.logger.debug(f"ℹ️ شکاف بزرگ {next_id - current_id} نادیده گرفته شد (احتمالاً پست وجود ندارد)")
     
-                # اضافه کردن آخرین پست به لیست کامل
                 if newly_added_sorted:
                     complete_list.append(newly_added_sorted[-1])
-    
-                # به‌روزرسانی newly_added_sorted با لیست کامل
                 newly_added_sorted = complete_list
             else:
-                newly_added_sorted = []  # اگر newly_added خالی است
-            # اگر هیچ پست جدیدی اضافه نشد، یعنی کار تمام است
+                newly_added_sorted = []            # اگر هیچ پست جدیدی اضافه نشد، یعنی کار تمام است
             if not newly_added:
                 # ─── اگر fallback_ids داریم و هنوز fallback باقی مانده ───
                 if hasattr(self, '_fallback_ids') and self._fallback_ids:
