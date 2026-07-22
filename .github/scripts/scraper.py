@@ -700,7 +700,8 @@ class TelegramChannelScraper:
                         existing_context=context,
                         existing_page=page,
                         limit=1,
-                        target_ids=[str(missing_id)]
+                        target_ids=[str(missing_id)],
+                        quick_check=True   # ★★★ فعال کردن حالت سریع ★★★
                     )
             
                     # برگرداندن لینک قبلی
@@ -796,7 +797,7 @@ class TelegramChannelScraper:
             self.logger.info("🔄 صفحه‌ی جدید در context موجود ساخته شد.")
         return context, page
     # ═══════════════════ استخراج پست‌ها با پشتیبانی از جهت اسکرول ═══════════════════
-    async def _fetch_posts_from_telegram(self, existing_seen_ids: set = None, keep_browser_open: bool = False, existing_context: Any = None, existing_page: Any = None, limit: int = None, target_ids: List[str] = None) -> Tuple[List[Dict], Any, Any]:
+    async def _fetch_posts_from_telegram(self, existing_seen_ids: set = None, keep_browser_open: bool = False, existing_context: Any = None, existing_page: Any = None, limit: int = None, target_ids: List[str] = None, quick_check: bool = False) -> Tuple[List[Dict], Any, Any]:
         from playwright.async_api import async_playwright
 
         # ─── اگر context و page از قبل وجود دارند، از آن‌ها استفاده کن ──
@@ -933,7 +934,8 @@ class TelegramChannelScraper:
         except Exception as e:
             self.logger.warning(f"⚠️ timeout در انتظار پیام‌ها: {e}. ادامه با اسکرول...")
 
-        await self._save_screenshot(page, "initial")
+        if not quick_check:
+            await self._save_screenshot(page, "initial")
         # ─── صبر اضافی برای بارگذاری کامل ────────────────────────────
         if not self.start_link and self.scroll_direction == 'up':
             self.logger.info("⏳ ۴ ثانیه صبر اضافی برای بارگذاری کامل...")
@@ -945,20 +947,28 @@ class TelegramChannelScraper:
         processed_ids = set()     # ★★★ شناسه‌های تمام پست‌های پردازش‌شده (حتی ریپلای‌ها)
         scroll_attempts = 0
         effective_limit = limit if limit is not None else self.limit
-
-        self.logger.info(f"🔍 شروع استخراج مقاوم — حد: {effective_limit} پست")
+        # ★★★ تنظیم تعداد تلاش‌ها بر اساس حالت سریع ★★★
+        max_attempts = 2 if quick_check else 5
+        if quick_check:
+            self.logger.info(f"⚡ حالت چک سریع فعال شد برای پست {self.target_msg_id} (تلاش‌ها: {max_attempts})")
+        else:
+            self.logger.info(f"🔍 شروع استخراج مقاوم — حد: {effective_limit} پست")
 
         # ─── متغیر start_collecting ─────────────────────────────────────
         start_collecting = not bool(self.start_link)  # اگر start_link نداشته باشیم، از اول شروع می‌کنیم
         
-        for attempt in range(5):  # حداکثر ۵ تلاش
+        for attempt in range(max_attempts):  # حداکثر ۵ تلاش (یا ۲ در حالت سریع)
             if attempt > 0:
-                self.logger.info(f"🔄 تلاش استخراج {attempt+1}/5 (با تأخیر برای بارگذاری)...")
-                
-                # ─── اسکرول هوشمند ──────────────────────────────────
-                scrolled = await self._smart_scroll(page, self.scroll_direction, step=600, max_attempts=2)
-                
-                # ─── اگر اسکرول نتیجه نداد، اسکرول برعکس را چند بار امتحان کن ──
+                if quick_check:
+                    self.logger.debug(f"   ⚡ حالت سریع: تلاش {attempt+1}/{max_attempts} با صبر کم...")
+                    await human_sleep(1.5, 0.3)   # صبر خیلی کمتر
+                    # در حالت سریع اسکرول سنگین انجام نمی‌دهیم
+                else:
+                    self.logger.info(f"🔄 تلاش استخراج {attempt+1}/5 (با تأخیر برای بارگذاری)...")
+                    
+                    # ─── اسکرول هوشمند ──────────────────────────────────
+                    scrolled = await self._smart_scroll(page, self.scroll_direction, step=600, max_attempts=2)
+                    
                 if not scrolled:
                     self.logger.info("🔄 اسکرول معمولی نتیجه نداد. تلاش با اسکرول برعکس (بالا و پایین)...")
                     
@@ -1216,7 +1226,8 @@ class TelegramChannelScraper:
                         
         self.logger.info(f"📊 در مجموع {len(items)} پست جمع‌آوری شد.")
         items = items[:effective_limit]
-        await self._save_screenshot(page, "final")
+        if not quick_check:
+            await self._save_screenshot(page, "final")
         await self._capture_post_screenshots(page, items)
 
         if items:
@@ -1373,7 +1384,7 @@ class TelegramChannelScraper:
         return False
 
     # ═══════════════════ متد جستجو با لینک (start_link) ═══════════════════
-    async def _navigate_to_start_link(self, page) -> bool:
+    async def _navigate_to_start_link(self, page, quick_check: bool = False) -> bool:
         self.logger.info(f"🔗 تلاش برای رفتن به لینک: {self.start_link}")
 
         try:
@@ -1427,7 +1438,11 @@ class TelegramChannelScraper:
             await human_sleep(1.5, 0.3)
             await page.keyboard.press("Enter")
             self.logger.info("⏳ منتظر نتایج جستجو...")
-            await human_sleep(5, 0.5)
+            # ★★★ زمان کمتر در حالت سریع ★★★
+            if quick_check:
+                await human_sleep(3, 0.5)
+            else:
+                await human_sleep(5, 0.5)
             await self._take_screenshot(page, "search_results_loaded")
 
             clicked = False
@@ -1481,8 +1496,16 @@ class TelegramChannelScraper:
                 return False
 
             # ─── مرحله ۱: منتظر بارگذاری پیام‌ها ──────────────────
+            timeout_value = 8000 if quick_check else 20000
             try:
-                await page.wait_for_selector('div[data-message-id]', timeout=20000)
+                await page.wait_for_selector('div[data-message-id]', timeout=timeout_value)
+            except Exception:
+                if quick_check:
+                    self.logger.info(f"⚡ پست {self.target_msg_id} سریعاً پیدا نشد → احتمالاً حذف شده")
+                    return False   # زود برگرد
+                else:
+                    self.logger.warning("⚠️ پیام‌ها با timeout بارگذاری نشدند. تلاش با روش‌های جایگزین...")
+                    # ادامه می‌دهیم تا مراحل بعدی اجرا شوند
                 self.logger.info("✅ پیام‌ها در صفحه بارگذاری شدند.")
                 await self._take_screenshot(page, "messages_loaded")
             except Exception:
