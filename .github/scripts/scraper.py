@@ -403,12 +403,19 @@ class TelegramChannelScraper:
             self.logger.critical(f"❌ خطای مرگبار: {e}", exc_info=True)
 
     async def _run_impl(self):
+        # ─── خواندن start_link از config ──────────────────────────
+        # start_link ممکن است در config تنظیم شده باشد
+        self.start_link = getattr(self.config, 'start_link', None)
+        self.target_msg_id = None
+
         if self.start_link:
             self.logger.info(f"🚀 شروع اسکریپر با لینک: {self.start_link} (limit={self.limit})")
         else:
             self.logger.info(f"🚀 شروع اسکریپر مستقل برای @{self.channel} (limit={self.limit})")
-        last_post_id = None  # ← مقداردهی اولیه برای جلوگیری از UnboundLocalError
-        # ─── بارگذاری وضعیت قبلی (اگر resume فعال باشد) ───
+
+        last_post_id = None
+
+        # ─── بارگذاری وضعیت قبلی برای resume و fallback ──────────
         if getattr(self.config, 'resume', False):
             state = self._load_resume_state()
             if state:
@@ -420,47 +427,35 @@ class TelegramChannelScraper:
                 if downloaded_posts:
                     try:
                         downloaded_ids = sorted([int(id) for id in downloaded_posts if id.isdigit()])
-                        # ─── لاگ‌های دیباگ ──────────────────────────────────
                         self.logger.info(f"🐞 downloaded_ids: {downloaded_ids[:10]} ... (تعداد: {len(downloaded_ids)})")
-        
                         try:
                             last_index = downloaded_ids.index(int(last_post_id))
                         except ValueError:
                             last_index = len(downloaded_ids) - 1
                         self.logger.info(f"🐞 last_index: {last_index}")
-        
                         for i in range(last_index - 1, -1, -1):
                             fallback_ids.append(str(downloaded_ids[i]))
                     except Exception as e:
                         self.logger.warning(f"⚠️ خطا در ساخت لیست fallback: {e}")
                 self.logger.info(f"🐞 fallback_ids: {fallback_ids[:10]} ... (تعداد: {len(fallback_ids)})")
-                # ذخیره لیست fallback برای استفاده در حلقه اصلی
                 self._fallback_ids = fallback_ids
-                self._fallback_index = 0  # برای پیگیری اندیس فعلی
-                
-        # ─── بارگذاری وضعیت قبلی (اگر resume فعال باشد) ───
-        if getattr(self.config, 'resume', False):
-            state = self._load_resume_state()
-            if state:
-                last_post_id = state.get('last_post_id')
+                self._fallback_index = 0
+
+                # ★★★ اگر resume_state وجود دارد، start_link را override کن ★★★
                 if last_post_id:
-                    # استفاده از خود آخرین پست به عنوان نقطه شروع (بدون حدس شناسه)
                     self.start_link = f"https://t.me/{self.channel}/{last_post_id}"
                     self.target_msg_id = str(last_post_id)
                     self.logger.info(f"🔄 ادامه از آخرین پست دانلودشده: {last_post_id}")
                 else:
-                    self.logger.info("ℹ️ resume_state خالی است، از ابتدا شروع می‌شود.")
-                    self.start_link = None
-                    self.target_msg_id = None
+                    # resume_state خالی است، از start_link قبلی (که از config آمده) استفاده کن
+                    self.logger.info("ℹ️ resume_state خالی است، از start_link موجود استفاده می‌شود.")
             else:
-                self.logger.info("ℹ️ resume فعال است اما وضعیتی وجود ندارد، از ابتدا شروع می‌شود.")
-                self.start_link = None
-                self.target_msg_id = None
+                # resume فعال است ولی فایل state وجود ندارد
+                self.logger.info("ℹ️ resume فعال است اما وضعیتی وجود ندارد، از start_link موجود استفاده می‌شود.")
+                # start_link همان مقداری که از config گرفته شده، باقی می‌ماند
         else:
-            self.logger.info("ℹ️ resume غیرفعال است، از ابتدا شروع می‌شود.")
-            self.start_link = None
-            self.target_msg_id = None
-        
+            self.logger.info(f"ℹ️ resume غیرفعال است، از start_link موجود استفاده می‌شود: {self.start_link}")
+        # start_link همان مقداری که از config گرفته شده، باقی می‌ماند
         # ─── اگر fallback تمام شد، حدس شناسه‌های قبلی (به‌عنوان آخرین راه) ───
         # این بخش باید بعد از بارگذاری resume و در سطح _run_impl باشد،
         # اما در حلقه while اجرا می‌شود (قبلاً اضافه شده است).            
