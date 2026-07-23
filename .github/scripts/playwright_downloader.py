@@ -244,12 +244,13 @@ class PlaywrightDownloader:
             logger.info(f"   🖼️ تعداد تقریبی مدیا: {visible_count} | شروع دانلود...")
 
         downloaded_files = []
-        self._save_debug_on_failure = False   # ← این خط جدید
+        self._save_debug_on_failure = False
         file_index = 0
         seen_suggested = set()
+        should_stop = False  # ★★★ متغیر جدید برای تشخیص رد شدن فایل
 
         async def on_download(download: Download):
-            nonlocal file_index, seen_suggested
+            nonlocal file_index, seen_suggested, should_stop  # ★★★ اضافه شد
             try:
                 suggested = download.suggested_filename or f"unknown_{int(time.time())}_{file_index}.bin"
 
@@ -274,6 +275,7 @@ class PlaywrightDownloader:
                 if size_mb > self.max_bytes / (1024 * 1024):
                     logger.info(f"⏩ رد شد (حجم زیاد): {filepath.name}")
                     filepath.unlink(missing_ok=True)
+                    should_stop = True  # ★★★
                 else:
                     logger.info(f"✅ دانلود شد: {filepath.name} ({size_mb:.1f} MB)")
                     downloaded_files.append(f"media/{filepath.name}")
@@ -394,6 +396,11 @@ class PlaywrightDownloader:
                         waited += check_interval
                         current_count = len(downloaded_files)
 
+                        # ★★★ اگر فایل رد شد، فوری خارج شو ★★★
+                        if should_stop:
+                            logger.info(f"   ⏭️ فایل به دلیل حجم زیاد رد شد. ادامه به پست بعدی...")
+                            break
+
                         if current_count > last_count:
                             # دانلود جدید رخ داده
                             last_count = current_count
@@ -406,7 +413,7 @@ class PlaywrightDownloader:
                         else:
                             quiet_elapsed += check_interval
                             logger.debug(f"   ⏳ {waited}s – {current_count} فایل، {quiet_elapsed}s سکوت")
-
+                            
                             # اگر هنوز اولین دانلود رخ نداده و به آستانه سکوت رسیدیم
                             if not has_first_download and quiet_elapsed >= first_download_quiet_threshold:
                                 # تمدید زمان با استفاده از TimeoutManager
