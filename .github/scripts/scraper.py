@@ -193,7 +193,25 @@ class TelegramChannelScraper:
     @staticmethod
     def _sanitize_filename(name: str) -> str:
         return re.sub(r'[<>:"/\\|?*]', '_', name).strip()
+    @staticmethod
+    def _clean_id(msg_id: str) -> str:
+        """پاک‌سازی شناسه پیام: تبدیل به عدد صحیح و برگرداندن به صورت رشته"""
+        if not msg_id:
+            return msg_id
+        try:
+            cleaned = str(int(float(msg_id)))
+            if cleaned != msg_id:
+                logging.getLogger("TelegramScraper").debug(f"ID cleaned: {msg_id} → {cleaned}")
+            return cleaned
+        except (ValueError, TypeError):
+            return str(msg_id).strip()
 
+    def _int_id(self, post_id: str) -> int:
+        """تبدیل شناسه به int بعد از پاک‌سازی"""
+        try:
+            return int(self._clean_id(post_id))
+        except (ValueError, TypeError):
+            return 0
     # ═══════════════════ متد واحد برای اسکرین‌شات ═══════════════════
     async def _screenshot(self, page, name: str, full_page: bool = True, element=None):
         try:
@@ -362,8 +380,9 @@ class TelegramChannelScraper:
             () => {
                 const posts = [];
                 document.querySelectorAll('[data-message-id]').forEach(el => {
-                    const msgId = el.getAttribute('data-message-id');
+                    let msgId = el.getAttribute('data-message-id');
                     if (!msgId) return;
+                    msgId = String(parseInt(parseFloat(msgId)));
                     const textEl = el.querySelector('.text, .message-text, [data-text]');
                     const text = textEl ? textEl.innerText.trim() : '';
                     const dateEl = el.querySelector('.date, .time, [data-date]');
@@ -426,7 +445,7 @@ class TelegramChannelScraper:
                 downloaded_ids = []
                 if downloaded_posts:
                     try:
-                        downloaded_ids = sorted([int(id) for id in downloaded_posts if id.isdigit()])
+                        downloaded_ids = sorted([self._int_id(id) for id in downloaded_posts if self._clean_id(id).isdigit()])
                         self.logger.info(f"🐞 downloaded_ids: {downloaded_ids[:10]} ... (تعداد: {len(downloaded_ids)})")
                         try:
                             last_index = downloaded_ids.index(int(last_post_id))
@@ -569,7 +588,7 @@ class TelegramChannelScraper:
 
             # ─── تشخیص شکاف‌های واقعی با JS ──────────────────
             if newly_added:
-                newly_added_sorted = sorted(newly_added, key=lambda x: int(x['id']))
+                newly_added_sorted = sorted(newly_added, key=lambda x: self._int_id(x['id']))
                 complete_list = []
     
                 for i in range(len(newly_added_sorted) - 1):
@@ -655,7 +674,7 @@ class TelegramChannelScraper:
             # به‌روزرسانی start_link با آخرین پست جدید
                         # ─── به‌روزرسانی start_link فقط اگر دور آخر نباشیم ───
             if not is_last_round and new_items:          # ← مهم: استفاده از new_items
-                all_fetched_sorted = sorted(new_items, key=lambda x: int(x['id']))
+                all_fetched_sorted = sorted(new_items, key=lambda x: self._int_id(x['id']))
                 
                 if self.scroll_direction == 'up':
                     anchor_item = all_fetched_sorted[0]      # قدیمی‌ترین
@@ -735,7 +754,8 @@ class TelegramChannelScraper:
                 self.logger.info(f"⬇️ شروع دانلود {len(fetched_missing_items)} پست واکشی‌شده...")
                 try:
                     # مرتب‌سازی پست‌های واکشی‌شده
-                    fetched_sorted = sorted(fetched_missing_items, key=lambda x: int(x['id']))
+                    fetched_sorted = sorted(fetched_missing_items, key=lambda x: self._int_id(x['id']))
+
                     # دانلود با همان page و context
                     missing_media_map, missing_downloaded, missing_failed = await self._download_media(
                         fetched_sorted, page, context
@@ -1090,7 +1110,7 @@ class TelegramChannelScraper:
                     # ─── تشخیص نوع msg (دیکشنری یا المان Playwright) ───
                     if isinstance(msg, dict):
                         # msg از _extract_posts_from_page آمده است
-                        msg_id = msg.get('id')
+                        msg_id = self._clean_id(msg.get('id'))
                         
                         # ★★★ اگر قبلاً پردازش شده، رد کن
                         if msg_id in processed_ids:
@@ -1110,7 +1130,7 @@ class TelegramChannelScraper:
                         # msg المان Playwright است
                         msg_id = await msg.get_attribute('data-message-id')
                         if msg_id:
-                            msg_id = str(int(float(msg_id)))
+                            msg_id = self._clean_id(msg_id)
                         
                         # ★★★ اگر قبلاً پردازش شده، رد کن
                         if msg_id in processed_ids:
@@ -1407,14 +1427,11 @@ class TelegramChannelScraper:
 
         # === پاک‌سازی target_msg_id (جلوگیری از اعشار) ===
         if self.target_msg_id:
-            try:
-                cleaned_id = str(int(float(self.target_msg_id)))
-                if cleaned_id != self.target_msg_id:
-                    self.logger.warning(f"⚠️ target_msg_id تصحیح شد: {self.target_msg_id} → {cleaned_id}")
-                    self.target_msg_id = cleaned_id
-                    self.start_link = f"https://t.me/{self.channel}/{cleaned_id}"
-            except Exception as e:
-                self.logger.error(f"خطا در پاک‌سازی target_msg_id: {e}")
+            cleaned_id = self._clean_id(self.target_msg_id)
+            if cleaned_id != self.target_msg_id:
+                self.logger.warning(f"⚠️ target_msg_id تصحیح شد: {self.target_msg_id} → {cleaned_id}")
+                self.target_msg_id = cleaned_id
+                self.start_link = f"https://t.me/{self.channel}/{cleaned_id}"
 
         async def perform_search_and_click():
             search_input = None
@@ -1735,7 +1752,7 @@ class TelegramChannelScraper:
                 all_items.append({'id': post_id, 'text': caption})
         
         # مرتب‌سازی بر اساس شناسه
-        all_items.sort(key=lambda x: int(x['id']))
+        all_items.sort(key=lambda x: self._int_id(x['id']))
         
         # ─── نوشتن گزارش ──────────────────────────────────────────────
         with open(report_path, 'w', encoding='utf-8') as f:
@@ -1749,7 +1766,7 @@ class TelegramChannelScraper:
             f.write("✅ پست‌های دانلود شده (موفق):\n")
             f.write("-" * 40 + "\n")
             if all_successful:
-                for i, post_id in enumerate(sorted(all_successful, key=int), 1):
+                for i, post_id in enumerate(sorted(all_successful, key=lambda x: self._int_id(x)), 1):
                     url = f"https://t.me/{self.channel}/{post_id}"
                     count = len(media_map.get(post_id, []))
                     # اگر پست در media_map نبود (از قبلی)، از previous_successful استفاده کن
@@ -1768,7 +1785,7 @@ class TelegramChannelScraper:
             f.write("❌ پست‌های ناموفق (شکست خورده):\n")
             f.write("-" * 40 + "\n")
             if all_failed:
-                sorted_failed = sorted(all_failed.values(), key=lambda x: int(x['id']))
+                sorted_failed = sorted(all_failed.values(), key=lambda x: self._int_id(x['id']))
                 for i, item in enumerate(sorted_failed, 1):
                     post_id = item['id']
                     reason = item.get('reason', 'نامشخص')
@@ -1810,7 +1827,7 @@ class TelegramChannelScraper:
             if unprocessed:
                 f.write("⚠️ پست‌های پردازش نشده:\n")
                 f.write("-" * 40 + "\n")
-                for i, post_id in enumerate(sorted(unprocessed, key=int), 1):
+                for i, post_id in enumerate(sorted(unprocessed, key=lambda x: self._int_id(x)), 1):
                     url = f"https://t.me/{self.channel}/{post_id}"
                     caption = post_text.get(post_id, '')
                     caption_summary = caption[:50] + ('...' if len(caption) > 50 else '')
