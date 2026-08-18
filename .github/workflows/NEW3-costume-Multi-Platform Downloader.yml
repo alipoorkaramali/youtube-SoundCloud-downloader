@@ -39,161 +39,595 @@ jobs:
       - name: 📥 دریافت فایل‌های مخزن
         uses: actions/checkout@v4
 
-      # ============= رمزگشایی فایل کوکی =============
+      # ============================================================
+      # رمزگشایی فایل کوکی
+      # ============================================================
       - name: 🔐 رمزگشایی فایل cookies.txt.gpg
         run: |
           if [ ! -f "config/cookies.txt.gpg" ]; then
             echo "❌ خطا: فایل cookies.txt.gpg در مخزن یافت نشد!"
             exit 1
           fi
-          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt config/cookies.txt.gpg > cookies.txt
+
+          if [ -z "${{ secrets.COOKIE_DECRYPT_KEY }}" ]; then
+            echo "❌ خطا: Secret با نام COOKIE_DECRYPT_KEY تنظیم نشده است!"
+            exit 1
+          fi
+
+          gpg --batch \
+              --yes \
+              --pinentry-mode loopback \
+              --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
+              --decrypt config/cookies.txt.gpg > cookies.txt || {
+                echo "❌ خطا در رمزگشایی فایل cookies.txt.gpg"
+                exit 1
+              }
+
           if [ -s cookies.txt ]; then
             echo "✅ فایل cookies.txt با موفقیت رمزگشایی شد."
           else
-            echo "❌ خطا: رمزگشایی ناموفق بود یا فایل کوکی خالی است."
+            echo "❌ خطا: فایل کوکی خالی است."
             exit 1
           fi
-      # ==============================================
 
-      # ============= نصب و کش yt-dlp و ffmpeg =============
-      - name: ⚙️ نصب yt‑dlp و ffmpeg (با کش خودکار)
+          chmod 600 cookies.txt
+
+      # ============================================================
+      # نصب و کش yt-dlp و ffmpeg
+      # ============================================================
+      - name: ⚙️ نصب yt-dlp و ffmpeg (با کش خودکار)
         uses: AnimMouse/setup-yt-dlp@v3
         with:
           ejs-node: true
           aria2: true
           ffmpeg: true
-      # ====================================================
+          nightly: true
 
+      # ============================================================
+      # بررسی نسخه ابزارها
+      # ============================================================
+      - name: 🔍 بررسی نسخه yt-dlp و ffmpeg
+        run: |
+          echo "=============================================="
+          echo "🔍 yt-dlp version"
+          yt-dlp --version
+
+          echo ""
+          echo "🔍 ffmpeg version"
+          ffmpeg -version | head -1
+
+          echo ""
+          echo "🔍 Python version"
+          python3 --version
+
+          echo "=============================================="
+
+      # ============================================================
+      # نصب PO Token Provider
+      # ============================================================
+      - name: 📦 نصب افزونه PO Token برای YouTube
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade bgutil-ytdlp-pot-provider
+
+          echo "=============================================="
+          echo "✅ bgutil-ytdlp-pot-provider نصب شد."
+          echo "=============================================="
+
+      # ============================================================
+      # پاکسازی پوشه دانلود
+      # ============================================================
       - name: 🧹 پاکسازی پوشهٔ دانلود (فقط برای دانلودهای دستی)
         if: github.event.inputs.folder != 'audio_downloads'
-        run: rm -rf "${{ github.event.inputs.folder }}"/*
+        run: |
+          mkdir -p "${{ github.event.inputs.folder }}"
+          rm -rf "${{ github.event.inputs.folder }}"/*
+          echo "🧹 پوشه دانلود پاکسازی شد."
 
-      # ================= YouTube =================
+      # ============================================================
+      # YouTube - دانلود ویدئو
+      # ============================================================
       - name: ▶️ یوتیوب | دانلود ویدئو (MP4)
         if: github.event.inputs.platform == 'youtube' && github.event.inputs.format == 'video'
         run: |
-          mkdir -p "${{ github.event.inputs.folder }}"
-          yt-dlp -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
-            --merge-output-format mp4 \
+          set -e
+
+          DOWNLOAD_DIR="${{ github.event.inputs.folder }}"
+          URL="${{ github.event.inputs.url }}"
+
+          mkdir -p "$DOWNLOAD_DIR"
+
+          echo "=============================================="
+          echo "▶️ شروع دانلود YouTube"
+          echo "🔗 URL: $URL"
+          echo "📁 پوشه: $DOWNLOAD_DIR"
+          echo "=============================================="
+
+          yt-dlp \
             --cookies cookies.txt \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            --no-playlist \
+            --no-overwrites \
+            --continue \
+            --retries 30 \
+            --fragment-retries 30 \
+            --extractor-retries 15 \
+            --file-access-retries 15 \
+            --retry-sleep "http:exp=1:20" \
+            --retry-sleep "fragment:exp=1:20" \
+            --sleep-requests 2 \
             --sleep-interval 5 \
             --max-sleep-interval 15 \
-            --sleep-requests 2 \
+            --concurrent-fragments 4 \
+            --js-runtimes node \
+            --extractor-args "youtube:player_client=web,android,ios,web_embedded" \
+            --extractor-args "youtube:skip=webpage,age_gate" \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            --merge-output-format mp4 \
+            -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best" \
+            --remux-video mp4 \
             --force-overwrites \
-            "${{ github.event.inputs.url }}" \
-            -o "${{ github.event.inputs.folder }}/%(title)s.%(ext)s"
+            --progress \
+            "$URL" \
+            -o "$DOWNLOAD_DIR/%(title)s.%(ext)s"
 
+          echo ""
+          echo "=============================================="
+          echo "🔍 بررسی فایل دانلودشده"
+          echo "=============================================="
+
+          find "$DOWNLOAD_DIR" -maxdepth 1 -type f -print
+
+          DOWNLOADED_FILE=$(find "$DOWNLOAD_DIR" -maxdepth 1 -type f \
+            \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" \) \
+            -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+
+          if [ -z "$DOWNLOADED_FILE" ]; then
+            echo "❌ هیچ فایل ویدیویی دانلود نشد!"
+            echo ""
+            echo "📂 محتویات پوشه:"
+            ls -lah "$DOWNLOAD_DIR"
+            exit 1
+          fi
+
+          echo "✅ فایل با موفقیت دانلود شد:"
+          echo "$DOWNLOADED_FILE"
+
+      # ============================================================
+      # YouTube - دانلود صوت
+      # ============================================================
       - name: ▶️ یوتیوب | دانلود صوت (MP3)
         if: github.event.inputs.platform == 'youtube' && github.event.inputs.format == 'audio'
         run: |
-          mkdir -p "${{ github.event.inputs.folder }}"
-          yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" \
-            --audio-format mp3 \
-            --audio-quality 0 \
+          set -e
+
+          DOWNLOAD_DIR="${{ github.event.inputs.folder }}"
+          URL="${{ github.event.inputs.url }}"
+
+          mkdir -p "$DOWNLOAD_DIR"
+
+          echo "=============================================="
+          echo "▶️ شروع دانلود صوت از YouTube"
+          echo "🔗 URL: $URL"
+          echo "📁 پوشه: $DOWNLOAD_DIR"
+          echo "=============================================="
+
+          yt-dlp \
             --cookies cookies.txt \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            --no-playlist \
+            --no-overwrites \
+            --continue \
+            --retries 30 \
+            --fragment-retries 30 \
+            --extractor-retries 15 \
+            --file-access-retries 15 \
+            --retry-sleep "http:exp=1:20" \
+            --retry-sleep "fragment:exp=1:20" \
+            --sleep-requests 2 \
             --sleep-interval 5 \
             --max-sleep-interval 15 \
-            --sleep-requests 2 \
+            --concurrent-fragments 4 \
+            --js-runtimes node \
+            --extractor-args "youtube:player_client=web,android,ios,web_embedded" \
+            --extractor-args "youtube:skip=webpage,age_gate" \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            -f "bestaudio[ext=m4a]/bestaudio/best" \
+            -x \
+            --audio-format mp3 \
+            --audio-quality 0 \
             --force-overwrites \
-            --no-playlist \
-            "${{ github.event.inputs.url }}" \
-            -o "${{ github.event.inputs.folder }}/%(title)s.%(ext)s"
+            --progress \
+            "$URL" \
+            -o "$DOWNLOAD_DIR/%(title)s.%(ext)s"
 
-      # ================= SoundCloud =================
+          echo ""
+          echo "=============================================="
+          echo "🔍 بررسی فایل صوتی دانلودشده"
+          echo "=============================================="
+
+          find "$DOWNLOAD_DIR" -maxdepth 1 -type f -print
+
+          DOWNLOADED_FILE=$(find "$DOWNLOAD_DIR" -maxdepth 1 -type f \
+            \( -iname "*.mp3" -o -iname "*.m4a" -o -iname "*.opus" -o -iname "*.wav" \) \
+            -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+
+          if [ -z "$DOWNLOADED_FILE" ]; then
+            echo "❌ هیچ فایل صوتی دانلود نشد!"
+            echo ""
+            echo "📂 محتویات پوشه:"
+            ls -lah "$DOWNLOAD_DIR"
+            exit 1
+          fi
+
+          echo "✅ فایل صوتی با موفقیت دانلود شد:"
+          echo "$DOWNLOADED_FILE"
+
+      # ============================================================
+      # SoundCloud - دانلود صوت
+      # ============================================================
       - name: ☁️ ساندکلاد | دانلود صوت (MP3)
         if: github.event.inputs.platform == 'soundcloud' && github.event.inputs.format == 'audio'
         run: |
-          mkdir -p "${{ github.event.inputs.folder }}"
-          yt-dlp -x --audio-format mp3 --audio-quality 0 \
+          set -e
+
+          DOWNLOAD_DIR="${{ github.event.inputs.folder }}"
+          URL="${{ github.event.inputs.url }}"
+
+          mkdir -p "$DOWNLOAD_DIR"
+
+          echo "=============================================="
+          echo "☁️ شروع دانلود صوت از SoundCloud"
+          echo "🔗 URL: $URL"
+          echo "📁 پوشه: $DOWNLOAD_DIR"
+          echo "=============================================="
+
+          yt-dlp \
             --no-playlist \
+            --no-overwrites \
+            --continue \
             --force-ipv4 \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            --retries 30 \
+            --fragment-retries 30 \
+            --extractor-retries 15 \
+            --file-access-retries 15 \
+            --retry-sleep "http:exp=1:20" \
+            --retry-sleep "fragment:exp=1:20" \
+            --sleep-requests 2 \
             --sleep-interval 5 \
             --max-sleep-interval 15 \
-            --sleep-requests 2 \
-            "${{ github.event.inputs.url }}" \
-            -o "${{ github.event.inputs.folder }}/%(title)s.%(ext)s"
+            --concurrent-fragments 4 \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            -f "bestaudio/best" \
+            -x \
+            --audio-format mp3 \
+            --audio-quality 0 \
+            --force-overwrites \
+            --progress \
+            "$URL" \
+            -o "$DOWNLOAD_DIR/%(title)s.%(ext)s"
 
+          echo ""
+          echo "=============================================="
+          echo "🔍 بررسی فایل صوتی SoundCloud"
+          echo "=============================================="
+
+          find "$DOWNLOAD_DIR" -maxdepth 1 -type f -print
+
+          DOWNLOADED_FILE=$(find "$DOWNLOAD_DIR" -maxdepth 1 -type f \
+            \( -iname "*.mp3" -o -iname "*.m4a" -o -iname "*.opus" -o -iname "*.wav" \) \
+            -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+
+          if [ -z "$DOWNLOADED_FILE" ]; then
+            echo "❌ هیچ فایل صوتی از SoundCloud دانلود نشد!"
+            echo ""
+            echo "📂 محتویات پوشه:"
+            ls -lah "$DOWNLOAD_DIR"
+            exit 1
+          fi
+
+          echo "✅ فایل صوتی SoundCloud با موفقیت دانلود شد:"
+          echo "$DOWNLOADED_FILE"
+
+      # ============================================================
+      # SoundCloud - دانلود ویدئو
+      # ============================================================
       - name: ☁️ ساندکلاد | دانلود ویدئو (در صورت وجود)
         if: github.event.inputs.platform == 'soundcloud' && github.event.inputs.format == 'video'
         run: |
-          mkdir -p "${{ github.event.inputs.folder }}"
-          yt-dlp -f bestvideo+bestaudio/best --merge-output-format mp4 \
+          set -e
+
+          DOWNLOAD_DIR="${{ github.event.inputs.folder }}"
+          URL="${{ github.event.inputs.url }}"
+
+          mkdir -p "$DOWNLOAD_DIR"
+
+          echo "=============================================="
+          echo "☁️ شروع دانلود ویدئو از SoundCloud"
+          echo "🔗 URL: $URL"
+          echo "📁 پوشه: $DOWNLOAD_DIR"
+          echo "=============================================="
+
+          yt-dlp \
             --no-playlist \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            --no-overwrites \
+            --continue \
+            --force-ipv4 \
+            --retries 30 \
+            --fragment-retries 30 \
+            --extractor-retries 15 \
+            --file-access-retries 15 \
+            --retry-sleep "http:exp=1:20" \
+            --retry-sleep "fragment:exp=1:20" \
+            --sleep-requests 2 \
             --sleep-interval 5 \
             --max-sleep-interval 15 \
-            --sleep-requests 2 \
-            "${{ github.event.inputs.url }}" \
-            -o "${{ github.event.inputs.folder }}/%(title)s.%(ext)s"
+            --concurrent-fragments 4 \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            -f "bestvideo+bestaudio/best" \
+            --merge-output-format mp4 \
+            --remux-video mp4 \
+            --force-overwrites \
+            --progress \
+            "$URL" \
+            -o "$DOWNLOAD_DIR/%(title)s.%(ext)s"
 
-      # ================= تقسیم فایل‌های بزرگ به قطعات ۳۰ مگابایتی =================
+          echo ""
+          echo "=============================================="
+          echo "🔍 بررسی فایل ویدیویی SoundCloud"
+          echo "=============================================="
+
+          find "$DOWNLOAD_DIR" -maxdepth 1 -type f -print
+
+          DOWNLOADED_FILE=$(find "$DOWNLOAD_DIR" -maxdepth 1 -type f \
+            \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" \) \
+            -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+
+          if [ -z "$DOWNLOADED_FILE" ]; then
+            echo "❌ هیچ فایل ویدیویی از SoundCloud دانلود نشد!"
+            echo ""
+            echo "📂 محتویات پوشه:"
+            ls -lah "$DOWNLOAD_DIR"
+            exit 1
+          fi
+
+          echo "✅ فایل ویدیویی SoundCloud با موفقیت دانلود شد:"
+          echo "$DOWNLOADED_FILE"
+
+      # ============================================================
+      # بررسی نهایی فایل قبل از Split
+      # ============================================================
+      - name: 🔎 بررسی نهایی فایل دانلودشده
+        run: |
+          FOLDER="${{ github.event.inputs.folder }}"
+
+          echo "=============================================="
+          echo "🔎 فایل‌های موجود در پوشه دانلود"
+          echo "=============================================="
+
+          ls -lah "$FOLDER"
+
+          FILE_COUNT=$(find "$FOLDER" -maxdepth 1 -type f | wc -l)
+
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "❌ هیچ فایل نهایی در پوشه وجود ندارد!"
+            exit 1
+          fi
+
+          echo ""
+          echo "📊 تعداد فایل‌های موجود: $FILE_COUNT"
+
+      # ============================================================
+      # تقسیم فایل‌های بزرگ به قطعات ۳۰ مگابایتی
+      # ============================================================
       - name: ✂️ تقسیم فایل‌های بزرگ (بیشتر از ۳۰MB) به ZIP چندبخشی
         run: |
           FOLDER="${{ github.event.inputs.folder }}"
+
           # آستانه ۳۰ مگابایت
           THRESHOLD=$((30 * 1024 * 1024))
-          find "$FOLDER" -type f -size +${THRESHOLD}c \( ! -name "*.zip" -o -name "*.mp4" -o -name "*.m4a" -o -name "*.mp3" \) | while read -r file; do
-            # از فایل‌هایی که قبلاً قطعه‌قطعه شده‌اند صرف نظر کن
-            if [[ "$file" =~ \.z[0-9]+$ ]] || [[ "$file" =~ \.part- ]]; then
-              continue
-            fi
-            SIZE=$(stat -c%s "$file")
-            BASENAME=$(basename "$file")
-            NAME="${BASENAME%.*}"
-            ZIPNAME="$FOLDER/${NAME}.zip"
-            echo "📦 تقسیم $file ($(numfmt --to=iec $SIZE)) به قطعات ۳۰ مگابایتی ..."
-            zip -s 30m -j "$ZIPNAME" "$file"
-            rm "$file"
-            echo "✅ فایل به قطعات ZIP تقسیم شد." > "$FOLDER/${NAME}_README.txt"
+
+          echo "=============================================="
+          echo "✂️ بررسی فایل‌های بزرگ‌تر از ۳۰MB"
+          echo "=============================================="
+
+          find "$FOLDER" \
+            -type f \
+            -size +${THRESHOLD}c \
+            ! -name "*.zip" \
+            ! -name "*.z01" \
+            ! -name "*.z02" \
+            ! -name "*.z03" \
+            ! -name "*.z04" \
+            ! -name "*.z05" \
+            ! -name "*.z06" \
+            ! -name "*.z07" \
+            ! -name "*.z08" \
+            ! -name "*.z09" \
+            ! -name "*.part-*" \
+            -print0 | while IFS= read -r -d '' file; do
+
+              if [[ "$file" =~ \.z[0-9]+$ ]] || [[ "$file" =~ \.part- ]]; then
+                echo "⏭️ فایل قبلاً تقسیم شده است: $file"
+                continue
+              fi
+
+              SIZE=$(stat -c%s "$file")
+              BASENAME=$(basename "$file")
+              NAME="${BASENAME%.*}"
+              ZIPNAME="$FOLDER/${NAME}.zip"
+
+              echo ""
+              echo "📦 فایل:"
+              echo "$file"
+
+              echo "📊 حجم:"
+              numfmt --to=iec "$SIZE"
+
+              echo "✂️ تقسیم به قطعات ۳۰ مگابایتی..."
+
+              zip -s 30m -j "$ZIPNAME" "$file"
+
+              if [ $? -eq 0 ]; then
+                rm "$file"
+
+                echo "✅ فایل به قطعات ZIP تقسیم شد."
+
+                echo "==============================================" \
+                  > "$FOLDER/${NAME}_README.txt"
+
+                echo "📦 فایل تقسیم‌شده به قطعات ZIP" \
+                  >> "$FOLDER/${NAME}_README.txt"
+
+                echo "📁 نام فایل اصلی: $BASENAME" \
+                  >> "$FOLDER/${NAME}_README.txt"
+
+                echo "📏 اندازه هر قطعه: 30 MB" \
+                  >> "$FOLDER/${NAME}_README.txt"
+
+                echo "==============================================" \
+                  >> "$FOLDER/${NAME}_README.txt"
+
+              else
+                echo "❌ خطا در تقسیم فایل: $file"
+                exit 1
+              fi
           done
 
-      # ================= ثبت زمان آپلود =================
-      - name: 🕒 ثبت زمان آپلود فایل‌های جدید
-        run: python .github/scripts/record_upload_time.py "${{ github.event.inputs.folder }}"
+          echo ""
+          echo "=============================================="
+          echo "📂 محتویات نهایی پوشه"
+          echo "=============================================="
 
-      # ================= ثبت فایل‌ها در مخزن با retry =================
+          ls -lah "$FOLDER"
+
+      # ============================================================
+      # ثبت زمان آپلود
+      # ============================================================
+      - name: 🕒 ثبت زمان آپلود فایل‌های جدید
+        run: |
+          python .github/scripts/record_upload_time.py \
+            "${{ github.event.inputs.folder }}"
+
+      # ============================================================
+      # ثبت فایل‌ها در مخزن با retry
+      # ============================================================
       - name: 🚀 ثبت فایل‌ها در مخزن (با retry و حل کانفلیکت)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           MAX_RETRIES=5
           RETRY_DELAY=10
-          
+
           for ((i=1; i<=MAX_RETRIES; i++)); do
+
+            echo "=============================================="
             echo "🔄 تلاش $i از $MAX_RETRIES برای commit و push..."
-            
+            echo "=============================================="
+
             git fetch origin main
-            git stash push --include-untracked -m "costume-stash-$i" || true
+
+            # --------------------------------------------------------
+            # ذخیره تغییرات فعلی
+            # --------------------------------------------------------
+            git stash push \
+              --include-untracked \
+              -m "costume-stash-$i" || true
+
+            # --------------------------------------------------------
+            # همگام‌سازی با آخرین وضعیت main
+            # --------------------------------------------------------
             git reset --hard origin/main
+
+            # --------------------------------------------------------
+            # برگرداندن فایل‌های دانلودشده و State
+            # --------------------------------------------------------
             git stash pop || true
-            
+
+            # --------------------------------------------------------
+            # بررسی Conflict
+            # --------------------------------------------------------
             if git status --porcelain | grep -E '^UU.*State/upload_times_'; then
-              echo "⚠️ کانفلیکت در فایل رکورد زمان. استفاده از نسخه راه‌دور..."
-              git checkout --theirs State\upload_times_*.txt 2>/dev/null || true
-              git add upload_times_*.txt
+
+              echo "⚠️ کانفلیکت در فایل رکورد زمان شناسایی شد."
+
+              for f in State/upload_times_*.txt; do
+
+                if [ -f "$f" ]; then
+
+                  echo "🔧 ادغام فایل: $f"
+
+                  git show :2:"$f" > "$f.local" 2>/dev/null || true
+                  git show :3:"$f" > "$f.remote" 2>/dev/null || true
+
+                  cat "$f.local" "$f.remote" 2>/dev/null \
+                    | sed '/^$/d' \
+                    | sort -u > "$f.merged"
+
+                  mv "$f.merged" "$f"
+
+                  rm -f "$f.local" "$f.remote"
+
+                  git add "$f"
+
+                fi
+
+              done
             fi
-            
-            git add "${{ github.event.inputs.folder }}" State/upload_times_*.txt || true
-            
+
+            # --------------------------------------------------------
+            # اضافه کردن فایل‌های دانلودشده
+            # --------------------------------------------------------
+            git add "${{ github.event.inputs.folder }}" || true
+
+            # --------------------------------------------------------
+            # اضافه کردن فایل‌های ثبت زمان
+            # --------------------------------------------------------
+            git add State/upload_times_*.txt 2>/dev/null || true
+
+            # --------------------------------------------------------
+            # بررسی اینکه تغییری برای Commit وجود دارد یا نه
+            # --------------------------------------------------------
             if git diff --staged --quiet; then
+
               echo "ℹ️ هیچ فایل جدیدی برای commit وجود ندارد."
+
+              git status --short
+
               exit 0
+
             fi
-            
-            git commit -m "افزودن فایل از ${{ github.event.inputs.platform }}"
-            
+
+            # --------------------------------------------------------
+            # Commit
+            # --------------------------------------------------------
+            git commit \
+              -m "افزودن فایل از ${{ github.event.inputs.platform }}"
+
+            # --------------------------------------------------------
+            # Push
+            # --------------------------------------------------------
             if git push origin main; then
+
+              echo "=============================================="
               echo "✅ پوش با موفقیت انجام شد."
+              echo "=============================================="
+
               exit 0
+
             else
-              echo "⚠️ تداخل در push. ${RETRY_DELAY} ثانیه صبر می‌شود..."
-              sleep $RETRY_DELAY
+
+              echo "⚠️ تداخل در push."
+
+              echo "⏳ ${RETRY_DELAY} ثانیه صبر می‌شود..."
+
+              sleep "$RETRY_DELAY"
+
             fi
+
           done
-          
+
+          echo "=============================================="
           echo "❌ پس از $MAX_RETRIES تلاش، پوش ناموفق بود."
+          echo "=============================================="
+
           exit 1
