@@ -88,6 +88,11 @@ jobs:
           aria2: true
           ffmpeg: true
 
+      - name: 🔄 Update yt-dlp
+        run: |
+          python -m pip install -U yt-dlp
+          yt-dlp --version
+
       - name: 📦 Install rclone (official with mega support)
         run: |
           curl https://rclone.org/install.sh | sudo bash
@@ -113,8 +118,13 @@ jobs:
           cd "${{ env.FOLDER }}"
           
           if [ "${{ env.PLATFORM }}" = "youtube" ]; then
-            yt-dlp -f "bestaudio[ext=m4a]/bestaudio/best" --audio-format mp3 --audio-quality 0 \
-              --cookies ../cookies.txt --no-playlist \
+            yt-dlp \
+              --extractor-args "youtube:player_client=android,web" \
+              -f "bestaudio[ext=m4a]/bestaudio/best" \
+              --audio-format mp3 \
+              --audio-quality 0 \
+              --cookies ../cookies.txt \
+              --no-playlist \
               "${{ env.URL }}" \
               -o "%(title)s.%(ext)s"
           else
