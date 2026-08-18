@@ -17,13 +17,13 @@ on:
         required: true
 
       type:
-        description: 'نوع محتوا (audio/video)'
+        description: 'نوع محتوا - برای YouTube همیشه Audio است'
         required: false
         default: 'audio'
         type: string
 
       quality:
-        description: 'کیفیت دانلود (best, worst, etc.)'
+        description: 'کیفیت دانلود'
         required: false
         default: 'best'
         type: string
@@ -52,23 +52,27 @@ on:
         required: false
         default: '100M'
 
+
   repository_dispatch:
     types:
       - trigger-download
 
 
 jobs:
+
   download:
     runs-on: ubuntu-latest
+
     timeout-minutes: 120
 
     permissions:
       contents: write
 
+
     steps:
 
       # ============================================================
-      # 1. Checkout Repository
+      # 1. دریافت Repository
       # ============================================================
 
       - name: 📥 Checkout Repository
@@ -76,48 +80,84 @@ jobs:
 
 
       # ============================================================
-      # 2. تنظیم متغیرها از تریگر فعال
+      # 2. تنظیم متغیرها از Trigger فعال
       # ============================================================
 
       - name: ⚙️ تنظیم متغیرها از تریگر فعال
         run: |
+
           echo "PLATFORM=${{ github.event.client_payload.platform || github.event.inputs.platform || 'youtube' }}" >> $GITHUB_ENV
+
           echo "URL=${{ github.event.client_payload.url || github.event.inputs.url }}" >> $GITHUB_ENV
+
           echo "CONTENT_TYPE=${{ github.event.client_payload.type || github.event.inputs.type || 'audio' }}" >> $GITHUB_ENV
+
           echo "QUALITY=${{ github.event.client_payload.quality || github.event.inputs.quality || 'best' }}" >> $GITHUB_ENV
+
           echo "FOLDER=${{ github.event.client_payload.folder || github.event.inputs.folder || 'news_downloads' }}" >> $GITHUB_ENV
+
           echo "MEGA_FOLDER=${{ github.event.client_payload.mega_folder || github.event.inputs.mega_folder || 'YoutubeNews' }}" >> $GITHUB_ENV
+
           echo "SPLIT_CHOICE=${{ github.event.client_payload.split_choice || github.event.inputs.split_choice || 'single' }}" >> $GITHUB_ENV
+
           echo "SPLIT_SIZE=${{ github.event.client_payload.split_size || github.event.inputs.split_size || '100M' }}" >> $GITHUB_ENV
 
 
       # ============================================================
-      # 3. رمزگشایی Cookies
+      # 3. نمایش تنظیمات نهایی
+      # ============================================================
+
+      - name: 🔎 نمایش تنظیمات اجرا
+        run: |
+
+          echo "=============================================="
+          echo "🚀 تنظیمات اجرای Workflow"
+          echo "=============================================="
+
+          echo "🌐 PLATFORM     = ${PLATFORM}"
+          echo "🔗 URL          = ${URL}"
+          echo "🎵 CONTENT_TYPE = ${CONTENT_TYPE}"
+          echo "⭐ QUALITY      = ${QUALITY}"
+          echo "📁 FOLDER       = ${FOLDER}"
+          echo "📂 MEGA_FOLDER  = ${MEGA_FOLDER}"
+          echo "✂️ SPLIT_CHOICE = ${SPLIT_CHOICE}"
+          echo "📦 SPLIT_SIZE   = ${SPLIT_SIZE}"
+
+          echo "=============================================="
+
+
+      # ============================================================
+      # 4. رمزگشایی Cookies
       # ============================================================
 
       - name: 🔐 Decrypt cookies
         run: |
+
           if [ ! -f config/cookies.txt.gpg ]; then
             echo "❌ فایل config/cookies.txt.gpg یافت نشد!"
             exit 1
           fi
 
+
           gpg \
             --batch \
             --yes \
             --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
-            --decrypt config/cookies.txt.gpg > cookies.txt
+            --decrypt config/cookies.txt.gpg \
+            > cookies.txt
+
 
           if [ ! -s cookies.txt ]; then
             echo "❌ رمزگشایی کوکی ناموفق بود یا فایل خالی است"
             exit 1
           fi
 
+
           echo "✅ کوکی با موفقیت رمزگشایی شد"
 
 
       # ============================================================
-      # 4. نصب yt-dlp + ffmpeg
+      # 5. نصب yt-dlp و ffmpeg
       # ============================================================
 
       - name: ⚙️ Setup yt-dlp + ffmpeg
@@ -129,44 +169,68 @@ jobs:
 
 
       # ============================================================
-      # 5. نصب و فعال‌سازی PO Token Provider
+      # 6. نصب آخرین yt-dlp + PO Token Provider
       # ============================================================
 
-      - name: 📦 Install PO Token Provider
+      - name: 📦 Install yt-dlp + PO Token Provider
         run: |
+
+          echo "🔄 Updating yt-dlp..."
+
           python3 -m pip install --upgrade yt-dlp
+
+
+          echo "🔄 Installing PO Token Provider..."
+
           python3 -m pip install --upgrade bgutil-ytdlp-pot-provider
 
-          echo "========================================"
-          echo "yt-dlp version:"
-          yt-dlp --version
-          echo "========================================"
 
-          echo "✅ yt-dlp + PO Token provider installed"
+          echo ""
+          echo "=============================================="
+          echo "📌 yt-dlp version"
+          echo "=============================================="
+
+          yt-dlp --version
+
+
+          echo ""
+          echo "=============================================="
+          echo "✅ yt-dlp + PO Token provider آماده است"
+          echo "=============================================="
 
 
       # ============================================================
-      # 6. نصب rclone
+      # 7. نصب rclone
       # ============================================================
 
       - name: 📦 Install rclone (official with Mega support)
         run: |
+
           curl https://rclone.org/install.sh | sudo bash
+
+          echo ""
+          echo "=============================================="
+          echo "📌 rclone version"
+          echo "=============================================="
+
           rclone version
 
 
       # ============================================================
-      # 7. رمزگشایی تنظیمات rclone
+      # 8. رمزگشایی rclone config
       # ============================================================
 
       - name: 🔓 Decrypt rclone config
         run: |
+
           mkdir -p ~/.config/rclone
+
 
           if [ ! -f config/rclone_mega.conf.gpg ]; then
             echo "❌ فایل config/rclone_mega.conf.gpg پیدا نشد!"
             exit 1
           fi
+
 
           gpg \
             --quiet \
@@ -177,29 +241,45 @@ jobs:
             --output ~/.config/rclone/rclone.conf \
             config/rclone_mega.conf.gpg
 
+
           chmod 600 ~/.config/rclone/rclone.conf
 
+
           echo "✅ rclone config loaded"
+
+
+          echo ""
+          echo "📌 Remoteهای موجود:"
 
           rclone listremotes
 
 
       # ============================================================
-      # 8. دانلود فایل
+      # 9. دانلود
       # ============================================================
 
       - name: ▶️ دانلود فایل
         id: download
         run: |
 
-          rm -rf "${{ env.FOLDER }}" 2>/dev/null || true
-          mkdir -p "${{ env.FOLDER }}"
+          echo "=============================================="
+          echo "🎬 شروع دانلود"
+          echo "=============================================="
 
-          cd "${{ env.FOLDER }}"
+
+          # --------------------------------------------------------
+          # پاک کردن پوشه قبلی
+          # --------------------------------------------------------
+
+          rm -rf "${FOLDER}" 2>/dev/null || true
+
+          mkdir -p "${FOLDER}"
+
+          cd "${FOLDER}"
 
 
           # ========================================================
-          # گزینه‌های مشترک yt-dlp
+          # گزینه‌های عمومی yt-dlp برای YouTube
           # ========================================================
 
           COMMON_OPTS="--cookies ../cookies.txt \
@@ -221,87 +301,136 @@ jobs:
           # YouTube
           # ========================================================
 
-          if [ "${{ env.PLATFORM }}" = "youtube" ]; then
+          if [ "${PLATFORM}" = "youtube" ]; then
 
-            echo "========================================"
+            echo ""
+            echo "=============================================="
             echo "🌐 Platform: YouTube"
-            echo "🎵 Content type: ${CONTENT_TYPE}"
-            echo "⭐ Quality: ${QUALITY}"
+            echo "=============================================="
+
             echo "🔗 URL: ${URL}"
-            echo "========================================"
+            echo "🎵 حالت: AUDIO ONLY"
+            echo "⭐ کیفیت: ${QUALITY}"
+            echo ""
+            echo "⚠️ توجه:"
+            echo "برای YouTube این Workflow فقط صوت دانلود می‌کند."
+            echo "هیچ فایل ویدئویی دانلود نخواهد شد."
+            echo "=============================================="
 
 
             # ------------------------------------------------------
-            # YouTube - Audio
+            # فقط Audio
             # ------------------------------------------------------
 
-            if [ "${CONTENT_TYPE}" = "audio" ]; then
-
-              echo "🎵 حالت Audio فعال شد"
-              echo "🎧 دریافت بهترین کیفیت صوتی و تبدیل به MP3..."
-
-              yt-dlp $COMMON_OPTS \
-                -f "bestaudio/best" \
-                -x \
-                --audio-format mp3 \
-                --audio-quality 0 \
-                "${URL}" \
-                -o "%(title)s.%(ext)s"
-
-
-            # ------------------------------------------------------
-            # YouTube - Video
-            # ------------------------------------------------------
-
-            else
-
-              echo "🎬 حالت Video فعال شد"
-              echo "📹 دریافت بهترین کیفیت ویدئو..."
-
-              yt-dlp $COMMON_OPTS \
-                -f "best" \
-                "${URL}" \
-                -o "%(title)s.%(ext)s"
-
-            fi
+            yt-dlp ${COMMON_OPTS} \
+              -f "bestaudio/best" \
+              -x \
+              --audio-format mp3 \
+              --audio-quality 0 \
+              "${URL}" \
+              -o "%(title)s.%(ext)s"
 
 
           # ========================================================
           # SoundCloud
           # ========================================================
 
+          elif [ "${PLATFORM}" = "soundcloud" ]; then
+
+            echo ""
+            echo "=============================================="
+            echo "🌐 Platform: SoundCloud"
+            echo "=============================================="
+
+            echo "🔗 URL: ${URL}"
+            echo "🎵 حالت: AUDIO ONLY"
+            echo "⭐ کیفیت: ${QUALITY}"
+            echo "=============================================="
+
+
+            yt-dlp \
+              --no-playlist \
+              -f "bestaudio/best" \
+              -x \
+              --audio-format mp3 \
+              --audio-quality 0 \
+              "${URL}" \
+              -o "%(title)s.%(ext)s"
+
+
           else
 
-            echo "========================================"
-            echo "🌐 Platform: SoundCloud"
-            echo "🎵 Content type: ${CONTENT_TYPE}"
-            echo "⭐ Quality: ${QUALITY}"
-            echo "🔗 URL: ${URL}"
-            echo "========================================"
+            echo "❌ پلتفرم ناشناخته است: ${PLATFORM}"
+            exit 1
+
+          fi
 
 
-            if [ "${CONTENT_TYPE}" = "audio" ]; then
+          # ========================================================
+          # پیدا کردن فایل دانلود شده
+          # ========================================================
 
-              echo "🎵 حالت Audio فعال شد"
+          DOWNLOADED_FILE=$(find . -maxdepth 1 -type f -printf '%f\n' | head -1)
 
-              yt-dlp \
-                --no-playlist \
-                -f "bestaudio/best" \
-                -x \
-                --audio-format mp3 \
-                --audio-quality 0 \
-                "${URL}" \
-                -o "%(title)s.%(ext)s"
 
-            else
+          if [ -z "$DOWNLOADED_FILE" ]; then
 
-              echo "🎬 حالت Video فعال شد"
+            echo ""
+            echo "❌ هیچ فایلی دانلود نشد!"
 
-              yt-dlp \
-                --no-playlist \
-                -f "best" \
-                "${URL}" \
-                -o "%(title)s.%(ext)s"
+            echo ""
+            echo "📁 محتویات پوشه:"
+
+            ls -lah
+
+            exit 1
+
+          fi
+
+
+          # ========================================================
+          # اطمینان از اینکه خروجی YouTube واقعاً MP3 است
+          # ========================================================
+
+          if [ "${PLATFORM}" = "youtube" ]; then
+
+            FILE_EXTENSION="${DOWNLOADED_FILE##*.}"
+
+            if [ "${FILE_EXTENSION,,}" != "mp3" ]; then
+
+              echo ""
+              echo "⚠️ فایل خروجی YouTube MP3 نیست:"
+              echo "📁 ${DOWNLOADED_FILE}"
+
+              echo ""
+              echo "🔄 تلاش برای تبدیل فایل به MP3..."
+
+              ORIGINAL_FILE="${DOWNLOADED_FILE}"
+
+              ffmpeg \
+                -y \
+                -i "${ORIGINAL_FILE}" \
+                -vn \
+                -codec:a libmp3lame \
+                -q:a 0 \
+                "${ORIGINAL_FILE%.*}.mp3"
+
+
+              if [ -f "${ORIGINAL_FILE%.*}.mp3" ]; then
+
+                rm -f "${ORIGINAL_FILE}"
+
+                DOWNLOADED_FILE="${ORIGINAL_FILE%.*}.mp3"
+
+                echo "✅ تبدیل به MP3 با موفقیت انجام شد"
+
+              else
+
+                echo "❌ تبدیل به MP3 ناموفق بود"
+
+                exit 1
+
+              fi
 
             fi
 
@@ -309,142 +438,210 @@ jobs:
 
 
           # ========================================================
-          # بررسی فایل دانلودشده
+          # ثبت اطلاعات فایل
           # ========================================================
 
-          DOWNLOADED_FILE=$(find . -maxdepth 1 -type f -printf '%f\n' | head -1)
+          FILE_TITLE=$(basename "$DOWNLOADED_FILE" | sed 's/\.[^.]*$//')
 
 
-          if [ -z "$DOWNLOADED_FILE" ]; then
-            echo "❌ هیچ فایلی دانلود نشد!"
-            echo ""
-            echo "📁 محتوای پوشه:"
-            ls -la
-            exit 1
-          fi
+          echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
+
+          echo "DOWNLOADED_FILE=${DOWNLOADED_FILE}" >> $GITHUB_ENV
 
 
           echo ""
-          echo "========================================"
+          echo "=============================================="
           echo "✅ دانلود با موفقیت انجام شد"
-          echo "📁 فایل: $DOWNLOADED_FILE"
-          echo "========================================"
+          echo "=============================================="
+
+          echo "📁 فایل: ${DOWNLOADED_FILE}"
+
+          echo "📏 حجم فایل:"
+
+          du -h "${DOWNLOADED_FILE}"
 
 
-          echo "FILE_TITLE=$(basename "$DOWNLOADED_FILE" | sed 's/\.[^.]*$//')" >> $GITHUB_ENV
-          echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
+          echo ""
+          echo "📂 محتویات پوشه:"
+
+          ls -lah
 
 
       # ============================================================
-      # 9. Split into ZIP volumes
+      # 10. Split into ZIP volumes
       # ============================================================
 
       - name: ✂️ Split into zip volumes (if requested)
         if: env.SPLIT_CHOICE == 'split'
         run: |
 
-          cd "${{ env.FOLDER }}"
+          cd "${FOLDER}"
 
-          FILE="${{ env.DOWNLOADED_FILE }}"
-          SIZE="${{ env.SPLIT_SIZE }}"
 
-          echo "========================================"
-          echo "✂️ شروع تقسیم فایل"
-          echo "📁 فایل: $FILE"
-          echo "📦 اندازه هر قسمت: $SIZE"
-          echo "========================================"
+          FILE="${DOWNLOADED_FILE}"
+
+          SIZE="${SPLIT_SIZE}"
+
+
+          echo "=============================================="
+          echo "✂️ تقسیم فایل به ZIP Volume"
+          echo "=============================================="
+
+          echo "📁 فایل: ${FILE}"
+          echo "📦 اندازه هر قسمت: ${SIZE}"
+
 
           sudo apt-get update
+
           sudo apt-get install -y zip
 
-          zip -s "$SIZE" "${FILE}.zip" "$FILE"
 
-          rm "$FILE"
+          echo ""
+          echo "📦 در حال ساخت ZIP چندبخشی..."
 
-          echo "✅ Zip volumes created"
+
+          zip \
+            -s "${SIZE}" \
+            "${FILE}.zip" \
+            "${FILE}"
+
+
+          rm -f "${FILE}"
+
+
+          echo ""
+          echo "✅ ZIP volumes created"
+
 
           echo ""
           echo "📁 فایل‌های ایجادشده:"
+
           ls -lah
+
 
           echo "DOWNLOADED_FILE=${FILE}.zip" >> $GITHUB_ENV
 
 
       # ============================================================
-      # 10. آپلود به Mega.nz
+      # 11. آپلود به Mega.nz
       # ============================================================
 
       - name: ☁️ آپلود به Mega.nz
         run: |
 
-          echo "========================================"
+          echo "=============================================="
           echo "☁️ شروع آپلود به Mega.nz"
-          echo "📂 مقصد: ${MEGA_FOLDER}"
-          echo "========================================"
+          echo "=============================================="
+
+          echo "📂 پوشه محلی:"
+          echo "   ${FOLDER}"
+
+          echo ""
+
+          echo "📂 پوشه مقصد:"
+          echo "   mega:${MEGA_FOLDER}"
+
+
+          echo ""
+          echo "📁 محتویات قبل از آپلود:"
+
+          ls -lah "${FOLDER}"
+
+
+          echo ""
+          echo "☁️ شروع Upload..."
+
 
           rclone copy \
-            "${{ env.FOLDER }}" \
-            "mega:${{ env.MEGA_FOLDER }}" \
+            "${FOLDER}" \
+            "mega:${MEGA_FOLDER}" \
             --progress \
             --transfers=4 \
             -vv
 
-          echo "========================================"
+
+          echo ""
+          echo "=============================================="
           echo "✅ آپلود به Mega.nz با موفقیت انجام شد"
-          echo "========================================"
+          echo "=============================================="
 
 
       # ============================================================
-      # 11. ثبت زمان آپلود
+      # 12. ثبت زمان آپلود
       # ============================================================
 
       - name: 🕒 ثبت زمان آپلود (فقط upload_times)
         run: |
 
           git config user.name "github-actions[bot]"
+
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
 
-          UPLOAD_TIMES_FILE="State/upload_times_${{ env.FOLDER }}.txt"
+          UPLOAD_TIMES_FILE="State/upload_times_${FOLDER}.txt"
+
+
+          echo "=============================================="
+          echo "🕒 ثبت زمان آپلود"
+          echo "=============================================="
 
 
           # --------------------------------------------------------
-          # 1. همسان‌سازی کامل branch محلی با remote
+          # همسان‌سازی branch محلی با remote
           # --------------------------------------------------------
 
           git fetch origin main
+
           git reset --hard origin/main
 
 
           # --------------------------------------------------------
-          # 2. اجرای اسکریپت record_upload_time
+          # اجرای اسکریپت ثبت زمان
           # --------------------------------------------------------
 
-          python .github/scripts/record_upload_time.py "${{ env.FOLDER }}"
+          python .github/scripts/record_upload_time.py "${FOLDER}"
 
 
           # --------------------------------------------------------
-          # 3. add, commit, push
+          # اضافه کردن فایل
           # --------------------------------------------------------
 
-          git add "$UPLOAD_TIMES_FILE"
+          git add "${UPLOAD_TIMES_FILE}"
 
+
+          # --------------------------------------------------------
+          # بررسی تغییرات
+          # --------------------------------------------------------
 
           if git diff --staged --quiet; then
+
             echo "ℹ️ هیچ تغییری برای commit وجود ندارد."
+
             exit 0
+
           fi
 
 
-          git commit \
-            -m "Update upload times for ${{ env.PLATFORM }} - ${{ env.URL }}"
+          # --------------------------------------------------------
+          # Commit
+          # --------------------------------------------------------
 
+          git commit \
+            -m "Update upload times for ${PLATFORM} - ${URL}"
+
+
+          # --------------------------------------------------------
+          # Push
+          # --------------------------------------------------------
 
           git push origin main
 
 
+          echo "✅ زمان آپلود ثبت شد"
+
+
       # ============================================================
-      # 12. ارسال نوتیفیکیشن Pushbullet
+      # 13. Pushbullet Notification
       # ============================================================
 
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
@@ -452,17 +649,26 @@ jobs:
         run: |
 
           if [ -z "${{ secrets.PB_TOKEN }}" ]; then
+
             echo "⚠️ سکرت PB_TOKEN تنظیم نشده، نوتیفیکیشن ارسال نشد"
+
             exit 0
+
           fi
 
 
           MESSAGE="✅ دانلود خودکار به مگا اضافه شد: 🎉 دانلود و آپلود خودکار با موفقیت انجام شد!"
 
-          MESSAGE="${MESSAGE}\n📁 پلتفرم: ${{ env.PLATFORM }}"
-          MESSAGE="${MESSAGE}\n🎬 عنوان: ${{ env.FILE_TITLE }}"
-          MESSAGE="${MESSAGE}\n📂 پوشه مقصد در مگا: ${{ env.MEGA_FOLDER }}"
-          MESSAGE="${MESSAGE}\n✂️ تقسیم: ${{ env.SPLIT_CHOICE }}"
+
+          MESSAGE="${MESSAGE}\n📁 پلتفرم: ${PLATFORM}"
+
+          MESSAGE="${MESSAGE}\n🎵 نوع: Audio / MP3"
+
+          MESSAGE="${MESSAGE}\n🎬 عنوان: ${FILE_TITLE}"
+
+          MESSAGE="${MESSAGE}\n📂 پوشه مقصد در مگا: ${MEGA_FOLDER}"
+
+          MESSAGE="${MESSAGE}\n✂️ تقسیم: ${SPLIT_CHOICE}"
 
 
           curl \
