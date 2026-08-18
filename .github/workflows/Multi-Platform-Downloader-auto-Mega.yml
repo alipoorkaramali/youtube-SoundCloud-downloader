@@ -120,7 +120,7 @@ jobs:
           if [ "${{ env.PLATFORM }}" = "youtube" ]; then
             yt-dlp \
               --extractor-args "youtube:player_client=web" \
-              -f "bestaudio[ext=m4a]/bestaudio/best" \
+              -f "bestaudio/best" \
               --audio-format mp3 \
               --audio-quality 0 \
               --cookies ../cookies.txt \
