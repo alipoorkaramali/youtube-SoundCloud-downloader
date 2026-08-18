@@ -88,14 +88,18 @@ jobs:
             echo "❌ هیچ فایل cookies*.txt.gpg یافت نشد!"
             exit 1
           fi
+
           RANDOM_INDEX=$((RANDOM % ${#COOKIE_FILES[@]}))
           SELECTED_FILE="${COOKIE_FILES[$RANDOM_INDEX]}"
+
           echo "🎲 فایل انتخاب شده: $SELECTED_FILE"
+
           gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
               --decrypt "$SELECTED_FILE" > cookies.txt || {
             echo "❌ GPG Decrypt Failed!"
             exit 1
           }
+
           echo "✅ کوکی با موفقیت decrypt شد"
 
       # ============================================================
@@ -176,17 +180,24 @@ jobs:
       - name: 🔓 Decrypt rclone config
         run: |
           mkdir -p ~/.config/rclone
+
           if [ ! -f config/rclone_mega.conf.gpg ]; then
             echo "❌ فایل rclone_mega.conf.gpg پیدا نشد!"
             exit 1
           fi
-          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
-              --output ~/.config/rclone/rclone.conf config/rclone_mega.conf.gpg
+
+          gpg --quiet --batch --yes \
+              --decrypt \
+              --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+              --output ~/.config/rclone/rclone.conf \
+              config/rclone_mega.conf.gpg
+
           chmod 600 ~/.config/rclone/rclone.conf
+
           echo "✅ rclone config loaded"
 
       # ============================================================
-      # مرحله 11: دانلود فایل (با گزینه‌های بهبودیافته)
+      # مرحله 11: دانلود فایل (نسخه اصلاح‌شده و مقاوم)
       # ============================================================
       - name: ▶️ دانلود فایل
         id: download
@@ -195,7 +206,18 @@ jobs:
           mkdir -p "${{ github.event.inputs.folder }}"
           cd "${{ github.event.inputs.folder }}"
 
-          # گزینه‌های بهبودیافته برای پایداری و سرعت بیشتر
+          # ========================================================
+          # گزینه‌های عمومی و بهبودیافته برای yt-dlp
+          # ========================================================
+          #
+          # این تنظیمات برای حل خطاهای:
+          #
+          #   WARNING: Only images are available for download
+          #   Requested format is not available
+          #
+          # و همچنین مشکلات موقتی YouTube در انتخاب format
+          # استفاده می‌شوند.
+          #
           COMMON_OPTS="--cookies ../cookies.txt \
             --no-check-formats \
             --extractor-args youtube:player_client=web,android,ios,web_embedded \
@@ -203,40 +225,146 @@ jobs:
             --extractor-retries 10 \
             --retries 30 \
             --fragment-retries 30 \
+            --retry-sleep 5 \
             --sleep-interval 5 \
+            --max-sleep-interval 15 \
             --sleep-subtitles 3 \
+            --sleep-requests 2 \
             --no-warnings \
             --ignore-errors \
             --no-playlist \
+            --force-overwrites \
             --compat-options no-external-downloader-progress \
             --concurrent-fragments 4"
 
+          # ========================================================
+          # نمایش اطلاعات برای Debug
+          # ========================================================
+          echo "================================================"
+          echo "🎬 شروع فرآیند دانلود"
+          echo "================================================"
+          echo "🌐 Platform: ${{ github.event.inputs.platform }}"
+          echo "🎯 Type: ${{ github.event.inputs.type }}"
+          echo "🔗 URL: ${{ github.event.inputs.url }}"
+          echo "📁 Folder: ${{ github.event.inputs.folder }}"
+          echo "================================================"
+
+          # ========================================================
+          # YouTube
+          # ========================================================
           if [ "${{ github.event.inputs.platform }}" = "youtube" ]; then
+
+            echo "▶️ پلتفرم YouTube شناسایی شد."
+
+            # ======================================================
+            # YouTube Video
+            # ======================================================
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp $COMMON_OPTS -f "best" \
-                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+
+              echo "🎬 حالت Video فعال است."
+              echo "📥 در حال دریافت بهترین Video + Audio موجود..."
+
+              yt-dlp $COMMON_OPTS \
+                -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best" \
+                --merge-output-format mp4 \
+                "${{ github.event.inputs.url }}" \
+                -o "%(title)s.%(ext)s"
+
+            # ======================================================
+            # YouTube Audio
+            # ======================================================
             else
-              yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
-                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+
+              echo "🎵 حالت Audio فعال است."
+              echo "📥 فقط صوت دانلود خواهد شد."
+              echo "🎧 خروجی نهایی: MP3"
+
+              yt-dlp $COMMON_OPTS \
+                -f "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best" \
+                -x \
+                --audio-format mp3 \
+                --audio-quality 0 \
+                "${{ github.event.inputs.url }}" \
+                -o "%(title)s.%(ext)s"
+
             fi
+
+          # ========================================================
+          # SoundCloud
+          # ========================================================
           else
+
+            echo "☁️ پلتفرم SoundCloud شناسایی شد."
+
+            # ======================================================
+            # SoundCloud Video
+            # ======================================================
             if [ "${{ github.event.inputs.type }}" = "video" ]; then
-              yt-dlp $COMMON_OPTS -f "best" \
-                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+
+              echo "🎬 حالت Video برای SoundCloud فعال است."
+
+              yt-dlp $COMMON_OPTS \
+                -f "bestvideo+bestaudio/best" \
+                --merge-output-format mp4 \
+                "${{ github.event.inputs.url }}" \
+                -o "%(title)s.%(ext)s"
+
+            # ======================================================
+            # SoundCloud Audio
+            # ======================================================
             else
-              yt-dlp $COMMON_OPTS -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 \
-                "${{ github.event.inputs.url }}" -o "%(title)s.%(ext)s"
+
+              echo "🎵 حالت Audio برای SoundCloud فعال است."
+              echo "🎧 خروجی نهایی: MP3"
+
+              yt-dlp $COMMON_OPTS \
+                -f "bestaudio/best" \
+                -x \
+                --audio-format mp3 \
+                --audio-quality 0 \
+                "${{ github.event.inputs.url }}" \
+                -o "%(title)s.%(ext)s"
+
             fi
+
           fi
 
-          DOWNLOADED_FILE=$(ls -1 | head -1)
+          # ========================================================
+          # بررسی فایل دانلودشده
+          # ========================================================
+
+          echo ""
+          echo "================================================"
+          echo "🔍 بررسی فایل دانلودشده..."
+          echo "================================================"
+
+          DOWNLOADED_FILE=$(find . -maxdepth 1 -type f \
+            ! -name "*.part" \
+            ! -name "*.ytdl" \
+            -printf '%f\n' | head -1)
+
           if [ -z "$DOWNLOADED_FILE" ]; then
             echo "❌ هیچ فایلی دانلود نشد!"
-            ls -la
+            echo ""
+            echo "📂 محتویات پوشه:"
+            ls -lah
+            echo ""
+            echo "❌ فرآیند دانلود متوقف شد."
             exit 1
           fi
+
           echo "DOWNLOADED_FILE=$DOWNLOADED_FILE" >> $GITHUB_ENV
-          echo "✅ دانلود با موفقیت انجام شد - فایل: $DOWNLOADED_FILE"
+
+          echo ""
+          echo "✅ دانلود با موفقیت انجام شد!"
+          echo "📄 فایل: $DOWNLOADED_FILE"
+
+          if [ -f "$DOWNLOADED_FILE" ]; then
+            FILE_SIZE=$(stat -c%s "$DOWNLOADED_FILE")
+            echo "📦 حجم: $(numfmt --to=iec "$FILE_SIZE")"
+          fi
+
+          echo "================================================"
 
       # ============================================================
       # مرحله 12: پردازش هوشمند ویدیو (نسخه نهایی با بهبودها)
@@ -279,7 +407,9 @@ jobs:
 
           # ---- ۳. تعیین پروفایل ----
           PROFILE="${{ github.event.inputs.optimization_profile }}"
+
           case "$PROFILE" in
+
             "balanced")
               TARGET_RESOLUTION="1280:720"
               CODEC="libx265"
@@ -289,6 +419,7 @@ jobs:
               PIX_FMT="yuv420p"
               LABEL="⭐ تعادل عالی - حجم ≈۵۰٪ (پیشنهادی سریع)"
               ;;
+
             "quality")
               TARGET_RESOLUTION="1920:1080"
               CODEC="libx265"
@@ -298,15 +429,17 @@ jobs:
               PIX_FMT="yuv420p"
               LABEL="🎬 کیفیت بالا - حجم کمتر (زمان بیشتر)"
               ;;
+
             "high_quality")
               TARGET_RESOLUTION="1920:1080"
               CODEC="libx265"
               CRF="21"
               PRESET="slow"
               AUDIO_BITRATE="192k"
-              PIX_FMT="yuv420p10le"   # 10-bit برای کیفیت بالاتر
+              PIX_FMT="yuv420p10le"
               LABEL="🔥 حداکثر کیفیت + حجم بهینه (زمان طولانی)"
               ;;
+
             "size")
               TARGET_RESOLUTION="854:480"
               CODEC="libx265"
@@ -316,6 +449,7 @@ jobs:
               PIX_FMT="yuv420p"
               LABEL="📱 حجم خیلی کم - کیفیت خوب (سریع)"
               ;;
+
             "ultra")
               TARGET_RESOLUTION="640:360"
               CODEC="libx265"
@@ -325,6 +459,7 @@ jobs:
               PIX_FMT="yuv420p"
               LABEL="💾 حجم بسیار کم - کیفیت قابل‌قبول (خیلی سریع)"
               ;;
+
           esac
 
           # ---- ۴. تصمیم‌گیری برای فیلتر مقیاس ----
@@ -364,6 +499,7 @@ jobs:
 
           # ---- ۶. بررسی نتیجه ----
           if [ -f "$OUTPUT_FILE" ]; then
+
             ORIGINAL_SIZE=$(stat -c%s "$INPUT_FILE")
             COMPRESSED_SIZE=$(stat -c%s "$OUTPUT_FILE")
             REDUCTION=$((100 - (COMPRESSED_SIZE * 100 / ORIGINAL_SIZE)))
@@ -379,19 +515,30 @@ jobs:
             echo "   کاهش حجم: ~${REDUCTION}٪"
 
             if [ $REDUCTION -lt 0 ]; then
+
               echo ""
               echo "⚠️ توجه: حجم فایل افزایش یافته است (غیرمنتظره!)."
               echo "💡 فایل اصلی حفظ می‌شود."
+
               rm "$OUTPUT_FILE"
+
               echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
+
             else
+
               rm "$INPUT_FILE"
+
               echo "DOWNLOADED_FILE=$OUTPUT_FILE" >> $GITHUB_ENV
+
             fi
+
           else
+
             echo ""
             echo "⚠️ خطا در بهینه‌سازی. فایل اصلی حفظ می‌شود."
+
             echo "DOWNLOADED_FILE=$INPUT_FILE" >> $GITHUB_ENV
+
           fi
 
       # ============================================================
@@ -401,13 +548,20 @@ jobs:
         if: github.event.inputs.split_choice == 'split'
         run: |
           cd "${{ github.event.inputs.folder }}"
+
           FILE="${{ env.DOWNLOADED_FILE }}"
           SIZE="${{ github.event.inputs.split_size }}"
+
           sudo apt-get update && sudo apt-get install -y zip
+
           echo "📦 ایجاد فایل‌های ZIP با حجم هر قسمت: $SIZE"
+
           zip -s "$SIZE" "${FILE}.zip" "$FILE"
+
           rm "$FILE"
+
           echo "✅ فایل‌های ZIP چندبخشی با موفقیت ساخته شدند:"
+
           ls -la
 
       # ============================================================
@@ -419,31 +573,51 @@ jobs:
           REMOTE_PATH="mega:${{ github.event.inputs.mega_folder }}"
 
           echo "📁 محتویات پوشه محلی '${{ github.event.inputs.folder }}':"
+
           ls -la "${{ github.event.inputs.folder }}"
 
           echo "🟢 بررسی وجود فایل rclone:"
+
           ls -la ~/bin/rclone
-          ~/bin/rclone version || { echo "⚠️ rclone قابل اجرا نیست"; exit 1; }
+
+          ~/bin/rclone version || {
+            echo "⚠️ rclone قابل اجرا نیست"
+            exit 1
+          }
 
           echo "🔄 تست اتصال به Mega:"
-          ~/bin/rclone --config "$CONFIG_FILE" lsd mega: || { echo "❌ اتصال به مگا برقرار نیست"; exit 1; }
+
+          ~/bin/rclone --config "$CONFIG_FILE" lsd mega: || {
+            echo "❌ اتصال به مگا برقرار نیست"
+            exit 1
+          }
 
           echo "📂 ایجاد پوشه در مگا: $REMOTE_PATH"
+
           ~/bin/rclone --config "$CONFIG_FILE" mkdir "$REMOTE_PATH" 2>&1
 
           echo "☁️ شروع آپلود..."
+
           ~/bin/rclone --config "$CONFIG_FILE" copy "${{ github.event.inputs.folder }}" "$REMOTE_PATH" \
-            --progress --transfers=4 -vv
+            --progress \
+            --transfers=4 \
+            -vv
 
           echo "🔍 لیست نهایی فایل‌ها در مگا:"
+
           ~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH"
 
           # نمایش لینک مستقیم دانلود برای فایل‌های آپلودشده
           echo ""
           echo "📎 لینک‌های دانلود مستقیم (برای هر فایل):"
+
           # پیدا کردن فایل‌های آپلودشده در مگا و نمایش لینک
           FILES=$(~/bin/rclone --config "$CONFIG_FILE" ls "$REMOTE_PATH" | awk '{print $2}')
+
           for FILE in $FILES; do
+
             LINK=$(~/bin/rclone --config "$CONFIG_FILE" link "$REMOTE_PATH/$FILE" 2>/dev/null || echo "ناموفق")
+
             echo "  - $FILE : $LINK"
+
           done
