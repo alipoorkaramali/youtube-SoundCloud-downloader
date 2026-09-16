@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: 'نام کاربری کانال (پیش‌فرض = آخرین کانال دانلودشده؛ وضعیت هر کانال جدا در State ذخیره می‌شود)'
+        description: 'نام کاربری کانال (پیش‌فرض = آخرین کانال دانلودشده)'
         required: true
         default: 'speaking_practice1404'
       channel_name:
@@ -12,11 +12,11 @@ on:
         required: false
         default: ''
       start_link:
-        description: 'لینک مستقیم پست (خالی بگذار تا از آخرین پست ذخیره‌شده ادامه دهد)'
+        description: 'لینک مستقیم پست (خالی = ادامه از بعد از آخرین پست ذخیره‌شده)'
         required: false
         default: ''
       scroll_direction:
-        description: 'جهت اسکرول (در حالت ادامه خودکار = down)'
+        description: 'جهت اسکرول (ادامه خودکار = down)'
         required: false
         default: 'down'
         type: choice
@@ -28,9 +28,9 @@ on:
         required: false
         default: '0'
       max_media_mb:
-        description: 'حداکثر حجم رسانه (MB)'
+        description: 'سقف حجم هر فایل به مگابایت (0 یا خالی = نامحدود)'
         required: false
-        default: '80'
+        default: '0'
       debug_mode:
         description: 'حالت دیباگ'
         type: boolean
@@ -42,7 +42,7 @@ on:
         required: false
         default: false
       resume:
-        description: 'ادامه از artifact (معمولاً لازم نیست)'
+        description: 'ادامه از artifact'
         type: boolean
         required: false
         default: false
@@ -79,7 +79,7 @@ jobs:
           lfs: true
           fetch-depth: 1
 
-      - name: Restore scraper (only-new + auto-limit)
+      - name: Restore scraper + unlimited-size patch
         run: python3 .github/scripts/restore_scraper_bootstrap.py
 
       - name: Load channel state
@@ -127,9 +127,13 @@ jobs:
           start_link = '${{ github.event.inputs.start_link }}'.strip()
           saved_post = '${{ steps.channel_state.outputs.LAST_POST_ID }}'.strip()
           try:
-              limit_val = int('${{ github.event.inputs.limit }}'.strip() or '0')
+              limit_val = int(('${{ github.event.inputs.limit }}' or '0').strip() or '0')
           except ValueError:
               limit_val = 0
+          try:
+              max_mb = int(('${{ github.event.inputs.max_media_mb }}' or '0').strip() or '0')
+          except ValueError:
+              max_mb = 0
           only_new = False
           skip_before = ''
           if saved_post and saved_post not in ('', 'null') and not start_link:
@@ -137,7 +141,7 @@ jobs:
               skip_before = saved_post
               start_link = f'https://t.me/{channel}/{saved_post}'
               c['scroll_direction'] = 'down'
-              print(f'continue AFTER post {saved_post} (skip that post itself)')
+              print(f'continue AFTER post {saved_post} (skip that post)')
           else:
               c['scroll_direction'] = '${{ github.event.inputs.scroll_direction }}' or 'down'
           c['start_link'] = start_link or None
@@ -147,8 +151,8 @@ jobs:
           c['only_new_posts'] = only_new
           c['skip_before_id'] = skip_before
           c['auto_limit_max'] = 150
-          c['max_media_mb'] = int('${{ github.event.inputs.max_media_mb }}')
-          dq = int('${{ github.event.inputs.download_quiet_timeout }}')
+          c['max_media_mb'] = max_mb
+          dq = int(('${{ github.event.inputs.download_quiet_timeout }}' or '20').strip() or '20')
           eff = limit_val if limit_val > 0 else 150
           c['timeout_seconds'] = (dq + 4) * eff + 2800
           c['download_quiet_seconds'] = dq
@@ -158,7 +162,7 @@ jobs:
           c['retry_failed'] = '${{ github.event.inputs.retry_failed }}'.lower() == 'true'
           with open('config/config.yaml', 'w') as f:
               yaml.dump(c, f, allow_unicode=True, default_flow_style=False)
-          print('config', c)
+          print('config limit=', limit_val, 'max_media_mb=', max_mb, '(0=unlimited)', 'only_new=', only_new)
           "
 
       - name: rclone setup
