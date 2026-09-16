@@ -1,0 +1,224 @@
+name: 🌀 Scrape Telegram & Save to Mega
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'نام کاربری کانال (پیش‌فرض = آخرین کانال دانلودشده؛ وضعیت هر کانال جدا در State ذخیره می‌شود)'
+        required: true
+        default: 'speaking_practice1404'
+      channel_name:
+        description: 'نام نمایشی کانال (اختیاری)'
+        required: false
+        default: ''
+      start_link:
+        description: 'لینک مستقیم پست (خالی بگذار تا از آخرین پست ذخیره‌شده ادامه دهد)'
+        required: false
+        default: ''
+      scroll_direction:
+        description: 'جهت اسکرول (در حالت ادامه خودکار = down)'
+        required: false
+        default: 'down'
+        type: choice
+        options:
+          - 'up'
+          - 'down'
+      limit:
+        description: 'تعداد پست (0 = خودکار: همه پست‌های جدید بعد از آخرین دانلود)'
+        required: false
+        default: '0'
+      max_media_mb:
+        description: 'حداکثر حجم رسانه (MB)'
+        required: false
+        default: '80'
+      debug_mode:
+        description: 'حالت دیباگ'
+        type: boolean
+        required: false
+        default: false
+      save_screenshots:
+        description: 'ذخیره اسکرین‌شات'
+        type: boolean
+        required: false
+        default: false
+      resume:
+        description: 'ادامه از artifact (معمولاً لازم نیست)'
+        type: boolean
+        required: false
+        default: false
+      mega_folder:
+        description: 'پوشه مقصد Mega'
+        required: true
+        default: 'TelegramArchive'
+      download_quiet_timeout:
+        description: 'آستانه سکوت دانلود (ثانیه)'
+        required: false
+        default: '20'
+      retry_failed:
+        description: 'تلاش مجدد پست‌های ناموفق'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.channel }}
+  cancel-in-progress: true
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          lfs: true
+          fetch-depth: 1
+
+      - name: Restore scraper (only-new + auto-limit)
+        run: python3 .github/scripts/restore_scraper_bootstrap.py
+
+      - name: Load channel state
+        id: channel_state
+        run: |
+          STATE_FILE="State/telegram_channels_state.json"
+          CHANNEL=$(echo "${{ github.event.inputs.channel }}" | sed 's/^@//')
+          mkdir -p State
+          [ -f "$STATE_FILE" ] || echo '{"last_used_channel":"","channel_list":[],"channels":{}}' > "$STATE_FILE"
+          cat "$STATE_FILE" | jq '.' || true
+          LAST_POST=$(jq -r --arg ch "$CHANNEL" '.channels[$ch].last_post_id // empty' "$STATE_FILE")
+          echo "LAST_POST_ID=$LAST_POST" >> $GITHUB_OUTPUT
+          echo "last_post=$LAST_POST for @$CHANNEL"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt pyyaml
+          sudo apt-get update
+          sudo apt-get install -y jq unzip xvfb
+          pip install playwright
+          python -m playwright install chromium
+          python -m playwright install-deps chromium
+
+      - name: Decrypt browser profile
+        run: |
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" \
+              --decrypt config/browser_profile.tar.gz.gpg > config/browser_profile.tar.gz
+          tar -xzf config/browser_profile.tar.gz -C config/
+
+      - name: Write config.yaml
+        run: |
+          python -c "
+          import yaml
+          with open('config/config.yaml') as f:
+              c = yaml.safe_load(f)
+          channel = '${{ github.event.inputs.channel }}'.lstrip('@') or 'unknown'
+          c['channel'] = channel
+          c['channel_name'] = '${{ github.event.inputs.channel_name }}'
+          start_link = '${{ github.event.inputs.start_link }}'.strip()
+          saved_post = '${{ steps.channel_state.outputs.LAST_POST_ID }}'.strip()
+          try:
+              limit_val = int('${{ github.event.inputs.limit }}'.strip() or '0')
+          except ValueError:
+              limit_val = 0
+          only_new = False
+          skip_before = ''
+          if saved_post and saved_post not in ('', 'null') and not start_link:
+              only_new = True
+              skip_before = saved_post
+              start_link = f'https://t.me/{channel}/{saved_post}'
+              c['scroll_direction'] = 'down'
+              print(f'continue AFTER post {saved_post} (skip that post itself)')
+          else:
+              c['scroll_direction'] = '${{ github.event.inputs.scroll_direction }}' or 'down'
+          c['start_link'] = start_link or None
+          if not c.get('start_link'):
+              c.pop('start_link', None)
+          c['limit'] = limit_val
+          c['only_new_posts'] = only_new
+          c['skip_before_id'] = skip_before
+          c['auto_limit_max'] = 150
+          c['max_media_mb'] = int('${{ github.event.inputs.max_media_mb }}')
+          dq = int('${{ github.event.inputs.download_quiet_timeout }}')
+          eff = limit_val if limit_val > 0 else 150
+          c['timeout_seconds'] = (dq + 4) * eff + 2800
+          c['download_quiet_seconds'] = dq
+          c['mega_folder'] = '${{ github.event.inputs.mega_folder }}'
+          c['save_screenshots'] = '${{ github.event.inputs.save_screenshots }}'.lower() == 'true'
+          c['resume'] = only_new or '${{ github.event.inputs.resume }}'.lower() == 'true'
+          c['retry_failed'] = '${{ github.event.inputs.retry_failed }}'.lower() == 'true'
+          with open('config/config.yaml', 'w') as f:
+              yaml.dump(c, f, allow_unicode=True, default_flow_style=False)
+          print('config', c)
+          "
+
+      - name: rclone setup
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+              --output ~/.config/rclone/rclone.conf config/rclone_mega.conf.gpg
+          chmod 600 ~/.config/rclone/rclone.conf
+
+      - name: Run scraper
+        if: ${{ !inputs.debug_mode }}
+        run: xvfb-run python .github/scripts/main.py --config config/config.yaml
+        timeout-minutes: 360
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: download-report-${{ github.event.inputs.channel }}
+          path: Download/telegram_downloads/${{ github.event.inputs.channel }}/download_report.txt
+          overwrite: true
+
+      - name: Upload resume artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-state-${{ github.event.inputs.channel }}
+          path: Download/telegram_downloads/${{ github.event.inputs.channel }}/resume_state.json
+          overwrite: true
+          retention-days: 7
+
+      - name: Update permanent channel state
+        if: always()
+        run: |
+          CHANNEL=$(echo "${{ github.event.inputs.channel }}" | sed 's/^@//')
+          STATE_FILE="State/telegram_channels_state.json"
+          RESUME_FILE="Download/telegram_downloads/${CHANNEL}/resume_state.json"
+          mkdir -p State
+          [ -f "$STATE_FILE" ] || echo '{"last_used_channel":"","channel_list":[],"channels":{}}' > "$STATE_FILE"
+          if [ -f "$RESUME_FILE" ]; then
+            LAST_POST=$(jq -r '.last_post_id // empty' "$RESUME_FILE")
+            COUNT=$(jq -r '(.downloaded_posts // []) | length' "$RESUME_FILE")
+            RECENT=$(jq -c '(.downloaded_posts // []) | .[-20:]' "$RESUME_FILE")
+            if [ -n "$LAST_POST" ] && [ "$LAST_POST" != "null" ]; then
+              NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              jq --arg ch "$CHANNEL" --arg post "$LAST_POST" --arg now "$NOW" --argjson count "$COUNT" --argjson recent "$RECENT" \
+                '.last_used_channel=$ch | .channel_list=((.channel_list//[])+[$ch]|unique) | .channels[$ch]=((.channels[$ch]//{})+{last_post_id:$post,last_updated:$now,downloaded_posts_count:$count,recent_post_ids:$recent})' \
+                "$STATE_FILE" > /tmp/st.json && mv /tmp/st.json "$STATE_FILE"
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git add "$STATE_FILE"
+              git commit -m "chore(telegram): last post @$CHANNEL -> $LAST_POST" || true
+              git push origin "HEAD:${{ github.ref_name }}" || true
+            fi
+          fi
+
+      - name: Upload media to Mega
+        if: ${{ !inputs.debug_mode }}
+        run: |
+          rclone copy "Download/telegram_downloads/${{ github.event.inputs.channel }}/media" \
+                     "mega:${{ github.event.inputs.mega_folder }}/${{ github.event.inputs.channel }}" \
+                     --progress --transfers=4 -vv
