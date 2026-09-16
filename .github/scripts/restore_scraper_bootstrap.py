@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Restore scraper.py with only-new + auto-limit support."""
+"""Restore scraper + patch downloader for only-new, auto-limit, unlimited size."""
 import urllib.request
 from pathlib import Path
 
@@ -9,7 +9,7 @@ BASE_URL = (
     "c6f1fb1144ce028ec7e4b3f6dee51b55434a9a6b/.github/scripts/scraper.py"
 )
 
-def apply_patches(text: str) -> str:
+def apply_scraper_patches(text: str) -> str:
     old_limit = (
         "        self.limit = config.limit\n"
         "        self.max_media_bytes = config.max_media_mb * 1024 * 1024"
@@ -22,34 +22,15 @@ def apply_patches(text: str) -> str:
         "        if self.limit <= 0:\n"
         "            self._auto_limit = True\n"
         "            self.limit = int(getattr(config, 'auto_limit_max', 150) or 150)\n"
-        "        self.max_media_bytes = config.max_media_mb * 1024 * 1024"
+        "        # 0 MB = unlimited\n"
+        "        _mm = int(getattr(config, 'max_media_mb', 0) or 0)\n"
+        "        self.max_media_bytes = (_mm * 1024 * 1024) if _mm > 0 else 0\n"
     )
     if old_limit not in text:
         raise SystemExit("patch: limit block not found")
     text = text.replace(old_limit, new_limit, 1)
 
-    old_log = (
-        "        self.logger.info(\n"
-        "            f\"\U0001f4f8 \u0630\u062e\u06cc\u0631\u0647 \u0627\u0633\u06a9\u0631\u06cc\u0646\u200c\u0634\u0627\u062a: {'\u0641\u0639\u0627\u0644' if self.save_screenshots else '\u063a\u06cc\u0631\u0641\u0639\u0627\u0644'}\"\n"
-        "        )"
-    )
-    # Use simpler marker-based patch for log section
-    marker = "\U0001f4f8 \u0630\u062e\u06cc\u0631\u0647 \u0627\u0633\u06a9\u0631\u06cc\u0646\u200c\u0634\u0627\u062a"
-    if marker not in text:
-        raise SystemExit("patch: screenshot log marker not found")
-    # Insert after the screenshot log line block - find the closing of that logger.info
-    needle = "f\"\U0001f4f8 \u0630\u062e\u06cc\u0631\u0647 \u0627\u0633\u06a9\u0631\u06cc\u0646\u200c\u0634\u0627\u062a: {'\u0641\u0639\u0627\u0644' if self.save_screenshots else '\u063a\u06cc\u0631\u0641\u0639\u0627\u0644'}\""
-    # Fallback: insert after scroll direction validation block end
-    insert_after = "            self.scroll_direction = 'up'\n"
-    extra = (
-        "\n        if getattr(self, '_auto_limit', False):\n"
-        "            self.logger.info(f\"\U0001f916 limit auto max={self.limit}\")\n"
-        "        if getattr(self, 'only_new_posts', False) or getattr(self, 'skip_before_id', ''):\n"
-        "            self.logger.info(f\"only-new after {getattr(self, 'skip_before_id', '')}\")\n"
-    )
-    # Prefer filter patch which is ASCII-heavy
-    old_filter = (
-        "            # \u0641\u06cc\u0644\u062a\u0631 \u06a9\u0631\u062f\u0646 \u067e\u0633\u062a\u200c\u0647\u0627\u06cc \u062c\u062f\u06cc\u062f (\u062d\u0630\u0641 \u062a\u06a9\u0631\u0627\u0631\u06cc\u200c\u0647\u0627)\n"
+    old_filter2 = (
         "            newly_added = []\n"
         "            for item in new_items:\n"
         "                if item['id'] not in {i['id'] for i in items}:\n"
@@ -57,7 +38,6 @@ def apply_patches(text: str) -> str:
         "                    newly_added.append(item)"
     )
     new_filter = (
-        "            # filter new posts + skip already downloaded\n"
         "            newly_added = []\n"
         "            skip_before = self._int_id(self.skip_before_id) if getattr(self, 'skip_before_id', '') else 0\n"
         "            for item in new_items:\n"
@@ -69,30 +49,41 @@ def apply_patches(text: str) -> str:
         "                items.append(item)\n"
         "                newly_added.append(item)"
     )
-    if old_filter not in text:
-        # try without persian comment
-        old_filter2 = (
-            "            newly_added = []\n"
-            "            for item in new_items:\n"
-            "                if item['id'] not in {i['id'] for i in items}:\n"
-            "                    items.append(item)\n"
-            "                    newly_added.append(item)"
-        )
-        if old_filter2 not in text:
-            raise SystemExit("patch: filter block not found")
-        text = text.replace(old_filter2, new_filter, 1)
-    else:
-        text = text.replace(old_filter, new_filter, 1)
+    if old_filter2 not in text:
+        raise SystemExit("patch: filter block not found")
+    text = text.replace(old_filter2, new_filter, 1)
     return text
 
+def patch_downloader(path: Path) -> None:
+    """0 max_bytes = unlimited (do not reject large files)."""
+    if not path.exists():
+        print("playwright_downloader.py missing, skip")
+        return
+    text = path.read_text(encoding="utf-8")
+    a = "if size_mb > self.max_bytes / (1024 * 1024):"
+    b = "if self.max_bytes > 0 and size_mb > self.max_bytes / (1024 * 1024):"
+    c = "if len(body) > self.max_bytes:"
+    d = "if self.max_bytes > 0 and len(body) > self.max_bytes:"
+    n = 0
+    if a in text:
+        text = text.replace(a, b)
+        n += 1
+    if c in text:
+        text = text.replace(c, d)
+        n += 1
+    path.write_text(text, encoding="utf-8")
+    print(f"playwright_downloader patched ({n} size-check(s) -> unlimited when max_bytes=0)")
+
 def main():
-    target = Path(__file__).resolve().parent / "scraper.py"
+    here = Path(__file__).resolve().parent
+    target = here / "scraper.py"
     print("downloading base scraper...")
     with urllib.request.urlopen(BASE_URL, timeout=60) as r:
         base = r.read().decode("utf-8")
-    patched = apply_patches(base)
+    patched = apply_scraper_patches(base)
     target.write_text(patched, encoding="utf-8")
-    print(f"scraper.py written ({len(patched)} bytes) only-new+auto-limit")
+    print(f"scraper.py written ({len(patched)} bytes)")
+    patch_downloader(here / "playwright_downloader.py")
 
 if __name__ == "__main__":
     main()
