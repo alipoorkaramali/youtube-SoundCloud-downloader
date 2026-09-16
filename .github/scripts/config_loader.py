@@ -23,11 +23,8 @@ class Config:
     scroll_direction: str = 'up'
     save_screenshots: bool = True
     retry_failed: bool = False
-    # فقط پست‌های جدیدتر از آخرین پست ذخیره‌شده (بدون دانلود مجدد)
     only_new_posts: bool = False
-    # شناسه پستی که باید از آن رد شویم (خودش دانلود نمی‌شود؛ فقط بزرگ‌ترها)
     skip_before_id: str = ''
-    # سقف ایمنی وقتی limit=0 (حالت خودکار)
     auto_limit_max: int = 150
 
 def load_config(path: str = "config.yaml") -> Config:
@@ -42,13 +39,15 @@ def load_config(path: str = "config.yaml") -> Config:
     if not data.get('channel') and not data.get('start_link'):
         raise ValueError("❌ یا نام کانال (channel) یا لینک شروع (start_link) باید در config.yaml تنظیم شود.")
 
-    # limit=0 یعنی خودکار (همه پست‌های جدید تا سقف auto_limit_max)
     limit = int(data.get('limit', 0) or 0)
     if limit < 0:
         raise ValueError("❌ limit نمی‌تواند منفی باشد (0 = خودکار).")
 
-    if data.get('max_media_mb', 0) <= 0:
-        raise ValueError("❌ max_media_mb باید بزرگ‌تر از صفر باشد.")
+    # 0 = نامحدود
+    max_media_mb = int(data.get('max_media_mb', 0) or 0)
+    if max_media_mb < 0:
+        raise ValueError("❌ max_media_mb نمی‌تواند منفی باشد (0 = نامحدود).")
+
     if not data.get('profile_dir'):
         raise ValueError("❌ پوشهٔ پروفایل (profile_dir) مشخص نشده است.")
 
@@ -67,7 +66,7 @@ def load_config(path: str = "config.yaml") -> Config:
     return Config(
         channel=data['channel'].lstrip('@'),
         limit=limit,
-        max_media_mb=data['max_media_mb'],
+        max_media_mb=max_media_mb,
         output_dir=data.get('output_dir', 'Download'),
         profile_dir=data['profile_dir'],
         delay_between_posts=data.get('delay_between_posts', 1.5),
