@@ -22,7 +22,14 @@ class Config:
     download_quiet_seconds: int = 20
     scroll_direction: str = 'up'
     save_screenshots: bool = True
-    retry_failed: bool = False 
+    retry_failed: bool = False
+    # فقط پست‌های جدیدتر از آخرین پست ذخیره‌شده (بدون دانلود مجدد)
+    only_new_posts: bool = False
+    # شناسه پستی که باید از آن رد شویم (خودش دانلود نمی‌شود؛ فقط بزرگ‌ترها)
+    skip_before_id: str = ''
+    # سقف ایمنی وقتی limit=0 (حالت خودکار)
+    auto_limit_max: int = 150
+
 def load_config(path: str = "config.yaml") -> Config:
     """بارگذاری تنظیمات از فایل YAML"""
     config_path = Path(path)
@@ -32,29 +39,34 @@ def load_config(path: str = "config.yaml") -> Config:
     with open(config_path, 'r', encoding='utf-8') as f:
         data = yaml.safe_load(f)
 
-    # اعتبارسنجی
     if not data.get('channel') and not data.get('start_link'):
         raise ValueError("❌ یا نام کانال (channel) یا لینک شروع (start_link) باید در config.yaml تنظیم شود.")
-    if data.get('limit', 0) <= 0:
-        raise ValueError("❌ limit باید بزرگ‌تر از صفر باشد.")
+
+    # limit=0 یعنی خودکار (همه پست‌های جدید تا سقف auto_limit_max)
+    limit = int(data.get('limit', 0) or 0)
+    if limit < 0:
+        raise ValueError("❌ limit نمی‌تواند منفی باشد (0 = خودکار).")
+
     if data.get('max_media_mb', 0) <= 0:
         raise ValueError("❌ max_media_mb باید بزرگ‌تر از صفر باشد.")
     if not data.get('profile_dir'):
         raise ValueError("❌ پوشهٔ پروفایل (profile_dir) مشخص نشده است.")
 
-    # خواندن فیلدهای اختیاری با پیش‌فرض
     timeout_seconds = data.get('timeout_seconds', 2100)
     download_quiet_seconds = data.get('download_quiet_seconds', 20)
     scroll_direction = data.get('scroll_direction', 'up')
     save_screenshots = data.get('save_screenshots', True)
-    mega_folder = data.get('mega_folder', 'TelegramArchive') 
+    mega_folder = data.get('mega_folder', 'TelegramArchive')
     retry_failed = data.get('retry_failed', False)
+    only_new_posts = data.get('only_new_posts', False)
+    skip_before_id = str(data.get('skip_before_id', '') or '').strip()
+    auto_limit_max = int(data.get('auto_limit_max', 150) or 150)
     if scroll_direction not in ['up', 'down']:
         scroll_direction = 'up'
-        
+
     return Config(
         channel=data['channel'].lstrip('@'),
-        limit=data['limit'],
+        limit=limit,
         max_media_mb=data['max_media_mb'],
         output_dir=data.get('output_dir', 'Download'),
         profile_dir=data['profile_dir'],
@@ -62,10 +74,13 @@ def load_config(path: str = "config.yaml") -> Config:
         channel_name=data.get('channel_name', ''),
         resume=data.get('resume', True),
         start_link=data.get('start_link', ''),
-        mega_folder=mega_folder,           # ← ترتیب درست
+        mega_folder=mega_folder,
         timeout_seconds=timeout_seconds,
         download_quiet_seconds=download_quiet_seconds,
         scroll_direction=scroll_direction,
         save_screenshots=save_screenshots,
-        retry_failed=retry_failed
+        retry_failed=retry_failed,
+        only_new_posts=only_new_posts,
+        skip_before_id=skip_before_id,
+        auto_limit_max=auto_limit_max,
     )
