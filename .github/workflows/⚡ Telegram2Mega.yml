@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: 'نام کاربری کانال (برای مسیر خروجی، حتی اگر start_link دارید)'
+        description: 'نام کاربری کانال (آخرین مقدار استفاده‌شده در State ذخیره می‌شود و می‌توانید دستی عوض کنید)'
         required: true
         default: 'bbcpersian'
       channel_name:
@@ -79,6 +79,43 @@ jobs:
           lfs: true
           fetch-depth: 1
 
+      # ════════════════════════════════════════════════════════════
+      # بارگذاری وضعیت دائمی کانال‌ها (آخرین پست ذخیره‌شده)
+      # ════════════════════════════════════════════════════════════
+      - name: 📂 Load persistent channel state
+        id: channel_state
+        run: |
+          STATE_FILE="State/telegram_channels_state.json"
+          CHANNEL="${{ github.event.inputs.channel }}"
+          CHANNEL=$(echo "$CHANNEL" | sed 's/^@//')
+
+          if [ ! -f "$STATE_FILE" ]; then
+            echo "ℹ️ فایل وضعیت وجود ندارد — با ساختار خالی ساخته می‌شود"
+            mkdir -p State
+            echo '{"last_used_channel":"","channels":{}}' > "$STATE_FILE"
+          fi
+
+          echo "📋 وضعیت فعلی کانال‌ها:"
+          cat "$STATE_FILE" | jq '.' || cat "$STATE_FILE"
+
+          LAST_POST=$(jq -r --arg ch "$CHANNEL" '.channels[$ch].last_post_id // empty' "$STATE_FILE")
+          LAST_USED=$(jq -r '.last_used_channel // empty' "$STATE_FILE")
+
+          echo "LAST_POST_ID=$LAST_POST" >> $GITHUB_OUTPUT
+          echo "LAST_USED_CHANNEL=$LAST_USED" >> $GITHUB_OUTPUT
+
+          if [ -n "$LAST_POST" ] && [ "$LAST_POST" != "null" ]; then
+            echo "✅ آخرین پست ذخیره‌شده برای @$CHANNEL → $LAST_POST"
+            echo "HAS_SAVED_POST=true" >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️ هیچ پست قبلی برای @$CHANNEL ذخیره نشده"
+            echo "HAS_SAVED_POST=false" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -n "$LAST_USED" ] && [ "$LAST_USED" != "null" ]; then
+            echo "📌 آخرین کانال استفاده‌شده: @$LAST_USED"
+          fi
+
       - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
@@ -134,13 +171,29 @@ jobs:
         run: |
           pip install pyyaml
           python -c "
-          import yaml
+          import yaml, os
           with open('config/config.yaml', 'r') as f:
               c = yaml.safe_load(f)
           c['channel'] = '${{ github.event.inputs.channel }}' or 'unknown'
           c['channel_name'] = '${{ github.event.inputs.channel_name }}'
-          c['start_link'] = '${{ github.event.inputs.start_link }}'
-          c['scroll_direction'] = '${{ github.event.inputs.scroll_direction }}' or 'up'
+          start_link = '${{ github.event.inputs.start_link }}'.strip()
+          saved_post = '${{ steps.channel_state.outputs.LAST_POST_ID }}'.strip()
+          channel = c['channel'].lstrip('@')
+          # اگر start_link خالی است ولی آخرین پست ذخیره‌شده داریم → از آن استفاده کن
+          if not start_link and saved_post and saved_post not in ('', 'null'):
+              start_link = f'https://t.me/{channel}/{saved_post}'
+              print(f'🔄 start_link از وضعیت دائمی تنظیم شد: {start_link}')
+              # برای گرفتن پست‌های جدیدتر، جهت را روی down می‌گذاریم مگر کاربر صریحاً up خواسته باشد
+              user_scroll = '${{ github.event.inputs.scroll_direction }}' or 'up'
+              if user_scroll == 'up' and '${{ github.event.inputs.resume }}'.lower() != 'true':
+                  # اگر کاربر resume نزده و start_link دستی نداده، پیش‌فرض برای ادامه = down
+                  c['scroll_direction'] = 'down'
+                  print('🧭 جهت اسکرول خودکار روی down (پست‌های جدیدتر) تنظیم شد')
+              else:
+                  c['scroll_direction'] = user_scroll
+          else:
+              c['scroll_direction'] = '${{ github.event.inputs.scroll_direction }}' or 'up'
+          c['start_link'] = start_link
           c['limit'] = ${{ github.event.inputs.limit }}
           c['max_media_mb'] = ${{ github.event.inputs.max_media_mb }}
           download_quiet = int('${{ github.event.inputs.download_quiet_timeout }}')
@@ -149,13 +202,14 @@ jobs:
           c['download_quiet_seconds'] = download_quiet
           c['mega_folder'] = '${{ github.event.inputs.mega_folder }}'
           c['save_screenshots'] = '${{ github.event.inputs.save_screenshots }}'.lower() == 'true'
-          c['resume'] = '${{ github.event.inputs.resume }}'.lower() == 'true'
+          # اگر پست ذخیره‌شده داریم، resume را فعال نگه می‌داریم تا از artifact هم استفاده شود
+          c['resume'] = '${{ github.event.inputs.resume }}'.lower() == 'true' or bool(saved_post and saved_post not in ('', 'null') and not '${{ github.event.inputs.start_link }}'.strip())
           c['retry_failed'] = '${{ github.event.inputs.retry_failed }}'.lower() == 'true'
-          # اگر start_link خالی باشد، کلید را حذف می‌کنیم تا از شرط‌های خالی جلوگیری شود
           if not c.get('start_link'):
               c.pop('start_link', None)
           with open('config/config.yaml', 'w') as f:
               yaml.dump(c, f, default_flow_style=False, allow_unicode=True)
+          print('✅ config.yaml به‌روز شد')
           "
       #------------------------------------------------------------------------------------------
       - name: 🧮 Calculate timeout from inputs
@@ -459,6 +513,67 @@ jobs:
           path: Download/telegram_downloads/${{ github.event.inputs.channel }}/resume_state.json
           overwrite: true
           retention-days: 7  # وضعیت را به مدت ۷ روز نگه دار (کافی است)
+
+      # ════════════════════════════════════════════════════════════
+      # به‌روزرسانی وضعیت دائمی کانال (آخرین پست + last_used)
+      # ════════════════════════════════════════════════════════════
+      - name: 💾 Update persistent channel state & commit
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          CHANNEL=$(echo "$CHANNEL" | sed 's/^@//')
+          CHANNEL_NAME="${{ github.event.inputs.channel_name }}"
+          STATE_FILE="State/telegram_channels_state.json"
+          RESUME_FILE="Download/telegram_downloads/${CHANNEL}/resume_state.json"
+
+          mkdir -p State
+          if [ ! -f "$STATE_FILE" ]; then
+            echo '{"last_used_channel":"","channels":{}}' > "$STATE_FILE"
+          fi
+
+          LAST_POST=""
+          if [ -f "$RESUME_FILE" ]; then
+            LAST_POST=$(jq -r '.last_post_id // empty' "$RESUME_FILE")
+            echo "📄 last_post_id از resume_state.json: $LAST_POST"
+          else
+            echo "⚠️ resume_state.json پیدا نشد — وضعیت دائمی به‌روز نمی‌شود"
+          fi
+
+          if [ -n "$LAST_POST" ] && [ "$LAST_POST" != "null" ]; then
+            NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            # به‌روزرسانی با jq
+            jq --arg ch "$CHANNEL" \
+               --arg post "$LAST_POST" \
+               --arg name "$CHANNEL_NAME" \
+               --arg now "$NOW" \
+               '
+               .last_used_channel = $ch |
+               .channels[$ch] = ((.channels[$ch] // {}) + {
+                 last_post_id: $post,
+                 last_updated: $now,
+                 channel_name: (if $name != "" then $name else (.channels[$ch].channel_name // "") end)
+               })
+               ' "$STATE_FILE" > /tmp/channels_state_new.json
+            mv /tmp/channels_state_new.json "$STATE_FILE"
+            echo "✅ وضعیت دائمی به‌روز شد:"
+            cat "$STATE_FILE" | jq '.'
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$STATE_FILE"
+            if git diff --cached --quiet; then
+              echo "ℹ️ تغییری در وضعیت دائمی وجود ندارد"
+            else
+              git commit -m "chore(telegram): update last post for @${CHANNEL} → ${LAST_POST}"
+              # push به همان برنچی که ورک‌فلو روی آن اجرا شده
+              git push origin "HEAD:${{ github.ref_name }}"
+              echo "✅ وضعیت دائمی به برنچ ${{ github.ref_name }} پوش شد"
+            fi
+          else
+            echo "ℹ️ last_post_id خالی است — commit انجام نشد"
+          fi
       # ════════════════════════════════════════════
       # آپلود حالت عادی (فقط پوشه media)
       # ════════════════════════════════════════════
