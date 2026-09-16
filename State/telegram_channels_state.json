@@ -1,10 +1,17 @@
 {
   "last_used_channel": "bbcpersian",
+  "channel_list": [
+    "bbcpersian"
+  ],
   "channels": {
     "bbcpersian": {
       "last_post_id": "",
       "last_updated": "",
-      "channel_name": ""
+      "channel_name": "",
+      "last_limit": 35,
+      "last_mega_folder": "TelegramArchive",
+      "downloaded_posts_count": 0,
+      "recent_post_ids": []
     }
   }
 }
