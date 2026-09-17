@@ -64,9 +64,10 @@ permissions:
   contents: write
   actions: write
 
+# One run per channel at a time; queue extra dispatches (do not cancel mid-download)
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.channel }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   scrape:
