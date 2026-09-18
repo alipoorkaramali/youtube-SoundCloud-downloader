@@ -1,6 +1,7 @@
 {
-  "last_used_channel": "speaking_practice1404",
+  "last_used_channel": "johndoe",
   "channel_list": [
+    "johndoe",
     "speaking_practice1404"
   ],
   "channels": {
@@ -17,6 +18,33 @@
       ],
       "source_run_id": 34889156757,
       "source_run_url": "https://github.com/alipoorkaramali/youtube-SoundCloud-downloader/actions/runs/34889156757"
+    },
+    "johndoe": {
+      "last_post_id": "374",
+      "last_updated": "2026-09-18T10:38:47Z",
+      "downloaded_posts_count": 20,
+      "recent_post_ids": [
+        "346",
+        "347",
+        "349",
+        "350",
+        "351",
+        "352",
+        "353",
+        "354",
+        "355",
+        "356",
+        "359",
+        "360",
+        "366",
+        "368",
+        "369",
+        "370",
+        "371",
+        "372",
+        "373",
+        "374"
+      ]
     }
   }
 }
