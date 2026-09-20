@@ -68,7 +68,7 @@ jobs:
       - name: نصب Python و کتابخانه‌ها
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
       - run: pip install --upgrade yt-dlp requests
 
       - name: ایجاد اسکریپت دانلود (فقط caption, like_count, comment_count)
