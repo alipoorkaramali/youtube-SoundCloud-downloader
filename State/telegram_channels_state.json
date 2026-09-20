@@ -6,14 +6,14 @@
   ],
   "channels": {
     "speaking_practice1404": {
-      "last_post_id": "417",
-      "last_updated": "2026-09-20T12:47:06Z",
+      "last_post_id": "1",
+      "last_updated": "2026-09-20T14:36:56Z",
       "channel_name": "",
       "last_limit": 35,
       "last_mega_folder": "TelegramArchive",
       "downloaded_posts_count": 1,
       "recent_post_ids": [
-        "417"
+        "1"
       ],
       "source_run_id": 34889156757,
       "source_run_url": "https://github.com/alipoorkaramali/youtube-SoundCloud-downloader/actions/runs/34889156757"
