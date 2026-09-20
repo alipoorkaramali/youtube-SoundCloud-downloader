@@ -6,9 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       shortcode:
-        description: 'لینک اینستاگرام یا shortcode پست'
+        description: 'Instagram URL or post shortcode'
         required: true
         type: string
+      mega_folder:
+        description: 'Destination folder on Mega (default: Instagram)'
+        required: false
+        type: string
+        default: 'Instagram'
 
 jobs:
   download:
@@ -323,11 +328,21 @@ jobs:
         run: |
           SHORTCODE="${{ steps.sc.outputs.shortcode }}"
           USERNAME="${{ steps.username.outputs.username }}"
-          REMOTE="mega:Instagram/${USERNAME}/${SHORTCODE}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MEGA_FOLDER="${{ github.event.inputs.mega_folder }}"
+          else
+            MEGA_FOLDER="Instagram"
+          fi
+          MEGA_FOLDER="${MEGA_FOLDER:-Instagram}"
+          # sanitize: strip leading/trailing slashes
+          MEGA_FOLDER=$(echo "$MEGA_FOLDER" | sed 's|^/*||;s|/*$||')
+          [ -z "$MEGA_FOLDER" ] && MEGA_FOLDER="Instagram"
+          echo "mega_folder=$MEGA_FOLDER" >> $GITHUB_OUTPUT
+          REMOTE="mega:${MEGA_FOLDER}/${USERNAME}/${SHORTCODE}"
           rclone mkdir "$REMOTE" 2>/dev/null || true
           rclone copy "instagram_downloads/$SHORTCODE" "$REMOTE" --transfers=4
           sudo apt-get update && sudo apt-get install -y megatools
-          LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "/Instagram/${USERNAME}/${SHORTCODE}" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
+          LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "/${MEGA_FOLDER}/${USERNAME}/${SHORTCODE}" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1)
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
       - name: Comment success
@@ -338,7 +353,7 @@ jobs:
           BODY=$(mktemp)
           echo "✅ پست ${{ steps.sc.outputs.shortcode }} با موفقیت به مگا آپلود شد." >> $BODY
           echo "🔗 لینک: ${{ steps.mega.outputs.link }}" >> $BODY
-          echo "📁 مسیر: \`Instagram/${{ steps.username.outputs.username }}/${{ steps.sc.outputs.shortcode }}/\`" >> $BODY
+          echo "📁 مسیر: \`${{ steps.mega.outputs.mega_folder }}/${{ steps.username.outputs.username }}/${{ steps.sc.outputs.shortcode }}/\`" >> $BODY
           gh issue comment "${{ github.event.issue.number }}" --body-file $BODY
 
       - name: Comment error
