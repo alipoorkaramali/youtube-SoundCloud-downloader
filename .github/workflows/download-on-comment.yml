@@ -3,10 +3,18 @@ name: 📥 دانلود اینستاگرام و آپلود به مگا
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      shortcode:
+        description: 'لینک اینستاگرام یا shortcode پست'
+        required: true
+        type: string
 
 jobs:
   download:
-    if: contains(github.event.comment.body, '/download')
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/download'))
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -17,13 +25,31 @@ jobs:
       - name: استخراج shortcode
         id: sc
         run: |
-          COMMENT="${{ github.event.comment.body }}"
-          SHORTCODE=$(echo "$COMMENT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW_INPUT="${{ github.event.inputs.shortcode }}"
+          else
+            RAW_INPUT="${{ github.event.comment.body }}"
+          fi
+
+          # چک کردن اینکه ورودی لینک کامل اینستاگرامه یا shortcode
+          if echo "$RAW_INPUT" | grep -qE 'instagram\.com'; then
+            # استخراج shortcode از لینک
+            SHORTCODE=$(echo "$RAW_INPUT" | grep -oE '/(p|reel|tv)/[A-Za-z0-9_-]+' | head -1 | awk -F'/' '{print $3}')
+          else
+            # استخراج shortcode از کامنت (حالت /download SHORTCODE)
+            SHORTCODE=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
+            # اگه توی کامنت نبود، شاید کاربر فقط shortcode خام داده
+            if [ -z "$SHORTCODE" ]; then
+              SHORTCODE=$(echo "$RAW_INPUT" | grep -oE '[A-Za-z0-9_-]{5,}' | head -1)
+            fi
+          fi
+
           if [ -z "$SHORTCODE" ]; then
-            echo "❌ فرمت صحیح نیست. از /download <shortcode> استفاده کنید."
+            echo "❌ فرمت صحیح نیست. از /download <shortcode> یا لینک اینستاگرام استفاده کنید."
             exit 1
           fi
           echo "shortcode=$SHORTCODE" >> $GITHUB_OUTPUT
+          echo "✅ Shortcode استخراج شد: $SHORTCODE"
 
       - name: 🔐 رمزگشایی کوکی اینستاگرام از فایل INSTAGRAM_COOKIES.gpg
         run: |
@@ -305,7 +331,7 @@ jobs:
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
       - name: Comment success
-        if: success()
+        if: success() && github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -316,7 +342,7 @@ jobs:
           gh issue comment "${{ github.event.issue.number }}" --body-file $BODY
 
       - name: Comment error
-        if: failure()
+        if: failure() && github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
