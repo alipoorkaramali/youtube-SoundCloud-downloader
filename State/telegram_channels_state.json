@@ -1,5 +1,5 @@
 {
-  "last_used_channel": "johndoe",
+  "last_used_channel": "speaking_practice1404",
   "channel_list": [
     "johndoe",
     "speaking_practice1404"
@@ -7,13 +7,13 @@
   "channels": {
     "speaking_practice1404": {
       "last_post_id": "428",
-      "last_updated": "2026-09-20T18:04:13Z",
+      "last_updated": "2026-09-21T14:29:29Z",
       "channel_name": "",
       "last_limit": 35,
       "last_mega_folder": "TelegramArchive",
       "downloaded_posts_count": 2,
       "recent_post_ids": [
-        "427",
+        "1",
         "428"
       ],
       "source_run_id": 34889156757,
