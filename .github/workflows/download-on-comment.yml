@@ -36,21 +36,34 @@ jobs:
             RAW_INPUT="${{ github.event.comment.body }}"
           fi
 
+          # تمیز کردن ورودی
+          RAW_INPUT=$(echo "$RAW_INPUT" | tr -d '\r' | xargs)
+
           PLATFORM=""
           ID=""
           FULL_URL=""
 
-          # تشخیص تیک‌تاک
-          if echo "$RAW_INPUT" | grep -qE 'tiktok\.com|vt\.tiktok\.com|vm\.tiktok\.com'; then
+          echo "📥 ورودی خام: $RAW_INPUT"
+
+          # ========== تشخیص تیک‌تاک ==========
+          if echo "$RAW_INPUT" | grep -qiE 'tiktok\.com|vt\.tiktok\.com|vm\.tiktok\.com'; then
             PLATFORM="tiktok"
-            # استخراج لینک کامل
-            FULL_URL=$(echo "$RAW_INPUT" | grep -oE 'https?://[^ ]*tiktok[^ ]*' | head -1)
+
+            # استخراج هر لینک تیک‌تاک از متن
+            FULL_URL=$(echo "$RAW_INPUT" | grep -oE 'https?://[^[:space:]]*tiktok[^[:space:]]*' | head -1)
+
+            # اگر پیدا نشد، شاید فقط /download لینک باشد
             if [ -z "$FULL_URL" ]; then
-              # شاید فقط /download لینک داده باشه
-              FULL_URL=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+(https?://[^ ]+)' | awk '{print $2}')
+              FULL_URL=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+(https?://[^[:space:]]+)' | awk '{print $2}')
             fi
+
+            # اگر هنوز خالی است و کل ورودی یک URL است
+            if [ -z "$FULL_URL" ] && echo "$RAW_INPUT" | grep -qE '^https?://'; then
+              FULL_URL="$RAW_INPUT"
+            fi
+
             # استخراج video id
-            ID=$(echo "$FULL_URL" | grep -oE '/video/([0-9]+)' | head -1 | awk -F'/' '{print $3}')
+            ID=$(echo "$FULL_URL" | grep -oE '/video/([0-9]+)' | head -1 | sed 's|/video/||')
             if [ -z "$ID" ]; then
               ID=$(echo "$FULL_URL" | grep -oE '[0-9]{15,}' | head -1)
             fi
@@ -58,26 +71,34 @@ jobs:
               ID="tiktok_$(date +%s)"
             fi
 
-          # تشخیص اینستاگرام
-          elif echo "$RAW_INPUT" | grep -qE 'instagram\.com'; then
+          # ========== تشخیص اینستاگرام ==========
+          elif echo "$RAW_INPUT" | grep -qiE 'instagram\.com'; then
             PLATFORM="instagram"
-            FULL_URL=$(echo "$RAW_INPUT" | grep -oE 'https?://[^ ]*instagram[^ ]*' | head -1)
+
+            FULL_URL=$(echo "$RAW_INPUT" | grep -oE 'https?://[^[:space:]]*instagram[^[:space:]]*' | head -1)
+            if [ -z "$FULL_URL" ] && echo "$RAW_INPUT" | grep -qE '^https?://'; then
+              FULL_URL="$RAW_INPUT"
+            fi
+
             ID=$(echo "$RAW_INPUT" | grep -oE '/(p|reel|tv)/[A-Za-z0-9_-]+' | head -1 | awk -F'/' '{print $3}')
             if [ -z "$ID" ]; then
               ID=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
             fi
 
-          # حالت shortcode خام یا /download SHORTCODE (فرض می‌کنیم اینستاگرام)
+          # ========== shortcode خام (فرض اینستاگرام) ==========
           else
             PLATFORM="instagram"
             ID=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
             if [ -z "$ID" ]; then
               ID=$(echo "$RAW_INPUT" | grep -oE '[A-Za-z0-9_-]{5,}' | head -1)
             fi
-            FULL_URL="https://www.instagram.com/p/${ID}/"
+            if [ -n "$ID" ]; then
+              FULL_URL="https://www.instagram.com/p/${ID}/"
+            fi
           fi
 
-          if [ -z "$ID" ] || [ -z "$PLATFORM" ]; then
+          # اعتبارسنجی نهایی
+          if [ -z "$PLATFORM" ] || [ -z "$ID" ]; then
             echo "❌ فرمت صحیح نیست."
             echo "نمونه‌های صحیح:"
             echo "  /download https://www.tiktok.com/@user/video/1234567890"
@@ -86,10 +107,16 @@ jobs:
             exit 1
           fi
 
+          if [ -z "$FULL_URL" ]; then
+            echo "❌ لینک کامل استخراج نشد!"
+            exit 1
+          fi
+
           echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
           echo "id=$ID" >> $GITHUB_OUTPUT
           echo "full_url=$FULL_URL" >> $GITHUB_OUTPUT
           echo "✅ پلتفرم: $PLATFORM | شناسه: $ID"
+          echo "🔗 URL نهایی: $FULL_URL"
 
       - name: 🔐 رمزگشایی کوکی اینستاگرام (فقط در صورت نیاز)
         if: steps.parse.outputs.platform == 'instagram'
@@ -106,11 +133,16 @@ jobs:
             echo "⚠️ کوکی خالی بود"
           fi
 
-      - name: نصب Python و yt-dlp
+      - name: نصب Python و yt-dlp + ffmpeg
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install --upgrade yt-dlp requests
+      - run: |
+          pip install --upgrade yt-dlp requests
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          yt-dlp --version
+          ffmpeg -version | head -1
 
       - name: ایجاد اسکریپت دانلود چندپلتفرمی
         run: |
@@ -128,18 +160,24 @@ jobs:
                   "--merge-output-format", "mp4",
                   "--retries", "15",
                   "--fragment-retries", "15",
+                  "--no-warnings",
                   url
               ]
               if cookies_file and Path(cookies_file).exists():
                   cmd.extend(["--cookies", cookies_file])
-              
+
               print(f"▶️ در حال دانلود: {url}")
+              print(f"📂 پوشه خروجی: {output_dir}")
               try:
                   result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                  print(result.stdout[-500:] if result.stdout else "")
+                  if result.stdout:
+                      print(result.stdout[-800:])
                   return True
               except subprocess.CalledProcessError as e:
-                  print(f"❌ yt-dlp خطا:\n{e.stderr}")
+                  print(f"❌ yt-dlp خطا (exit {e.returncode}):")
+                  print(e.stderr[-1500:] if e.stderr else "(بدون stderr)")
+                  if e.stdout:
+                      print("stdout:", e.stdout[-500:])
                   return False
 
           def extract_metadata(url, cookies_file=None):
@@ -147,11 +185,11 @@ jobs:
               if cookies_file and Path(cookies_file).exists():
                   cmd.extend(["--cookies", cookies_file])
               try:
-                  result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                  result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60)
                   info = json.loads(result.stdout)
                   return {
                       "id": info.get("id"),
-                      "username": info.get("uploader") or info.get("channel") or "unknown",
+                      "username": info.get("uploader") or info.get("channel") or info.get("creator") or "unknown",
                       "title": info.get("title", ""),
                       "description": info.get("description", ""),
                       "like_count": info.get("like_count", 0),
@@ -169,6 +207,10 @@ jobs:
               platform = sys.argv[1]
               item_id = sys.argv[2]
               url = sys.argv[3]
+
+              if not url or url.strip() == "":
+                  print("❌ URL خالی است!")
+                  sys.exit(1)
 
               download_dir = Path(f"{platform}_downloads") / item_id
               download_dir.mkdir(parents=True, exist_ok=True)
@@ -197,6 +239,7 @@ jobs:
                           "platform": platform
                       }, f, indent=2)
                   print(f"🎉 دانلود موفق: {platform} | {item_id}")
+                  print(f"👤 Username: {metadata.get('username')}")
               else:
                   print(f"💥 دانلود ناموفق: {platform} | {item_id}")
                   sys.exit(1)
@@ -208,6 +251,11 @@ jobs:
 
       - name: دانلود محتوا
         run: |
+          echo "========================================"
+          echo "پلتفرم: ${{ steps.parse.outputs.platform }}"
+          echo "شناسه: ${{ steps.parse.outputs.id }}"
+          echo "URL: ${{ steps.parse.outputs.full_url }}"
+          echo "========================================"
           python .github/scripts/download_multi.py \
             "${{ steps.parse.outputs.platform }}" \
             "${{ steps.parse.outputs.id }}" \
@@ -266,10 +314,10 @@ jobs:
           ID="${{ steps.parse.outputs.id }}"
           USERNAME="${{ steps.username.outputs.username }}"
 
+          # اولویت: ورودی دستی کاربر، در غیر این صورت بر اساس پلتفرم
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.mega_folder }}" ]; then
             MEGA_FOLDER="${{ github.event.inputs.mega_folder }}"
           else
-            # پیش‌فرض بر اساس پلتفرم
             if [ "$PLATFORM" = "tiktok" ]; then
               MEGA_FOLDER="TikTok"
             else
@@ -278,7 +326,10 @@ jobs:
           fi
 
           MEGA_FOLDER=$(echo "$MEGA_FOLDER" | sed 's|^/*||;s|/*$||')
+          [ -z "$MEGA_FOLDER" ] && MEGA_FOLDER="TikTok"
+
           echo "mega_folder=$MEGA_FOLDER" >> $GITHUB_OUTPUT
+          echo "📁 پوشه مگا انتخاب‌شده: $MEGA_FOLDER (پلتفرم: $PLATFORM)"
 
           REMOTE="mega:${MEGA_FOLDER}/${USERNAME}/${ID}"
           echo "📤 آپلود به: $REMOTE"
@@ -287,7 +338,7 @@ jobs:
           rclone copy "${PLATFORM}_downloads/${ID}" "$REMOTE" --transfers=4
 
           # لینک عمومی (اختیاری)
-          sudo apt-get update -qq && sudo apt-get install -y -qq megatools
+          sudo apt-get update -qq && sudo apt-get install -y -qq megatools || true
           LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "/${MEGA_FOLDER}/${USERNAME}/${ID}" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1 || true)
           echo "link=$LINK" >> $GITHUB_OUTPUT
 
