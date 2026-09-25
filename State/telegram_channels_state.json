@@ -7,12 +7,13 @@
   "channels": {
     "speaking_practice1404": {
       "last_post_id": "436",
-      "last_updated": "2026-09-24T17:24:47Z",
+      "last_updated": "2026-09-25T04:50:12Z",
       "channel_name": "",
       "last_limit": 35,
       "last_mega_folder": "TelegramArchive",
-      "downloaded_posts_count": 1,
+      "downloaded_posts_count": 2,
       "recent_post_ids": [
+        "1",
         "436"
       ],
       "source_run_id": 34889156757,
