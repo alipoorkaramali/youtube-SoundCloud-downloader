@@ -1,1 +1,383 @@
-PLACEHOLDER_WILL_REPLACE
+name: 📥 دانلود اینستاگرام / تیک‌تاک و آپلود به مگا
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      url_or_shortcode:
+        description: 'لینک اینستاگرام / تیک‌تاک یا shortcode اینستاگرام'
+        required: true
+        type: string
+
+jobs:
+  download:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/download'))
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: استخراج پلتفرم و شناسه
+        id: parse
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW_INPUT='${{ github.event.inputs.url_or_shortcode }}'
+          else
+            RAW_INPUT='${{ github.event.comment.body }}'
+          fi
+
+          RAW_INPUT=$(echo "$RAW_INPUT" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+          echo "📥 ورودی خام: [$RAW_INPUT]"
+
+          PLATFORM=""
+          ID=""
+          FULL_URL=""
+
+          if echo "$RAW_INPUT" | grep -qiE 'tiktok\.com|vt\.tiktok\.com|vm\.tiktok\.com'; then
+            PLATFORM="tiktok"
+
+            FULL_URL=$(echo "$RAW_INPUT" | grep -oE 'https?://[^[:space:]"'\''<>]+' | grep -i tiktok | head -1)
+
+            if [ -z "$FULL_URL" ] && echo "$RAW_INPUT" | grep -qE '^https?://'; then
+              FULL_URL="$RAW_INPUT"
+            fi
+
+            # پاک‌سازی پسوند اضافه (مثل /true) و query string
+            FULL_URL=$(echo "$FULL_URL" | sed -E 's#/(true|false)/?$##')
+            FULL_URL=$(echo "$FULL_URL" | sed -E 's#[?&].*$##')
+
+            # اگر لینک کوتاه vt/vm بود، فقط مسیر کوتاه را نگه دار
+            SHORT=$(echo "$FULL_URL" | grep -oE 'https?://(vt|vm)\.tiktok\.com/[A-Za-z0-9_-]+' | head -1 || true)
+            if [ -n "$SHORT" ]; then
+              FULL_URL="${SHORT}/"
+            fi
+
+            ID=$(echo "$FULL_URL" | grep -oE '/video/[0-9]+' | head -1 | sed 's|/video/||' || true)
+            if [ -z "$ID" ]; then
+              ID=$(echo "$FULL_URL" | grep -oE '[0-9]{15,}' | head -1 || true)
+            fi
+            if [ -z "$ID" ]; then
+              ID=$(echo "$FULL_URL" | grep -oE '(vt|vm)\.tiktok\.com/[A-Za-z0-9_-]+' | head -1 | sed 's|.*/||' || true)
+            fi
+            if [ -z "$ID" ]; then
+              ID="tiktok_$(date +%s)"
+            fi
+
+          elif echo "$RAW_INPUT" | grep -qiE 'instagram\.com'; then
+            PLATFORM="instagram"
+
+            FULL_URL=$(echo "$RAW_INPUT" | grep -oE 'https?://[^[:space:]"'\''<>]+' | grep -i instagram | head -1)
+            if [ -z "$FULL_URL" ] && echo "$RAW_INPUT" | grep -qE '^https?://'; then
+              FULL_URL="$RAW_INPUT"
+            fi
+
+            # حذف query (مثل ?stkn=...) و نرمال‌سازی اسلش
+            FULL_URL=$(echo "$FULL_URL" | sed -E 's#[?&].*$##')
+            FULL_URL=$(echo "$FULL_URL" | sed -E 's#/+$##')
+            FULL_URL="${FULL_URL}/"
+
+            ID=$(echo "$FULL_URL" | grep -oE '/(p|reel|tv)/[A-Za-z0-9_-]+' | head -1 | awk -F'/' '{print $NF}')
+            if [ -z "$ID" ]; then
+              ID=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
+            fi
+
+          else
+            # shortcode خام یا /download CODE (فقط اینستاگرام)
+            PLATFORM="instagram"
+            ID=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
+            if [ -z "$ID" ]; then
+              ID=$(echo "$RAW_INPUT" | grep -oE '[A-Za-z0-9_-]{5,}' | grep -viE '^(true|false|null|undefined|download|https?)$' | head -1 || true)
+            fi
+            if [ -n "$ID" ]; then
+              FULL_URL="https://www.instagram.com/p/${ID}/"
+            fi
+          fi
+
+          # رد شناسه‌های بی‌معنی (باگ پارس true/false از لینک تیک‌تاک)
+          if echo "$ID" | grep -qiE '^(true|false|null|undefined|truetrue)$'; then
+            echo "❌ شناسه نامعتبر استخراج شد: [$ID] — ورودی را بررسی کنید"
+            echo "RAW=[$RAW_INPUT]"
+            exit 1
+          fi
+
+          if [ -z "$PLATFORM" ] || [ -z "$ID" ] || [ -z "$FULL_URL" ]; then
+            echo "❌ نتوانست پلتفرم/لینک را استخراج کند"
+            echo "PLATFORM=[$PLATFORM] ID=[$ID] FULL_URL=[$FULL_URL]"
+            exit 1
+          fi
+
+          echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
+          echo "id=$ID" >> $GITHUB_OUTPUT
+          echo "full_url=$FULL_URL" >> $GITHUB_OUTPUT
+
+          echo "✅ پلتفرم: $PLATFORM"
+          echo "✅ شناسه: $ID"
+          echo "✅ URL: $FULL_URL"
+
+      - name: 🔐 رمزگشایی کوکی اینستاگرام (فقط در صورت نیاز)
+        if: steps.parse.outputs.platform == 'instagram'
+        run: |
+          if [ ! -f config/INSTAGRAM_COOKIES.gpg ]; then
+            echo "⚠️ کوکی اینستاگرام موجود نیست — بدون کوکی ادامه می‌دهیم"
+            exit 0
+          fi
+          gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt config/INSTAGRAM_COOKIES.gpg > cookies.txt || true
+          if [ -s cookies.txt ]; then
+            echo "✅ کوکی رمزگشایی شد"
+            echo "INSTAGRAM_COOKIES_PATH=$(pwd)/cookies.txt" >> $GITHUB_ENV
+          fi
+
+      - name: نصب ابزارها (با curl-cffi برای تیک‌تاک)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg python3-pip jq
+          pip3 install --upgrade "yt-dlp[default,curl-cffi]"
+          echo "--- versions ---"
+          yt-dlp --version
+          python3 -c "import curl_cffi; print('curl_cffi:', curl_cffi.__version__)" || echo "curl_cffi NOT found"
+          ffmpeg -version | head -1
+          yt-dlp --list-impersonate-targets 2>/dev/null | head -10 || true
+
+      - name: دانلود محتوا با yt-dlp
+        id: download
+        env:
+          PLATFORM: ${{ steps.parse.outputs.platform }}
+          ITEM_ID: ${{ steps.parse.outputs.id }}
+          FULL_URL: ${{ steps.parse.outputs.full_url }}
+        run: |
+          set -e
+          echo "========================================"
+          echo "پلتفرم : $PLATFORM"
+          echo "شناسه  : $ITEM_ID"
+          echo "URL    : $FULL_URL"
+          echo "========================================"
+
+          if [ -z "$FULL_URL" ]; then
+            echo "❌ FULL_URL خالی است!"
+            exit 1
+          fi
+
+          DOWNLOAD_DIR="${PLATFORM}_downloads/${ITEM_ID}"
+          mkdir -p "$DOWNLOAD_DIR"
+
+          # نرمال‌سازی نهایی URL (حذف query اگر مانده باشد)
+          FULL_URL=$(echo "$FULL_URL" | sed -E 's#[?&].*$##')
+
+          if [ "$PLATFORM" = "instagram" ]; then
+            # ===== اینستاگرام: چندمرحله‌ای و مقاوم =====
+            EXIT_CODE=1
+
+            # تلاش ۱: بدون کوکی + impersonate (پست‌های عمومی)
+            echo "▶️ [IG] تلاش ۱: بدون کوکی + impersonate chrome..."
+            set +e
+            yt-dlp \
+              --no-playlist \
+              --retries 5 \
+              --fragment-retries 5 \
+              --merge-output-format mp4 \
+              --impersonate chrome \
+              -f "b" \
+              -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
+              "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
+            EXIT_CODE=${PIPESTATUS[0]}
+            set -e
+
+            # تلاش ۲: با کوکی + impersonate
+            if [ "$EXIT_CODE" -ne 0 ] && [ -n "$INSTAGRAM_COOKIES_PATH" ] && [ -f "$INSTAGRAM_COOKIES_PATH" ]; then
+              echo "⚠️ [IG] تلاش ۱ شکست — تلاش ۲: با کوکی + impersonate..."
+              find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
+              set +e
+              yt-dlp \
+                --no-playlist \
+                --retries 5 \
+                --fragment-retries 5 \
+                --merge-output-format mp4 \
+                --impersonate chrome \
+                --cookies "$INSTAGRAM_COOKIES_PATH" \
+                -f "b" \
+                -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
+                "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
+              EXIT_CODE=${PIPESTATUS[0]}
+              set -e
+            fi
+
+            # تلاش ۳: فقط با کوکی (بدون impersonate)
+            if [ "$EXIT_CODE" -ne 0 ] && [ -n "$INSTAGRAM_COOKIES_PATH" ] && [ -f "$INSTAGRAM_COOKIES_PATH" ]; then
+              echo "⚠️ [IG] تلاش ۲ شکست — تلاش ۳: فقط کوکی..."
+              find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
+              set +e
+              yt-dlp \
+                --no-playlist \
+                --retries 5 \
+                --fragment-retries 5 \
+                --merge-output-format mp4 \
+                --cookies "$INSTAGRAM_COOKIES_PATH" \
+                -f "b" \
+                -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
+                "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
+              EXIT_CODE=${PIPESTATUS[0]}
+              set -e
+            fi
+
+          else
+            # ===== تیک‌تاک: رفتار قبلی عمداً حفظ شده =====
+            echo "▶️ [TT] شروع دانلود تیک‌تاک..."
+            set +e
+            yt-dlp \
+              --no-playlist \
+              --retries 10 \
+              --fragment-retries 10 \
+              --merge-output-format mp4 \
+              -f "b" \
+              -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
+              "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
+            EXIT_CODE=${PIPESTATUS[0]}
+            set -e
+          fi
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "❌ yt-dlp با کد $EXIT_CODE شکست خورد"
+            echo "--- آخرین خطوط لاگ ---"
+            tail -60 /tmp/ytdlp.log || true
+            echo ""
+            echo "محتوای پوشه:"
+            ls -la "$DOWNLOAD_DIR" || true
+            exit 1
+          fi
+
+          FILE_COUNT=$(find "$DOWNLOAD_DIR" -type f ! -name '*.json' ! -name '*.txt' | wc -l)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "❌ هیچ فایلی دانلود نشد!"
+            ls -la "$DOWNLOAD_DIR"
+            exit 1
+          fi
+
+          echo "✅ دانلود موفق — تعداد فایل: $FILE_COUNT"
+          ls -lh "$DOWNLOAD_DIR"
+
+          USERNAME=$(yt-dlp --print "%(uploader)s" --no-download "$FULL_URL" 2>/dev/null || echo "unknown")
+          [ -z "$USERNAME" ] && USERNAME="unknown"
+
+          REAL_ID=$(grep -oE '\[TikTok\] [0-9]{15,}' /tmp/ytdlp.log | head -1 | awk '{print $2}' || true)
+          if [ -n "$REAL_ID" ] && [ "$REAL_ID" != "$ITEM_ID" ]; then
+            echo "🔄 به‌روزرسانی شناسه واقعی: $REAL_ID"
+            NEW_DIR="${PLATFORM}_downloads/${REAL_ID}"
+            if [ "$DOWNLOAD_DIR" != "$NEW_DIR" ]; then
+              mv "$DOWNLOAD_DIR" "$NEW_DIR" || true
+              DOWNLOAD_DIR="$NEW_DIR"
+              ITEM_ID="$REAL_ID"
+              echo "id=$REAL_ID" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+          cat > "$DOWNLOAD_DIR/post_info.json" << JSON
+          {
+            "id": "$ITEM_ID",
+            "username": "$USERNAME",
+            "platform": "$PLATFORM"
+          }
+          JSON
+
+          echo "username=$USERNAME" >> $GITHUB_OUTPUT
+          echo "final_id=$ITEM_ID" >> $GITHUB_OUTPUT
+          echo "👤 Username: $USERNAME"
+          echo "🆔 Final ID: $ITEM_ID"
+
+      - name: Cache rclone
+        if: success()
+        uses: actions/cache@v4
+        id: cache-rclone
+        with:
+          path: ~/.local/bin/rclone
+          key: rclone-${{ runner.os }}
+
+      - name: Install rclone (if not cached)
+        if: success() && steps.cache-rclone.outputs.cache-hit != 'true'
+        run: |
+          curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip
+          unzip rclone-current-linux-amd64.zip
+          mkdir -p ~/.local/bin
+          cp rclone-*-linux-amd64/rclone ~/.local/bin/
+          chmod +x ~/.local/bin/rclone
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Enable rclone (cached)
+        if: success() && steps.cache-rclone.outputs.cache-hit == 'true'
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Decrypt rclone config
+        if: success()
+        run: |
+          mkdir -p ~/.config/rclone
+          gpg --quiet --batch --yes --decrypt --passphrase="${{ secrets.RCLONE_PASSPHRASE }}" \
+              --output ~/.config/rclone/rclone.conf config/rclone_mega.conf.gpg
+          chmod 600 ~/.config/rclone/rclone.conf
+
+      - name: Upload to Mega
+        if: success()
+        id: upload
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          PLATFORM="${{ steps.parse.outputs.platform }}"
+          ID="${{ steps.download.outputs.final_id }}"
+          [ -z "$ID" ] && ID="${{ steps.parse.outputs.id }}"
+          USERNAME="${{ steps.download.outputs.username }}"
+          [ -z "$USERNAME" ] && USERNAME="unknown"
+
+          if [ "$PLATFORM" = "tiktok" ]; then
+            MEGA_FOLDER="TikTok"
+          else
+            MEGA_FOLDER="Instagram"
+          fi
+
+          echo "mega_folder=$MEGA_FOLDER" >> $GITHUB_OUTPUT
+          echo "📁 پوشه مگا: $MEGA_FOLDER (پلتفرم: $PLATFORM)"
+
+          REMOTE="mega:${MEGA_FOLDER}/${USERNAME}/${ID}"
+          echo "📤 آپلود به: $REMOTE"
+
+          rclone mkdir "$REMOTE" 2>/dev/null || true
+          rclone copy "${PLATFORM}_downloads/${ID}" "$REMOTE" --transfers=4
+
+          sudo apt-get update -qq && sudo apt-get install -y -qq megatools || true
+          LINK=$(megatools export --username "$MEGA_EMAIL" --password "$MEGA_PASSWORD" "/${MEGA_FOLDER}/${USERNAME}/${ID}" 2>/dev/null | grep -o 'https://mega.nz/[^ ]*' | head -1 || true)
+          echo "link=$LINK" >> $GITHUB_OUTPUT
+
+      - name: Comment success
+        if: success() && github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PLATFORM="${{ steps.parse.outputs.platform }}"
+          BODY=""
+          echo "✅ **${PLATFORM^}** با موفقیت دانلود و به مگا آپلود شد." >> $BODY
+          echo "" >> $BODY
+          echo "- شناسه: \`${{ steps.download.outputs.final_id || steps.parse.outputs.id }}\`" >> $BODY
+          echo "- کاربر: \`${{ steps.download.outputs.username }}\`" >> $BODY
+          if [ -n "${{ steps.upload.outputs.link }}" ]; then
+            echo "- لینک مگا: ${{ steps.upload.outputs.link }}" >> $BODY
+          fi
+          gh issue comment "${{ github.event.issue.number }}" --body "$(cat <<EOF
+          ✅ **${PLATFORM^}** با موفقیت دانلود و به مگا آپلود شد.
+
+          - شناسه: \`${{ steps.download.outputs.final_id || steps.parse.outputs.id }}\`
+          - کاربر: \`${{ steps.download.outputs.username }}\`
+          EOF
+          )"
+
+      - name: Comment error
+        if: failure() && github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در دانلود \`${{ steps.parse.outputs.platform }}\` (شناسه: ${{ steps.parse.outputs.id }}). لطفاً لاگ را بررسی کنید."
