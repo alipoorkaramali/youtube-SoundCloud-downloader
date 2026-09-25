@@ -9,11 +9,6 @@ on:
         description: 'لینک اینستاگرام / تیک‌تاک یا shortcode اینستاگرام'
         required: true
         type: string
-      mega_folder:
-        description: 'پوشه مقصد در مگا (پیش‌فرض: Instagram یا TikTok)'
-        required: false
-        type: string
-        default: ''
 
 jobs:
   download:
@@ -197,7 +192,6 @@ jobs:
           REAL_ID=$(grep -oE '\[TikTok\] [0-9]{15,}' /tmp/ytdlp.log | head -1 | awk '{print $2}' || true)
           if [ -n "$REAL_ID" ] && [ "$REAL_ID" != "$ITEM_ID" ]; then
             echo "🔄 به‌روزرسانی شناسه واقعی: $REAL_ID"
-            # پوشه را با id واقعی rename کن
             NEW_DIR="${PLATFORM}_downloads/${REAL_ID}"
             if [ "$DOWNLOAD_DIR" != "$NEW_DIR" ]; then
               mv "$DOWNLOAD_DIR" "$NEW_DIR" || true
@@ -255,24 +249,17 @@ jobs:
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           PLATFORM="${{ steps.parse.outputs.platform }}"
-          # اولویت با final_id از مرحله دانلود
           ID="${{ steps.download.outputs.final_id }}"
           [ -z "$ID" ] && ID="${{ steps.parse.outputs.id }}"
           USERNAME="${{ steps.download.outputs.username }}"
           [ -z "$USERNAME" ] && USERNAME="unknown"
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.mega_folder }}" ]; then
-            MEGA_FOLDER="${{ github.event.inputs.mega_folder }}"
+          # پوشه مگا همیشه بر اساس پلتفرم لینک
+          if [ "$PLATFORM" = "tiktok" ]; then
+            MEGA_FOLDER="TikTok"
           else
-            if [ "$PLATFORM" = "tiktok" ]; then
-              MEGA_FOLDER="TikTok"
-            else
-              MEGA_FOLDER="Instagram"
-            fi
+            MEGA_FOLDER="Instagram"
           fi
-
-          MEGA_FOLDER=$(echo "$MEGA_FOLDER" | sed 's|^/*||;s|/*$||')
-          [ -z "$MEGA_FOLDER" ] && MEGA_FOLDER="TikTok"
 
           echo "mega_folder=$MEGA_FOLDER" >> $GITHUB_OUTPUT
           echo "📁 پوشه مگا: $MEGA_FOLDER (پلتفرم: $PLATFORM)"
