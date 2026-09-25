@@ -116,39 +116,23 @@ jobs:
             "config/cookies2.txt.gpg"
             "config/cookies3.txt.gpg"
           )
-
-          echo "🔍 جستجوی فایل کوکی..."
-          ls -la config/*.gpg 2>/dev/null || true
-
           FOUND=""
           for f in "${CANDIDATES[@]}"; do
             if [ -f "$f" ]; then
-              echo "📄 تلاش رمزگشایی: $f"
               gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt "$f" > cookies.txt 2>/tmp/gpg_err
-              if [ -s cookies.txt ]; then
-                if grep -qiE 'instagram|sessionid|csrftoken|ds_user' cookies.txt; then
-                  FOUND="$f"
-                  echo "✅ کوکی از $f با موفقیت رمزگشایی شد"
-                  wc -l cookies.txt
-                  break
-                else
-                  echo "⚠️ $f بدون محتوای اینستاگرام"
-                  rm -f cookies.txt
-                fi
-              else
-                echo "⚠️ رمزگشایی $f ناموفق"
-                cat /tmp/gpg_err 2>/dev/null | head -5 || true
-                rm -f cookies.txt
+              if [ -s cookies.txt ] && grep -qiE 'instagram|sessionid|csrftoken|ds_user' cookies.txt; then
+                FOUND="$f"
+                echo "✅ کوکی از $f"
+                break
               fi
+              rm -f cookies.txt
             fi
           done
-
           if [ -n "$FOUND" ] && [ -s cookies.txt ]; then
             echo "INSTAGRAM_COOKIES_PATH=$(pwd)/cookies.txt" >> $GITHUB_ENV
             echo "HAS_COOKIES=true" >> $GITHUB_ENV
           else
             echo "HAS_COOKIES=false" >> $GITHUB_ENV
-            echo "⚠️ کوکی لود نشد"
           fi
           set -e
 
@@ -157,7 +141,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg python3-pip jq
           pip3 install --upgrade "yt-dlp[default,curl-cffi]" gallery-dl instaloader
-          yt-dlp --version
 
       - name: دانلود محتوا
         id: download
@@ -167,50 +150,34 @@ jobs:
           FULL_URL: ${{ steps.parse.outputs.full_url }}
         run: |
           set -e
-          echo "========================================"
-          echo "پلتفرم : $PLATFORM"
-          echo "شناسه  : $ITEM_ID"
-          echo "URL    : $FULL_URL"
-          echo "کوکی  : ${INSTAGRAM_COOKIES_PATH:-(ندارد)} | HAS_COOKIES=${HAS_COOKIES:-false}"
-          echo "========================================"
+          echo "پلتفرم=$PLATFORM ID=$ITEM_ID URL=$FULL_URL COOKIES=${HAS_COOKIES:-false}"
 
-          if [ -z "$FULL_URL" ]; then
-            echo "❌ FULL_URL خالی است!"
-            exit 1
-          fi
+          if [ -z "$FULL_URL" ]; then exit 1; fi
 
           DOWNLOAD_DIR="${PLATFORM}_downloads/${ITEM_ID}"
           mkdir -p "$DOWNLOAD_DIR"
           FULL_URL=$(echo "$FULL_URL" | sed -E 's#[?&].*$##')
 
           HAS_CK=false
-          if [ -n "$INSTAGRAM_COOKIES_PATH" ] && [ -f "$INSTAGRAM_COOKIES_PATH" ]; then
-            HAS_CK=true
-          fi
+          if [ -n "$INSTAGRAM_COOKIES_PATH" ] && [ -f "$INSTAGRAM_COOKIES_PATH" ]; then HAS_CK=true; fi
 
           count_media() {
             find "$DOWNLOAD_DIR" -type f \( -name '*.mp4' -o -name '*.webm' -o -name '*.mkv' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' -o -name '*.webp' -o -name '*.mp3' -o -name '*.m4a' \) 2>/dev/null | wc -l
           }
-
           flatten_media() {
             find "$DOWNLOAD_DIR" -type f \( -name '*.mp4' -o -name '*.webm' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' -o -name '*.webp' \) -exec mv -n {} "$DOWNLOAD_DIR"/ \; 2>/dev/null || true
           }
 
           if [ "$PLATFORM" = "instagram" ]; then
-            EXIT_CODE=1
-
-            # 1) اول بدون کوکی
-            echo "▶️ [IG] تلاش ۱: yt-dlp بدون کوکی + impersonate..."
+            echo "▶️ [IG] تلاش ۱: yt-dlp بدون کوکی..."
             set +e
             yt-dlp --no-playlist --retries 5 --fragment-retries 5 --merge-output-format mp4 \
               --impersonate chrome -f "b" \
               -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
               "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
-            EXIT_CODE=${PIPESTATUS[0]}
             set -e
             FILE_COUNT=$(count_media)
 
-            # 2) اگر نشد و کوکی هست → با کوکی
             if [ "$FILE_COUNT" -eq 0 ] && [ "$HAS_CK" = true ]; then
               echo "⚠️ [IG] تلاش ۲: yt-dlp + کوکی + impersonate..."
               find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
@@ -219,28 +186,23 @@ jobs:
                 --impersonate chrome --cookies "$INSTAGRAM_COOKIES_PATH" -f "b" \
                 -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
                 "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
-              EXIT_CODE=${PIPESTATUS[0]}
               set -e
               FILE_COUNT=$(count_media)
             fi
 
             if [ "$FILE_COUNT" -eq 0 ] && [ "$HAS_CK" = true ]; then
-              echo "⚠️ [IG] تلاش ۳: yt-dlp + کوکی (بدون impersonate)..."
+              echo "⚠️ [IG] تلاش ۳: yt-dlp + کوکی..."
               find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
               set +e
               yt-dlp --no-playlist --retries 5 --fragment-retries 5 --merge-output-format mp4 \
                 --cookies "$INSTAGRAM_COOKIES_PATH" -f "b" \
                 -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
                 "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
-              EXIT_CODE=${PIPESTATUS[0]}
               set -e
               FILE_COUNT=$(count_media)
             fi
 
-            # 3) فالبک gallery-dl / instaloader
             if [ "$FILE_COUNT" -eq 0 ]; then
-              echo "🔄 [IG-FALLBACK] gallery-dl / instaloader..."
-
               if [ "$HAS_CK" = true ]; then
                 echo "▶️ [IG-FALLBACK] gallery-dl با کوکی..."
                 find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
@@ -250,20 +212,14 @@ jobs:
                 flatten_media
                 FILE_COUNT=$(count_media)
               fi
-
               if [ "$FILE_COUNT" -eq 0 ]; then
-                echo "▶️ [IG-FALLBACK] gallery-dl بدون کوکی..."
-                find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
                 set +e
                 gallery-dl --dest "$DOWNLOAD_DIR" "$FULL_URL" 2>&1 | tee /tmp/gallerydl.log
                 set -e
                 flatten_media
                 FILE_COUNT=$(count_media)
               fi
-
               if [ "$FILE_COUNT" -eq 0 ]; then
-                echo "▶️ [IG-FALLBACK] instaloader..."
-                find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
                 set +e
                 instaloader --dirname-pattern="$DOWNLOAD_DIR" --filename-pattern="{shortcode}" \
                   --no-captions --no-metadata-json --no-compress-json -- -"$ITEM_ID" 2>&1 | tee /tmp/instaloader.log
@@ -272,73 +228,76 @@ jobs:
                 FILE_COUNT=$(count_media)
               fi
             fi
-
           else
-            # ===== تیک‌تاک: بدون تغییر =====
-            echo "▶️ [TT] شروع دانلود تیک‌تاک..."
+            echo "▶️ [TT] دانلود تیک‌تاک..."
             set +e
             yt-dlp --no-playlist --retries 10 --fragment-retries 10 --merge-output-format mp4 -f "b" \
               -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
               "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
-            EXIT_CODE=${PIPESTATUS[0]}
             set -e
             FILE_COUNT=$(count_media)
           fi
 
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "❌ هیچ فایلی دانلود نشد"
-            ls -laR "$DOWNLOAD_DIR" || true
-            tail -40 /tmp/ytdlp.log 2>/dev/null || true
-            tail -30 /tmp/gallerydl.log 2>/dev/null || true
-            tail -30 /tmp/instaloader.log 2>/dev/null || true
             exit 1
           fi
 
-          echo "✅ دانلود موفق — تعداد فایل: $FILE_COUNT"
+          echo "✅ دانلود موفق"
           ls -lh "$DOWNLOAD_DIR"
 
-          # --- استخراج یوزرنیم ---
+          # --- یوزرنیم: هندل، نه ID عددی ---
           USERNAME=""
-          CK_ARGS=()
-          if [ "$PLATFORM" = "instagram" ] && [ -n "$INSTAGRAM_COOKIES_PATH" ] && [ -f "$INSTAGRAM_COOKIES_PATH" ]; then
-            CK_ARGS=(--cookies "$INSTAGRAM_COOKIES_PATH")
+          SAMPLE=$(find "$DOWNLOAD_DIR" -maxdepth 1 -type f ! -name '*.json' ! -name '*.txt' ! -name '*.part' | head -1 || true)
+          BASE=""
+          [ -n "$SAMPLE" ] && BASE=$(basename "$SAMPLE")
+
+          # 1) IG: Video by handle
+          if [ "$PLATFORM" = "instagram" ] && [ -n "$BASE" ]; then
+            FROM_VB=$(echo "$BASE" | grep -oE 'Video by [A-Za-z0-9._]+' | head -1 | sed 's/^Video by //' || true)
+            if [ -n "$FROM_VB" ]; then
+              USERNAME="$FROM_VB"
+              echo "📌 یوزرنیم از نام فایل (Video by): $USERNAME"
+            fi
           fi
 
-          for FIELD in uploader_id uploader channel channel_id; do
-            CAND=$(yt-dlp "${CK_ARGS[@]}" --print "%(${FIELD})s" --no-download "$FULL_URL" 2>/dev/null || true)
-            CAND=$(echo "$CAND" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            if [ -n "$CAND" ] && [ "$CAND" != "NA" ] && [ "$CAND" != "null" ] && [ "$CAND" != "None" ]; then
+          # 2) yt-dlp — رد فقط‌عددی
+          if [ -z "$USERNAME" ]; then
+            CK_ARGS=()
+            if [ "$PLATFORM" = "instagram" ] && [ -n "$INSTAGRAM_COOKIES_PATH" ] && [ -f "$INSTAGRAM_COOKIES_PATH" ]; then
+              CK_ARGS=(--cookies "$INSTAGRAM_COOKIES_PATH")
+            fi
+            for FIELD in uploader channel uploader_id channel_id; do
+              CAND=$(yt-dlp "${CK_ARGS[@]}" --print "%(${FIELD})s" --no-download "$FULL_URL" 2>/dev/null || true)
+              CAND=$(echo "$CAND" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+              if [ -z "$CAND" ] || [ "$CAND" = "NA" ] || [ "$CAND" = "null" ] || [ "$CAND" = "None" ]; then
+                continue
+              fi
+              if echo "$CAND" | grep -qE '^[0-9]+$'; then
+                echo "⏭️ رد شناسه عددی (${FIELD}): $CAND"
+                continue
+              fi
               USERNAME="$CAND"
               echo "📌 یوزرنیم از yt-dlp (${FIELD}): $USERNAME"
               break
-            fi
-          done
+            done
+          fi
 
-          if [ -z "$USERNAME" ]; then
-            SAMPLE=$(find "$DOWNLOAD_DIR" -maxdepth 1 -type f ! -name '*.json' ! -name '*.txt' ! -name '*.part' | head -1 || true)
-            if [ -n "$SAMPLE" ]; then
-              BASE=$(basename "$SAMPLE")
-              FROM_VB=$(echo "$BASE" | grep -oE 'Video by [A-Za-z0-9._]+' | head -1 | sed 's/^Video by //' || true)
-              if [ -n "$FROM_VB" ]; then
-                USERNAME="$FROM_VB"
-                echo "📌 یوزرنیم از نام فایل (Video by): $USERNAME"
-              else
-                FROM_PREFIX=$(echo "$BASE" | sed -E 's/ \[.*//; s/ - .*//')
-                if [ -n "$FROM_PREFIX" ] && [ "$FROM_PREFIX" != "$BASE" ] && [ ${#FROM_PREFIX} -lt 80 ]; then
-                  USERNAME="$FROM_PREFIX"
-                  echo "📌 یوزرنیم از پیشوند نام فایل: $USERNAME"
-                fi
+          # 3) پیشوند نام فایل (TT)
+          if [ -z "$USERNAME" ] && [ -n "$BASE" ]; then
+            FROM_PREFIX=$(echo "$BASE" | sed -E 's/ \[.*//; s/ - .*//')
+            if [ -n "$FROM_PREFIX" ] && [ "$FROM_PREFIX" != "$BASE" ] && [ ${#FROM_PREFIX} -lt 80 ]; then
+              if ! echo "$FROM_PREFIX" | grep -qE '^[0-9]+$'; then
+                USERNAME="$FROM_PREFIX"
+                echo "📌 یوزرنیم از پیشوند فایل: $USERNAME"
               fi
             fi
           fi
 
-          if [ -z "$USERNAME" ]; then
-            USERNAME="unknown"
-          fi
+          if [ -z "$USERNAME" ]; then USERNAME="unknown"; fi
 
           REAL_ID=$(grep -oE '\[TikTok\] [0-9]{15,}' /tmp/ytdlp.log 2>/dev/null | head -1 | awk '{print $2}' || true)
           if [ -n "$REAL_ID" ] && [ "$REAL_ID" != "$ITEM_ID" ]; then
-            echo "🔄 شناسه واقعی: $REAL_ID"
             NEW_DIR="${PLATFORM}_downloads/${REAL_ID}"
             if [ "$DOWNLOAD_DIR" != "$NEW_DIR" ]; then
               mv "$DOWNLOAD_DIR" "$NEW_DIR" || true
@@ -349,17 +308,12 @@ jobs:
           fi
 
           cat > "$DOWNLOAD_DIR/post_info.json" << JSON
-          {
-            "id": "$ITEM_ID",
-            "username": "$USERNAME",
-            "platform": "$PLATFORM"
-          }
+          {"id": "$ITEM_ID", "username": "$USERNAME", "platform": "$PLATFORM"}
           JSON
 
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
           echo "final_id=$ITEM_ID" >> $GITHUB_OUTPUT
-          echo "👤 Username: $USERNAME"
-          echo "🆔 Final ID: $ITEM_ID"
+          echo "👤 Username: $USERNAME | ID: $ITEM_ID"
 
       - name: Cache rclone
         if: success()
@@ -404,13 +358,8 @@ jobs:
           USERNAME="${{ steps.download.outputs.username }}"
           [ -z "$USERNAME" ] && USERNAME="unknown"
 
-          if [ "$PLATFORM" = "tiktok" ]; then
-            MEGA_FOLDER="TikTok"
-          else
-            MEGA_FOLDER="Instagram"
-          fi
+          if [ "$PLATFORM" = "tiktok" ]; then MEGA_FOLDER="TikTok"; else MEGA_FOLDER="Instagram"; fi
 
-          echo "mega_folder=$MEGA_FOLDER" >> $GITHUB_OUTPUT
           REMOTE="mega:${MEGA_FOLDER}/${USERNAME}/${ID}"
           echo "📤 آپلود به: $REMOTE"
 
@@ -427,11 +376,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PLATFORM="${{ steps.parse.outputs.platform }}"
-          gh issue comment "${{ github.event.issue.number }}" --body "✅ **${PLATFORM^}** با موفقیت دانلود شد.\n\n- شناسه: \`${{ steps.download.outputs.final_id || steps.parse.outputs.id }}\`\n- کاربر: \`${{ steps.download.outputs.username }}\`"
+          gh issue comment "${{ github.event.issue.number }}" --body "✅ **${PLATFORM^}** دانلود شد.\n- شناسه: \`${{ steps.download.outputs.final_id || steps.parse.outputs.id }}\`\n- کاربر: \`${{ steps.download.outputs.username }}\`"
 
       - name: Comment error
         if: failure() && github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در دانلود \`${{ steps.parse.outputs.platform }}\` (شناسه: ${{ steps.parse.outputs.id }})."
+          gh issue comment "${{ github.event.issue.number }}" --body "❌ خطا در دانلود \`${{ steps.parse.outputs.platform }}\`"
