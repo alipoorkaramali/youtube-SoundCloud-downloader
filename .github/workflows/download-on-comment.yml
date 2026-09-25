@@ -49,9 +49,22 @@ jobs:
               FULL_URL="$RAW_INPUT"
             fi
 
+            # پاک‌سازی پسوند اضافه (مثل /true که گاهی اشتباه چسبیده)
+            FULL_URL=$(echo "$FULL_URL" | sed -E 's|/(true|false)/?$||; s|[?&].*$||')
+
+            # اگر لینک کوتاه vt/vm بود، فقط مسیر کوتاه را نگه دار
+            SHORT=$(echo "$FULL_URL" | grep -oE 'https?://(vt|vm)\.tiktok\.com/[A-Za-z0-9_-]+' | head -1)
+            if [ -n "$SHORT" ]; then
+              FULL_URL="${SHORT}/"
+            fi
+
             ID=$(echo "$FULL_URL" | grep -oE '/video/[0-9]+' | head -1 | sed 's|/video/||')
             if [ -z "$ID" ]; then
               ID=$(echo "$FULL_URL" | grep -oE '[0-9]{15,}' | head -1)
+            fi
+            if [ -z "$ID" ]; then
+              # کد کوتاه لینک (مثل ZSbRGsX6H)
+              ID=$(echo "$FULL_URL" | grep -oE '(vt|vm)\.tiktok\.com/[A-Za-z0-9_-]+' | head -1 | sed 's|.*/||')
             fi
             if [ -z "$ID" ]; then
               ID="tiktok_$(date +%s)"
@@ -184,11 +197,9 @@ jobs:
           echo "✅ دانلود موفق — تعداد فایل: $FILE_COUNT"
           ls -lh "$DOWNLOAD_DIR"
 
-          # استخراج username و video id واقعی از لاگ یا yt-dlp
           USERNAME=$(yt-dlp --print "%(uploader)s" --no-download "$FULL_URL" 2>/dev/null || echo "unknown")
           [ -z "$USERNAME" ] && USERNAME="unknown"
 
-          # اگر short link بود، video id واقعی را از لاگ بگیر
           REAL_ID=$(grep -oE '\[TikTok\] [0-9]{15,}' /tmp/ytdlp.log | head -1 | awk '{print $2}' || true)
           if [ -n "$REAL_ID" ] && [ "$REAL_ID" != "$ITEM_ID" ]; then
             echo "🔄 به‌روزرسانی شناسه واقعی: $REAL_ID"
@@ -254,7 +265,6 @@ jobs:
           USERNAME="${{ steps.download.outputs.username }}"
           [ -z "$USERNAME" ] && USERNAME="unknown"
 
-          # پوشه مگا همیشه بر اساس پلتفرم لینک
           if [ "$PLATFORM" = "tiktok" ]; then
             MEGA_FOLDER="TikTok"
           else
