@@ -107,7 +107,6 @@ jobs:
         if: steps.parse.outputs.platform == 'instagram'
         run: |
           set +e
-          # نام‌های محتمل (شامل غلط املایی COOCKIES)
           CANDIDATES=(
             "config/INSTAGRAM_COOKIES.gpg"
             "config/INSTAGRAM_COOCKIES.gpg"
@@ -127,18 +126,17 @@ jobs:
               echo "📄 تلاش رمزگشایی: $f"
               gpg --batch --yes --passphrase "${{ secrets.COOKIE_DECRYPT_KEY }}" --decrypt "$f" > cookies.txt 2>/tmp/gpg_err
               if [ -s cookies.txt ]; then
-                # چک حداقلی Netscape
                 if grep -qiE 'instagram|sessionid|csrftoken|ds_user' cookies.txt; then
                   FOUND="$f"
                   echo "✅ کوکی از $f با موفقیت رمزگشایی شد"
                   wc -l cookies.txt
                   break
                 else
-                  echo "⚠️ $f رمزگشایی شد اما محتوای اینستاگرام ندارد — ادامه با فایل بعدی"
+                  echo "⚠️ $f بدون محتوای اینستاگرام"
                   rm -f cookies.txt
                 fi
               else
-                echo "⚠️ رمزگشایی $f ناموفق:"
+                echo "⚠️ رمزگشایی $f ناموفق"
                 cat /tmp/gpg_err 2>/dev/null | head -5 || true
                 rm -f cookies.txt
               fi
@@ -148,10 +146,9 @@ jobs:
           if [ -n "$FOUND" ] && [ -s cookies.txt ]; then
             echo "INSTAGRAM_COOKIES_PATH=$(pwd)/cookies.txt" >> $GITHUB_ENV
             echo "HAS_COOKIES=true" >> $GITHUB_ENV
-            echo "✅ INSTAGRAM_COOKIES_PATH تنظیم شد"
           else
             echo "HAS_COOKIES=false" >> $GITHUB_ENV
-            echo "⚠️ هیچ کوکی معتبری لود نشد — بدون کوکی ادامه می‌دهیم"
+            echo "⚠️ کوکی لود نشد"
           fi
           set -e
 
@@ -161,7 +158,6 @@ jobs:
           sudo apt-get install -y -qq ffmpeg python3-pip jq
           pip3 install --upgrade "yt-dlp[default,curl-cffi]" gallery-dl instaloader
           yt-dlp --version
-          gallery-dl --version || true
 
       - name: دانلود محتوا
         id: download
@@ -203,7 +199,6 @@ jobs:
           if [ "$PLATFORM" = "instagram" ]; then
             EXIT_CODE=1
 
-            # --- اگر کوکی هست: اول با کوکی ---
             if [ "$HAS_CK" = true ]; then
               echo "▶️ [IG] تلاش ۱: yt-dlp + کوکی + impersonate..."
               set +e
@@ -215,7 +210,7 @@ jobs:
               set -e
 
               if [ "$EXIT_CODE" -ne 0 ]; then
-                echo "⚠️ [IG] تلاش ۲: yt-dlp + کوکی (بدون impersonate)..."
+                echo "⚠️ [IG] تلاش ۲: yt-dlp + کوکی..."
                 find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
                 set +e
                 yt-dlp --no-playlist --retries 5 --fragment-retries 5 --merge-output-format mp4 \
@@ -227,7 +222,6 @@ jobs:
               fi
             fi
 
-            # --- بدون کوکی (فقط اگر هنوز فایلی نیست) ---
             FILE_COUNT=$(count_media)
             if [ "$FILE_COUNT" -eq 0 ]; then
               echo "▶️ [IG] تلاش بدون کوکی + impersonate..."
@@ -243,7 +237,6 @@ jobs:
 
             FILE_COUNT=$(count_media)
 
-            # --- فالبک gallery-dl: اول با کوکی ---
             if [ "$FILE_COUNT" -eq 0 ]; then
               echo "🔄 [IG-FALLBACK] gallery-dl / instaloader..."
 
@@ -303,8 +296,45 @@ jobs:
           echo "✅ دانلود موفق — تعداد فایل: $FILE_COUNT"
           ls -lh "$DOWNLOAD_DIR"
 
-          USERNAME=$(yt-dlp --print "%(uploader)s" --no-download "$FULL_URL" 2>/dev/null || echo "unknown")
-          [ -z "$USERNAME" ] && USERNAME="unknown"
+          # --- استخراج یوزرنیم (مثل حالت اولیه + مقاوم برای IG) ---
+          USERNAME=""
+          CK_ARGS=()
+          if [ "$PLATFORM" = "instagram" ] && [ -n "$INSTAGRAM_COOKIES_PATH" ] && [ -f "$INSTAGRAM_COOKIES_PATH" ]; then
+            CK_ARGS=(--cookies "$INSTAGRAM_COOKIES_PATH")
+          fi
+
+          for FIELD in uploader_id uploader channel channel_id; do
+            CAND=$(yt-dlp "${CK_ARGS[@]}" --print "%(${FIELD})s" --no-download "$FULL_URL" 2>/dev/null || true)
+            CAND=$(echo "$CAND" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [ -n "$CAND" ] && [ "$CAND" != "NA" ] && [ "$CAND" != "null" ] && [ "$CAND" != "None" ]; then
+              USERNAME="$CAND"
+              echo "📌 یوزرنیم از yt-dlp (${FIELD}): $USERNAME"
+              break
+            fi
+          done
+
+          # از نام فایل: IG «Video by handle» یا TT «uploader - title»
+          if [ -z "$USERNAME" ]; then
+            SAMPLE=$(find "$DOWNLOAD_DIR" -maxdepth 1 -type f ! -name '*.json' ! -name '*.txt' ! -name '*.part' | head -1 || true)
+            if [ -n "$SAMPLE" ]; then
+              BASE=$(basename "$SAMPLE")
+              FROM_VB=$(echo "$BASE" | grep -oE 'Video by [A-Za-z0-9._]+' | head -1 | sed 's/^Video by //' || true)
+              if [ -n "$FROM_VB" ]; then
+                USERNAME="$FROM_VB"
+                echo "📌 یوزرنیم از نام فایل (Video by): $USERNAME"
+              else
+                FROM_PREFIX=$(echo "$BASE" | sed -E 's/ \[.*//; s/ - .*//')
+                if [ -n "$FROM_PREFIX" ] && [ "$FROM_PREFIX" != "$BASE" ] && [ ${#FROM_PREFIX} -lt 80 ]; then
+                  USERNAME="$FROM_PREFIX"
+                  echo "📌 یوزرنیم از پیشوند نام فایل: $USERNAME"
+                fi
+              fi
+            fi
+          fi
+
+          if [ -z "$USERNAME" ]; then
+            USERNAME="unknown"
+          fi
 
           REAL_ID=$(grep -oE '\[TikTok\] [0-9]{15,}' /tmp/ytdlp.log 2>/dev/null | head -1 | awk '{print $2}' || true)
           if [ -n "$REAL_ID" ] && [ "$REAL_ID" != "$ITEM_ID" ]; then
