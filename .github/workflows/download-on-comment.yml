@@ -199,8 +199,21 @@ jobs:
           if [ "$PLATFORM" = "instagram" ]; then
             EXIT_CODE=1
 
-            if [ "$HAS_CK" = true ]; then
-              echo "▶️ [IG] تلاش ۱: yt-dlp + کوکی + impersonate..."
+            # 1) اول بدون کوکی
+            echo "▶️ [IG] تلاش ۱: yt-dlp بدون کوکی + impersonate..."
+            set +e
+            yt-dlp --no-playlist --retries 5 --fragment-retries 5 --merge-output-format mp4 \
+              --impersonate chrome -f "b" \
+              -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
+              "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
+            EXIT_CODE=${PIPESTATUS[0]}
+            set -e
+            FILE_COUNT=$(count_media)
+
+            # 2) اگر نشد و کوکی هست → با کوکی
+            if [ "$FILE_COUNT" -eq 0 ] && [ "$HAS_CK" = true ]; then
+              echo "⚠️ [IG] تلاش ۲: yt-dlp + کوکی + impersonate..."
+              find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
               set +e
               yt-dlp --no-playlist --retries 5 --fragment-retries 5 --merge-output-format mp4 \
                 --impersonate chrome --cookies "$INSTAGRAM_COOKIES_PATH" -f "b" \
@@ -208,35 +221,23 @@ jobs:
                 "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
               EXIT_CODE=${PIPESTATUS[0]}
               set -e
-
-              if [ "$EXIT_CODE" -ne 0 ]; then
-                echo "⚠️ [IG] تلاش ۲: yt-dlp + کوکی..."
-                find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
-                set +e
-                yt-dlp --no-playlist --retries 5 --fragment-retries 5 --merge-output-format mp4 \
-                  --cookies "$INSTAGRAM_COOKIES_PATH" -f "b" \
-                  -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
-                  "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
-                EXIT_CODE=${PIPESTATUS[0]}
-                set -e
-              fi
+              FILE_COUNT=$(count_media)
             fi
 
-            FILE_COUNT=$(count_media)
-            if [ "$FILE_COUNT" -eq 0 ]; then
-              echo "▶️ [IG] تلاش بدون کوکی + impersonate..."
+            if [ "$FILE_COUNT" -eq 0 ] && [ "$HAS_CK" = true ]; then
+              echo "⚠️ [IG] تلاش ۳: yt-dlp + کوکی (بدون impersonate)..."
               find "$DOWNLOAD_DIR" -type f ! -name 'post_info.json' -delete 2>/dev/null || true
               set +e
               yt-dlp --no-playlist --retries 5 --fragment-retries 5 --merge-output-format mp4 \
-                --impersonate chrome -f "b" \
+                --cookies "$INSTAGRAM_COOKIES_PATH" -f "b" \
                 -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
                 "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
               EXIT_CODE=${PIPESTATUS[0]}
               set -e
+              FILE_COUNT=$(count_media)
             fi
 
-            FILE_COUNT=$(count_media)
-
+            # 3) فالبک gallery-dl / instaloader
             if [ "$FILE_COUNT" -eq 0 ]; then
               echo "🔄 [IG-FALLBACK] gallery-dl / instaloader..."
 
@@ -296,7 +297,7 @@ jobs:
           echo "✅ دانلود موفق — تعداد فایل: $FILE_COUNT"
           ls -lh "$DOWNLOAD_DIR"
 
-          # --- استخراج یوزرنیم (مثل حالت اولیه + مقاوم برای IG) ---
+          # --- استخراج یوزرنیم ---
           USERNAME=""
           CK_ARGS=()
           if [ "$PLATFORM" = "instagram" ] && [ -n "$INSTAGRAM_COOKIES_PATH" ] && [ -f "$INSTAGRAM_COOKIES_PATH" ]; then
@@ -313,7 +314,6 @@ jobs:
             fi
           done
 
-          # از نام فایل: IG «Video by handle» یا TT «uploader - title»
           if [ -z "$USERNAME" ]; then
             SAMPLE=$(find "$DOWNLOAD_DIR" -maxdepth 1 -type f ! -name '*.json' ! -name '*.txt' ! -name '*.part' | head -1 || true)
             if [ -n "$SAMPLE" ]; then
