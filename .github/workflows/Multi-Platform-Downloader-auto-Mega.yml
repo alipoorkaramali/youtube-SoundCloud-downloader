@@ -319,14 +319,15 @@ jobs:
 
 
             # ------------------------------------------------------
-            # فقط Audio
+            # فقط Audio - فشرده‌سازی فوق‌العاده (32kbps mono 22kHz)
             # ------------------------------------------------------
 
             yt-dlp ${COMMON_OPTS} \
               -f "bestaudio/best" \
               -x \
               --audio-format mp3 \
-              --audio-quality 0 \
+              --audio-quality 32K \
+              --postprocessor-args "ffmpeg:-ac 1 -ar 22050" \
               "${URL}" \
               -o "%(title)s.%(ext)s"
 
@@ -353,7 +354,8 @@ jobs:
               -f "bestaudio/best" \
               -x \
               --audio-format mp3 \
-              --audio-quality 0 \
+              --audio-quality 32K \
+              --postprocessor-args "ffmpeg:-ac 1 -ar 22050" \
               "${URL}" \
               -o "%(title)s.%(ext)s"
 
@@ -412,7 +414,9 @@ jobs:
                 -i "${ORIGINAL_FILE}" \
                 -vn \
                 -codec:a libmp3lame \
-                -q:a 0 \
+                -b:a 32k \
+                -ac 1 \
+                -ar 22050 \
                 "${ORIGINAL_FILE%.*}.mp3"
 
 
@@ -645,38 +649,22 @@ jobs:
       # ============================================================
 
       - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
-        if: success() && env.FILE_TITLE != ''
+        if: always()
+        continue-on-error: true
         run: |
 
-          if [ -z "${{ secrets.PB_TOKEN }}" ]; then
-
-            echo "⚠️ سکرت PB_TOKEN تنظیم نشده، نوتیفیکیشن ارسال نشد"
-
+          if [ -z "${{ secrets.PUSHBULLET_API_KEY }}" ]; then
+            echo "⚠️ PUSHBULLET_API_KEY تنظیم نشده"
             exit 0
-
           fi
 
+          TITLE="دانلود ${PLATFORM} تکمیل شد"
+          BODY="لینک: ${URL}\nپوشه: ${MEGA_FOLDER}"
 
-          MESSAGE="✅ دانلود خودکار به مگا اضافه شد: 🎉 دانلود و آپلود خودکار با موفقیت انجام شد!"
-
-
-          MESSAGE="${MESSAGE}\n📁 پلتفرم: ${PLATFORM}"
-
-          MESSAGE="${MESSAGE}\n🎵 نوع: Audio / MP3"
-
-          MESSAGE="${MESSAGE}\n🎬 عنوان: ${FILE_TITLE}"
-
-          MESSAGE="${MESSAGE}\n📂 پوشه مقصد در مگا: ${MEGA_FOLDER}"
-
-          MESSAGE="${MESSAGE}\n✂️ تقسیم: ${SPLIT_CHOICE}"
-
-
-          curl \
-            -u "${{ secrets.PB_TOKEN }}": \
-            -X POST \
-            https://api.pushbullet.com/v2/pushes \
-            -H "Content-Type: application/json" \
-            -d "{\"type\":\"note\",\"title\":\"✅ دانلود خودکار به مگا اضافه شد\",\"body\":\"$MESSAGE\"}"
-
+          curl -s \
+            --header "Access-Token: ${{ secrets.PUSHBULLET_API_KEY }}" \
+            --header "Content-Type: application/json" \
+            --data-binary "{\"type\":\"note\",\"title\":\"${TITLE}\",\"body\":\"${BODY}\"}" \
+            https://api.pushbullet.com/v2/pushes || true
 
           echo "✅ نوتیفیکیشن ارسال شد"
