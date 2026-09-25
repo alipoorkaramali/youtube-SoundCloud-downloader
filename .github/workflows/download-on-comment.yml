@@ -37,7 +37,6 @@ jobs:
             RAW_INPUT='${{ github.event.comment.body }}'
           fi
 
-          # تمیز کردن
           RAW_INPUT=$(echo "$RAW_INPUT" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
           echo "📥 ورودی خام: [$RAW_INPUT]"
@@ -46,7 +45,6 @@ jobs:
           ID=""
           FULL_URL=""
 
-          # ========== تیک‌تاک ==========
           if echo "$RAW_INPUT" | grep -qiE 'tiktok\.com|vt\.tiktok\.com|vm\.tiktok\.com'; then
             PLATFORM="tiktok"
 
@@ -64,7 +62,6 @@ jobs:
               ID="tiktok_$(date +%s)"
             fi
 
-          # ========== اینستاگرام ==========
           elif echo "$RAW_INPUT" | grep -qiE 'instagram\.com'; then
             PLATFORM="instagram"
 
@@ -78,7 +75,6 @@ jobs:
               ID=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
             fi
 
-          # ========== shortcode خام ==========
           else
             PLATFORM="instagram"
             ID=$(echo "$RAW_INPUT" | grep -oE '/download[[:space:]]+([A-Za-z0-9_-]+)' | awk '{print $2}')
@@ -117,14 +113,17 @@ jobs:
             echo "INSTAGRAM_COOKIES_PATH=$(pwd)/cookies.txt" >> $GITHUB_ENV
           fi
 
-      - name: نصب ابزارها
+      - name: نصب ابزارها (با curl-cffi برای تیک‌تاک)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg python3-pip jq
-          pip3 install --upgrade yt-dlp
+          # مهم: curl-cffi برای impersonation تیک‌تاک الزامی است
+          pip3 install --upgrade "yt-dlp[default,curl-cffi]"
           echo "--- versions ---"
           yt-dlp --version
+          python3 -c "import curl_cffi; print('curl_cffi:', curl_cffi.__version__)" || echo "curl_cffi NOT found"
           ffmpeg -version | head -1
+          yt-dlp --list-impersonate-targets 2>/dev/null | head -10 || true
 
       - name: دانلود محتوا با yt-dlp
         id: download
@@ -156,13 +155,13 @@ jobs:
 
           echo "▶️ شروع دانلود..."
 
-          # اول سعی می‌کنیم با بهترین کیفیت
           set +e
           yt-dlp \
             --no-playlist \
             --retries 10 \
             --fragment-retries 10 \
             --merge-output-format mp4 \
+            -f "b" \
             -o "${DOWNLOAD_DIR}/%(uploader)s - %(title)s [%(id)s].%(ext)s" \
             $COOKIE_ARGS \
             "$FULL_URL" 2>&1 | tee /tmp/ytdlp.log
@@ -173,14 +172,13 @@ jobs:
             echo ""
             echo "❌ yt-dlp با کد $EXIT_CODE شکست خورد"
             echo "--- آخرین خطوط لاگ ---"
-            tail -50 /tmp/ytdlp.log || true
+            tail -60 /tmp/ytdlp.log || true
             echo ""
             echo "محتوای پوشه:"
             ls -la "$DOWNLOAD_DIR" || true
             exit 1
           fi
 
-          # چک کردن که فایل واقعاً دانلود شده
           FILE_COUNT=$(find "$DOWNLOAD_DIR" -type f ! -name '*.json' ! -name '*.txt' | wc -l)
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "❌ هیچ فایلی دانلود نشد!"
@@ -191,9 +189,23 @@ jobs:
           echo "✅ دانلود موفق — تعداد فایل: $FILE_COUNT"
           ls -lh "$DOWNLOAD_DIR"
 
-          # متادیتا ساده
+          # استخراج username و video id واقعی از لاگ یا yt-dlp
           USERNAME=$(yt-dlp --print "%(uploader)s" --no-download "$FULL_URL" 2>/dev/null || echo "unknown")
           [ -z "$USERNAME" ] && USERNAME="unknown"
+
+          # اگر short link بود، video id واقعی را از لاگ بگیر
+          REAL_ID=$(grep -oE '\[TikTok\] [0-9]{15,}' /tmp/ytdlp.log | head -1 | awk '{print $2}' || true)
+          if [ -n "$REAL_ID" ] && [ "$REAL_ID" != "$ITEM_ID" ]; then
+            echo "🔄 به‌روزرسانی شناسه واقعی: $REAL_ID"
+            # پوشه را با id واقعی rename کن
+            NEW_DIR="${PLATFORM}_downloads/${REAL_ID}"
+            if [ "$DOWNLOAD_DIR" != "$NEW_DIR" ]; then
+              mv "$DOWNLOAD_DIR" "$NEW_DIR" || true
+              DOWNLOAD_DIR="$NEW_DIR"
+              ITEM_ID="$REAL_ID"
+              echo "id=$REAL_ID" >> $GITHUB_OUTPUT
+            fi
+          fi
 
           cat > "$DOWNLOAD_DIR/post_info.json" << JSON
           {
@@ -204,7 +216,9 @@ jobs:
           JSON
 
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
+          echo "final_id=$ITEM_ID" >> $GITHUB_OUTPUT
           echo "👤 Username: $USERNAME"
+          echo "🆔 Final ID: $ITEM_ID"
 
       - name: Cache rclone
         id: cache-rclone
@@ -241,7 +255,9 @@ jobs:
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           PLATFORM="${{ steps.parse.outputs.platform }}"
-          ID="${{ steps.parse.outputs.id }}"
+          # اولویت با final_id از مرحله دانلود
+          ID="${{ steps.download.outputs.final_id }}"
+          [ -z "$ID" ] && ID="${{ steps.parse.outputs.id }}"
           USERNAME="${{ steps.download.outputs.username }}"
           [ -z "$USERNAME" ] && USERNAME="unknown"
 
@@ -278,11 +294,13 @@ jobs:
         run: |
           PLATFORM="${{ steps.parse.outputs.platform }}"
           BODY=$(mktemp)
+          ID="${{ steps.download.outputs.final_id }}"
+          [ -z "$ID" ] && ID="${{ steps.parse.outputs.id }}"
           echo "✅ **${PLATFORM^}** با موفقیت دانلود و به مگا آپلود شد." >> $BODY
           echo "" >> $BODY
-          echo "🆔 شناسه: \`${{ steps.parse.outputs.id }}\`" >> $BODY
+          echo "🆔 شناسه: \`$ID\`" >> $BODY
           echo "👤 کاربر: \`${{ steps.download.outputs.username }}\`" >> $BODY
-          echo "📁 مسیر: \`${{ steps.mega.outputs.mega_folder }}/${{ steps.download.outputs.username }}/${{ steps.parse.outputs.id }}/\`" >> $BODY
+          echo "📁 مسیر: \`${{ steps.mega.outputs.mega_folder }}/${{ steps.download.outputs.username }}/$ID/\`" >> $BODY
           if [ -n "${{ steps.mega.outputs.link }}" ]; then
             echo "🔗 لینک مگا: ${{ steps.mega.outputs.link }}" >> $BODY
           fi
