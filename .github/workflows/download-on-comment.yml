@@ -49,22 +49,22 @@ jobs:
               FULL_URL="$RAW_INPUT"
             fi
 
-            # پاک‌سازی پسوند اضافه (مثل /true که گاهی اشتباه چسبیده)
-            FULL_URL=$(echo "$FULL_URL" | sed -E 's|/(true|false)/?$||; s|[?&].*$||')
+            # پاک‌سازی پسوند اضافه (مثل /true) و query string
+            FULL_URL=$(echo "$FULL_URL" | sed -E 's#/(true|false)/?$##')
+            FULL_URL=$(echo "$FULL_URL" | sed -E 's#[?&].*$##')
 
             # اگر لینک کوتاه vt/vm بود، فقط مسیر کوتاه را نگه دار
-            SHORT=$(echo "$FULL_URL" | grep -oE 'https?://(vt|vm)\.tiktok\.com/[A-Za-z0-9_-]+' | head -1)
+            SHORT=$(echo "$FULL_URL" | grep -oE 'https?://(vt|vm)\.tiktok\.com/[A-Za-z0-9_-]+' | head -1 || true)
             if [ -n "$SHORT" ]; then
               FULL_URL="${SHORT}/"
             fi
 
-            ID=$(echo "$FULL_URL" | grep -oE '/video/[0-9]+' | head -1 | sed 's|/video/||')
+            ID=$(echo "$FULL_URL" | grep -oE '/video/[0-9]+' | head -1 | sed 's|/video/||' || true)
             if [ -z "$ID" ]; then
-              ID=$(echo "$FULL_URL" | grep -oE '[0-9]{15,}' | head -1)
+              ID=$(echo "$FULL_URL" | grep -oE '[0-9]{15,}' | head -1 || true)
             fi
             if [ -z "$ID" ]; then
-              # کد کوتاه لینک (مثل ZSbRGsX6H)
-              ID=$(echo "$FULL_URL" | grep -oE '(vt|vm)\.tiktok\.com/[A-Za-z0-9_-]+' | head -1 | sed 's|.*/||')
+              ID=$(echo "$FULL_URL" | grep -oE '(vt|vm)\.tiktok\.com/[A-Za-z0-9_-]+' | head -1 | sed 's|.*/||' || true)
             fi
             if [ -z "$ID" ]; then
               ID="tiktok_$(date +%s)"
@@ -125,7 +125,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg python3-pip jq
-          # مهم: curl-cffi برای impersonation تیک‌تاک الزامی است
           pip3 install --upgrade "yt-dlp[default,curl-cffi]"
           echo "--- versions ---"
           yt-dlp --version
