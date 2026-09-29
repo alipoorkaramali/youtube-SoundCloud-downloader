@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Restore scraper + patch for only-new, auto-limit, unlimited size, anchor fallback.
 Media skip = natural: if Download menu item missing, post is not downloaded.
+Last saved post is used as an anchor (must be found) but is never downloaded again.
 """
 import urllib.request
 from pathlib import Path
@@ -48,7 +49,7 @@ def apply_scraper_patches(text: str) -> str:
         "                if item['id'] in {i['id'] for i in items}:\n"
         "                    continue\n"
         "                if skip_before and self._int_id(item['id']) <= skip_before:\n"
-        "                    self.logger.debug(f\"skip post {item['id']} (<= {self.skip_before_id})\")\n"
+        "                    self.logger.info(f\"⏭️ رد پست {item['id']} (مرز ذخیره‌شده {self.skip_before_id} — پیدا شد، دانلود نمی‌شود)\")\n"
         "                    continue\n"
         "                items.append(item)\n"
         "                newly_added.append(item)"
@@ -57,7 +58,53 @@ def apply_scraper_patches(text: str) -> str:
         raise SystemExit("patch: filter block not found")
     text = text.replace(old_filter2, new_filter, 1)
 
-    # --- if navigate to anchor fails → search channel from scratch ---
+    old_dl = (
+        "            self.logger.info(f\"⬇️ شروع دانلود رسانه برای {len(newly_added)} پست جدید...\")\n"
+    )
+    new_dl = (
+        "            skip_before = self._int_id(self.skip_before_id) if getattr(self, 'skip_before_id', '') else 0\n"
+        "            if skip_before:\n"
+        "                before_n = len(newly_added_sorted)\n"
+        "                newly_added_sorted = [p for p in newly_added_sorted if self._int_id(p.get('id')) > skip_before]\n"
+        "                skipped = before_n - len(newly_added_sorted)\n"
+        "                if skipped:\n"
+        "                    self.logger.info(\n"
+        "                        f\"⏭️ {skipped} پست مرزی/قدیمی‌تر از {self.skip_before_id} از صف دانلود حذف شد\"\n"
+        "                    )\n"
+        "            if not newly_added_sorted:\n"
+        "                self.logger.info(\"ℹ️ در این دور فقط پست ذخیره‌شده/قدیمی بود — دانلود تکراری انجام نشد\")\n"
+        "            else:\n"
+        "                self.logger.info(f\"⬇️ شروع دانلود رسانه برای {len(newly_added_sorted)} پست جدید...\")\n"
+    )
+    if old_dl not in text:
+        raise SystemExit("patch: download-start log not found")
+    text = text.replace(old_dl, new_dl, 1)
+
+    # wrap the download call so empty list after skip does not download
+    old_try = (
+        "            try:\n"
+        "                # دیگر نیازی به مرتب‌سازی مجدد نیست چون از قبل sorted است\n"
+        "                batch_media_map, downloaded_batch, batch_failed = await self._download_media(\n"
+        "                    newly_added_sorted,  # ← استفاده از لیست کامل‌شده\n"
+        "                    page,\n"
+        "                    context\n"
+        "                )\n"
+    )
+    new_try = (
+        "            try:\n"
+        "                if not newly_added_sorted:\n"
+        "                    batch_media_map, downloaded_batch, batch_failed = {}, 0, []\n"
+        "                else:\n"
+        "                    batch_media_map, downloaded_batch, batch_failed = await self._download_media(\n"
+        "                        newly_added_sorted,\n"
+        "                        page,\n"
+        "                        context\n"
+        "                    )\n"
+    )
+    if old_try not in text:
+        raise SystemExit("patch: download try-block not found")
+    text = text.replace(old_try, new_try, 1)
+
     old_nav = (
         "        if self.start_link:\n"
         "            entered = await self._navigate_to_start_link(page, quick_check=quick_check)\n"
@@ -74,9 +121,9 @@ def apply_scraper_patches(text: str) -> str:
         "            if not entered and not quick_check:\n"
         "                lost = self.target_msg_id or self.start_link\n"
         "                self.logger.warning(\n"
-        "                    f\"⚠️ پست لنگر پیدا نشد ({lost}) → ورود عادی به کانال و اسکرپ از صفر\"\n"
+        "                    f\"⚠️ پست لنگر پیدا نشد ({lost}) → ورود عادی به کانال (مرز دانلود حفظ می‌شود)\"\n"
         "                )\n"
-        "                self._clear_anchor_and_only_new()\n"
+        "                self._clear_anchor_keep_skip()\n"
         "                entered = await self._search_and_enter_channel(page)\n"
         "        else:\n"
         "            entered = await self._search_and_enter_channel(page)\n"
@@ -89,7 +136,6 @@ def apply_scraper_patches(text: str) -> str:
         raise SystemExit("patch: navigate block not found")
     text = text.replace(old_nav, new_nav, 1)
 
-    # --- if anchor never appears in DOM → full channel re-fetch ---
     old_return = (
         "        return items, context, page\n"
         "\n"
@@ -97,7 +143,6 @@ def apply_scraper_patches(text: str) -> str:
         "    async def _search_and_enter_channel(self, page) -> bool:\n"
     )
     new_return = (
-        "        # ─── لنگر در DOM نبود → مثل اسکرپ از صفر ───\n"
         "        if (\n"
         "            require_anchor\n"
         "            and not items\n"
@@ -105,10 +150,10 @@ def apply_scraper_patches(text: str) -> str:
         "            and not getattr(self, '_did_full_channel_fallback', False)\n"
         "        ):\n"
         "            self.logger.warning(\n"
-        "                f\"⚠️ پست لنگر {anchor_id} در پیام‌ها پیدا نشد → جستجوی کانال و اسکرپ از صفر\"\n"
+        "                f\"⚠️ پست لنگر {anchor_id} در پیام‌ها پیدا نشد → ورود دوباره (بدون دانلود تکراری)\"\n"
         "            )\n"
         "            self._did_full_channel_fallback = True\n"
-        "            self._clear_anchor_and_only_new()\n"
+        "            self._clear_anchor_keep_skip()\n"
         "            try:\n"
         "                ok = await self._search_and_enter_channel(page)\n"
         "            except Exception as e:\n"
@@ -127,14 +172,15 @@ def apply_scraper_patches(text: str) -> str:
         "\n"
         "        return items, context, page\n"
         "\n"
-        "    def _clear_anchor_and_only_new(self):\n"
-        "        \"\"\"Clear start_link / only_new so scraper behaves like a fresh channel scrape.\"\"\"\n"
+        "    def _clear_anchor_keep_skip(self):\n"
+        "        \"\"\"Drop start_link so we can re-enter the channel, but keep skip_before_id.\"\"\"\n"
         "        self.start_link = None\n"
         "        self.target_msg_id = None\n"
-        "        self.skip_before_id = ''\n"
-        "        self.only_new_posts = False\n"
         "        if hasattr(self, '_fallback_ids'):\n"
         "            self._fallback_ids = []\n"
+        "        # skip_before_id / only_new_posts must stay: find posts, do not re-download them\n"
+        "        if self.skip_before_id:\n"
+        "            self.only_new_posts = True\n"
         "\n"
         "    # ═══════════════════ جستجو و ورود به کانال (روش معمولی) ═══════════════════\n"
         "    async def _search_and_enter_channel(self, page) -> bool:\n"
@@ -143,7 +189,6 @@ def apply_scraper_patches(text: str) -> str:
         raise SystemExit("patch: return/search block not found")
     text = text.replace(old_return, new_return, 1)
 
-    # --- track require_anchor ---
     old_sc = (
         "        # ─── متغیر start_collecting ─────────────────────────────────────\n"
         "        start_collecting = not bool(self.start_link)  # اگر start_link نداشته باشیم، از اول شروع می‌کنیم\n"
@@ -158,7 +203,6 @@ def apply_scraper_patches(text: str) -> str:
         raise SystemExit("patch: start_collecting block not found")
     text = text.replace(old_sc, new_sc, 1)
 
-    # --- outer loop: after fallback IDs exhausted → full channel once ---
     old_fb = (
         "            if not newly_added:\n"
         "                # ─── اگر fallback_ids داریم و هنوز fallback باقی مانده ───\n"
@@ -180,7 +224,6 @@ def apply_scraper_patches(text: str) -> str:
     )
     new_fb = (
         "            if not newly_added:\n"
-        "                # ─── اگر fallback_ids داریم و هنوز fallback باقی مانده ───\n"
         "                if hasattr(self, '_fallback_ids') and self._fallback_ids:\n"
         "                    self._fallback_index += 1\n"
         "                    if self._fallback_index < len(self._fallback_ids):\n"
@@ -192,13 +235,12 @@ def apply_scraper_patches(text: str) -> str:
         "                    else:\n"
         "                        self.logger.info(\"✅ تمام گزینه‌های fallback بررسی شدند.\")\n"
         "\n"
-        "                # ─── آخرین راه: اسکرپ کامل کانال از صفر (یک‌بار) ───\n"
         "                if not getattr(self, '_did_full_channel_fallback', False) and len(items) == 0:\n"
         "                    self._did_full_channel_fallback = True\n"
         "                    self.logger.warning(\n"
-        "                        \"⚠️ هیچ پستی با لنگر/fallback جمع نشد → جستجوی کانال و اسکرپ از صفر\"\n"
+        "                        \"⚠️ هیچ پست جدیدی بعد از مرز نبود → ورود دوباره به کانال (دانلود تکراری ممنوع)\"\n"
         "                    )\n"
-        "                    self._clear_anchor_and_only_new()\n"
+        "                    self._clear_anchor_keep_skip()\n"
         "                    continue\n"
         "\n"
         "                self.logger.info(\"✅ به نظر می‌رسد تمام پست‌های در دسترس جمع‌آوری شدند.\")\n"
