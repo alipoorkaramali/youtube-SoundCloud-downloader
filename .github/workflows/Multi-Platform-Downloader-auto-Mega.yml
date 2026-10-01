@@ -645,26 +645,30 @@ jobs:
 
 
       # ============================================================
-      # 13. Pushbullet Notification
+      # 13. ntfy Notification
       # ============================================================
 
-      - name: 🔔 ارسال نوتیفیکیشن به Pushbullet
+      - name: 🔔 ارسال نوتیفیکیشن به ntfy
         if: always()
         continue-on-error: true
         run: |
 
-          if [ -z "${{ secrets.PUSHBULLET_API_KEY }}" ]; then
-            echo "⚠️ PUSHBULLET_API_KEY تنظیم نشده"
+          if [ -z "${{ secrets.NTFY_TOKEN }}" ]; then
+            echo "⚠️ NTFY_TOKEN تنظیم نشده"
             exit 0
           fi
 
           TITLE="دانلود ${PLATFORM} تکمیل شد"
-          BODY="لینک: ${URL}\nپوشه: ${MEGA_FOLDER}"
+          BODY="لینک: ${URL}
+پوشه Mega: ${MEGA_FOLDER}
+وضعیت: ${{ job.status }}"
 
           curl -s \
-            --header "Access-Token: ${{ secrets.PUSHBULLET_API_KEY }}" \
-            --header "Content-Type: application/json" \
-            --data-binary "{\"type\":\"note\",\"title\":\"${TITLE}\",\"body\":\"${BODY}\"}" \
-            https://api.pushbullet.com/v2/pushes || true
+            -H "Authorization: Bearer ${{ secrets.NTFY_TOKEN }}" \
+            -H "Title: ${TITLE}" \
+            -H "Tags: white_check_mark,mega,download" \
+            -H "Priority: default" \
+            -d "${BODY}" \
+            "https://ntfy.sh/YOUR_TOPIC" || true
 
-          echo "✅ نوتیفیکیشن ارسال شد"
+          echo "✅ نوتیفیکیشن ntfy ارسال شد"
