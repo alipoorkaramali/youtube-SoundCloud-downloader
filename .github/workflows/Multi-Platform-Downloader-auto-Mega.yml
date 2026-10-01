@@ -653,8 +653,8 @@ jobs:
         continue-on-error: true
         run: |
 
-          if [ -z "${{ secrets.NTFY_TOKEN }}" ]; then
-            echo "⚠️ NTFY_TOKEN تنظیم نشده"
+          if [ -z "${{ secrets.NTFY_TOKEN }}" ] || [ -z "${{ secrets.NTFY_TOPIC }}" ]; then
+            echo "⚠️ NTFY_TOKEN یا NTFY_TOPIC تنظیم نشده"
             exit 0
           fi
 
@@ -669,6 +669,6 @@ jobs:
             -H "Tags: white_check_mark,mega,download" \
             -H "Priority: default" \
             -d "${BODY}" \
-            "https://ntfy.sh/YOUR_TOPIC" || true
+            "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}" || true
 
           echo "✅ نوتیفیکیشن ntfy ارسال شد"
