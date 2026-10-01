@@ -657,8 +657,9 @@ jobs:
             exit 0
           fi
 
-          TITLE="دانلود ${PLATFORM} تکمیل شد"
-          BODY="لینک: ${URL} | پوشه Mega: ${MEGA_FOLDER} | وضعیت: ${{ job.status }}"
+          TITLE="${FILE_TITLE:-دانلود تکمیل شد}"
+          BODY="پلتفرم: ${PLATFORM}
+لینک: ${URL}"
 
           curl -s \
             -H "Authorization: Bearer ${{ secrets.NTFY_TOKEN }}" \
