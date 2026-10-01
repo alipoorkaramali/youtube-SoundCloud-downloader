@@ -658,8 +658,7 @@ jobs:
           fi
 
           TITLE="${FILE_TITLE:-دانلود تکمیل شد}"
-          BODY="پلتفرم: ${PLATFORM}
-لینک: ${URL}"
+          BODY="پلتفرم: ${PLATFORM} | لینک: ${URL}"
 
           curl -s \
             -H "Authorization: Bearer ${{ secrets.NTFY_TOKEN }}" \
