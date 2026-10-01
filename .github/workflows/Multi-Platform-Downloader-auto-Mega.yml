@@ -652,16 +652,13 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-
           if [ -z "${{ secrets.NTFY_TOKEN }}" ] || [ -z "${{ secrets.NTFY_TOPIC }}" ]; then
             echo "⚠️ NTFY_TOKEN یا NTFY_TOPIC تنظیم نشده"
             exit 0
           fi
 
           TITLE="دانلود ${PLATFORM} تکمیل شد"
-          BODY="لینک: ${URL}
-پوشه Mega: ${MEGA_FOLDER}
-وضعیت: ${{ job.status }}"
+          BODY="لینک: ${URL} | پوشه Mega: ${MEGA_FOLDER} | وضعیت: ${{ job.status }}"
 
           curl -s \
             -H "Authorization: Bearer ${{ secrets.NTFY_TOKEN }}" \
