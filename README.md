@@ -84,16 +84,156 @@ tar -czf config/browser_profile.tar.gz -C config browser_profile
 
 ```
 
-
-
-
-
-
-
-
 سپس فایل `browser_profile.tar.gz` را با GPG رمزگذاری کنید و در مخزن قرار دهید.
 
 تنظیمات مربوط به کانال‌ها و پوشه مقصد در `config/config.yaml` انجام می‌شود.
+
+
+## ☁️ تنظیم حساب Mega.nz با rclone (مهم)
+
+ورک‌فلوهای آپلود به مگا از **rclone** استفاده می‌کنند. کانفیگ داخل مخزن به‌صورت رمزگذاری‌شده ذخیره می‌شود:
+
+| فایل در مخزن | Secret در GitHub |
+|--------------|------------------|
+| `config/rclone_mega.conf.gpg` | `RCLONE_PASSPHRASE` (رمز باز کردن همین فایل) |
+
+نام remote در rclone باید دقیقاً **`mega`** باشد (چون در ورک‌فلوها دستور به‌صورت `mega:FolderName/...` نوشته شده).
+
+### پیش‌نیاز روی سیستم خودت (لپ‌تاپ / Termux / لینوکس)
+
+```bash
+# نصب rclone
+# لینوکس:
+curl https://rclone.org/install.sh | sudo bash
+# یا Termux:
+pkg install rclone -y
+
+# نصب gpg (معمولاً هست)
+# Termux:
+pkg install gnupg -y
+```
+
+### گام ۱ — ساخت remote برای Mega
+
+```bash
+rclone config
+```
+
+پاسخ‌ها تقریباً این‌طور:
+
+```
+n) New remote
+name> mega
+Storage> mega          # عدد مربوط به Mega را انتخاب کن یا بنویس mega
+user> ایمیل_حساب_مگا@example.com
+y) Yes type in my own password
+password> ********     # رمز مگا
+Confirm password> ********
+```
+
+- اگر روی حساب Mega **تأیید دو مرحله‌ای (2FA)** داری، در نسخه‌های جدید rclone گزینه `2fa` هم پرسیده می‌شود؛ کد یک‌بارمصرف را همان لحظه وارد کن.
+- در پایان با `y` تأیید کن و با `q` خارج شو.
+
+تست اتصال:
+
+```bash
+rclone lsd mega:
+rclone about mega:
+```
+
+اگر لیست پوشه‌ها یا فضای آزاد را دیدی، کانفیگ درست است.
+
+### گام ۲ — پیدا کردن فایل کانفیگ
+
+معمولاً اینجاست:
+
+| سیستم | مسیر |
+|--------|------|
+| لینوکس / macOS | `~/.config/rclone/rclone.conf` |
+| Termux | `~/.config/rclone/rclone.conf` |
+| ویندوز | `%APPDATA%\rclone\rclone.conf` |
+
+محتوای مربوط به مگا شبیه این است (رمزها از قبل obscure شده‌اند):
+
+```ini
+[mega]
+type = mega
+user = you@example.com
+pass = ***ENCRYPTED_BY_RCLONE***
+```
+
+فقط بخش `[mega]` لازم است. اگر remoteهای دیگر داری، می‌توانی فقط همین بلوک را در یک فایل جدا کپی کنی:
+
+```bash
+# فقط بلوک mega را جدا کن (اختیاری)
+mkdir -p config
+grep -A5 '^\[mega\]' ~/.config/rclone/rclone.conf > config/rclone_mega.conf
+# یا کل فایل:
+cp ~/.config/rclone/rclone.conf config/rclone_mega.conf
+```
+
+### گام ۳ — رمزگذاری با GPG
+
+یک **رمز عبور قوی** انتخاب کن (همین رمز بعداً Secret می‌شود). **هرگز** فایل `.conf` خام را commit نکن.
+
+```bash
+cd /path/to/youtube-SoundCloud-downloader
+
+# رمزگذاری متقارن (-c)
+gpg --symmetric --cipher-algo AES256 -o config/rclone_mega.conf.gpg config/rclone_mega.conf
+
+# تست باز کردن (اختیاری)
+gpg --batch --yes --passphrase "YOUR_PASSPHRASE" \
+  --decrypt config/rclone_mega.conf.gpg | head
+
+# فایل خام را پاک کن
+rm -f config/rclone_mega.conf
+```
+
+### گام ۴ — قرار دادن در مخزن
+
+```bash
+git add config/rclone_mega.conf.gpg
+git commit -m "chore: update encrypted rclone mega config"
+git push
+```
+
+### گام ۵ — Secret در GitHub
+
+1. برو به مخزن → **Settings** → **Secrets and variables** → **Actions**
+2. **New repository secret**
+3. Name: دقیقاً  
+   `RCLONE_PASSPHRASE`
+4. Value: همان رمزی که در `gpg --symmetric` وارد کردی
+
+> اگر از مخزن **`new-youtube-SoundCloud-downloader`** هم آپلود Mega می‌کنی (مثلاً دانلود تلگرام با گزینه `mega`)، **همین Secret** را در آن مخزن هم بساز.  
+> ورک‌فلو آنجا در صورت نبودن `config/rclone_mega.conf.gpg` محلی، فایل را از این مخزن می‌گیرد؛ پس passphrase باید یکی باشد.
+
+### گام ۶ — تست از Actions
+
+یک ورک‌فلو دستی (مثلاً costume-Mega) را با یک لینک کوتاه اجرا کن و در لاگ دنبال این‌ها بگرد:
+
+- `rclone version`
+- باز شدن `rclone.conf` بدون خطای GPG
+- `rclone copy ... mega:...` با موفقیت
+
+خطاهای رایج:
+
+| پیام | علت احتمالی |
+|------|-------------|
+| `gpg: decryption failed` | اشتباه بودن `RCLONE_PASSPHRASE` |
+| `didn't find backend called "mega"` | rclone قدیمی / نصب ناقص در runner |
+| `couldn't login` / 2FA | حساب Mega با 2FA؛ کانفیگ را با rclone جدید دوباره بساز |
+| `Failed to create file system for "mega:..."` | نام remote چیز دیگری است (باید `mega` باشد) |
+
+### تعویض حساب مگا
+
+1. روی سیستم خودت دوباره `rclone config` → remote `mega` را edit یا حذف و از نو بساز  
+2. دوباره `config/rclone_mega.conf.gpg` بساز  
+3. اگر passphrase را عوض کردی، Secret گیت‌هاب را هم آپدیت کن  
+4. push کن و یک run تست بزن  
+
+**هرگز** ایمیل/رمز مگا یا فایل `rclone.conf` رمزگذاری‌نشده را در Issue یا README ننویس.
 
 
 ## 🛡️ امنیت و رمزگذاری
@@ -103,7 +243,7 @@ tar -czf config/browser_profile.tar.gz -C config browser_profile
 فایل‌های رمزگذاری‌شده در مخزن:
 - `rclone_mega.conf.gpg`
 - `cookies.txt.gpg` (یوتیوب)
-- `INSTAGRAM_COOKIES.gpg`
+- `INSTAGRAM_COOKIES.gpg` / `INSTAGRAM_COOCKIES.gpg`
 - `browser_profile.tar.gz.gpg` (تلگرام)
 
 **هرگز فایل‌های رمزگذاری‌نشده را commit نکنید!**
@@ -132,15 +272,20 @@ cd youtube-SoundCloud-downloader
 
 ### ۲. تنظیم Secrets در GitHub
 به `Settings > Secrets and variables > Actions` بروید و کلیدهای زیر را اضافه کنید:
-- `RCLONE_PASSPHRASE` (رمز عبور فایل rclone)
-- `COOKIE_DECRYPT_KEY` (کلید رمزگشایی کوکی‌ها)
-- `TELEGRAM_DECRYPT_KEY` (در صورت استفاده از تلگرام)
-- سایر کلیدهای مورد نیاز (مطابق با نیاز ورک‌فلوها)
+
+| Secret | توضیح |
+|--------|--------|
+| **`RCLONE_PASSPHRASE`** | رمز GPG فایل `config/rclone_mega.conf.gpg` (حساب Mega) |
+| `COOKIE_DECRYPT_KEY` | کلید رمزگشایی کوکی‌های یوتیوب/صوتی |
+| `TELEGRAM_DECRYPT_KEY` | در صورت استفاده از تلگرام |
+| سایر | مطابق نیاز ورک‌فلوها |
+
+جزئیات ساخت فایل rclone در بخش **☁️ تنظیم حساب Mega.nz با rclone** آمده است.
 
 ### ۳. آماده‌سازی فایل‌های کانفیگ
-- فایل `rclone_mega.conf` را با تنظیمات مگا خود ایجاد کنید و با `gpg -c` رمزگذاری کنید.
-- کوکی‌های یوتیوب و اینستاگرام را به‌صورت `cookies.txt` ذخیره و رمزگذاری کنید.
-- برای تلگرام، سشن را بسازید، فشرده و رمزگذاری کنید.
+- فایل `rclone_mega.conf` را با تنظیمات مگا خود ایجاد کنید و با `gpg -c` / `gpg --symmetric` رمزگذاری کنید → `config/rclone_mega.conf.gpg`
+- کوکی‌های یوتیوب و اینستاگرام را به‌صورت فایل ذخیره و رمزگذاری کنید
+- برای تلگرام، سشن را بسازید، فشرده و رمزگذاری کنید
 
 ### ۴. تنظیم `config/config.yaml`
 این فایل شامل تنظیمات پیش‌فرض (کیفیت، پوشه‌ها، کانال‌های تلگرام و …) است. آن را مطابق نیاز ویرایش کنید.
@@ -156,7 +301,7 @@ cd youtube-SoundCloud-downloader
 - **حجم فایل:** برای فایل‌های بسیار بزرگ، از گزینه `split` استفاده کنید تا آپلود با خطا مواجه نشود.
 - **لاگ‌ها:** تمام لاگ‌های اجرا در خروجی workflow و همچنین پوشه `State/` در دسترس است.
 - **رفع مشکل GPG:** مطمئن شوید رمز عبور در Secrets به‌درستی تنظیم شده است.
-
+- **Mega / rclone:** نام remote باید `mega` باشد؛ Secret باید همان passphrase فایل `.gpg` باشد.
 
 
 ## 🤝 مشارکت و مجوز
