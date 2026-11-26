@@ -6,29 +6,17 @@
   ],
   "channels": {
     "speaking_practice1404": {
-      "last_post_id": "594",
-      "last_updated": "2026-11-24T20:56:09Z",
+      "last_post_id": "598",
+      "last_updated": "2026-11-26T19:01:47Z",
       "channel_name": "",
       "last_limit": 35,
       "last_mega_folder": "TelegramArchive",
-      "downloaded_posts_count": 16,
+      "downloaded_posts_count": 4,
       "recent_post_ids": [
-        "579",
-        "580",
-        "581",
-        "582",
-        "583",
-        "584",
-        "585",
-        "586",
-        "587",
-        "588",
-        "589",
-        "590",
-        "591",
-        "592",
-        "593",
-        "594"
+        "595",
+        "596",
+        "597",
+        "598"
       ],
       "source_run_id": 34889156757,
       "source_run_url": "https://github.com/alipoorkaramali/youtube-SoundCloud-downloader/actions/runs/34889156757"
